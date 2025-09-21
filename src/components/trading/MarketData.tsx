@@ -25,17 +25,38 @@ export const MarketData: React.FC = () => {
     updateTickerRef.current = updateTicker;
   }, [updateTicker]);
 
-  // Initialize real market data from Binance
+  // Generate mock ticker data as fallback
+  const generateMockTickers = useCallback(() => {
+    const mockTickers = {
+      BTCUSDT: { symbol: 'BTCUSDT', price: 95550, changePercent24h: -0.04 },
+      ETHUSDT: { symbol: 'ETHUSDT', price: 3469, changePercent24h: -0.14 },
+      ADAUSDT: { symbol: 'ADAUSDT', price: 0.8984, changePercent24h: 0.19 },
+      BNBUSDT: { symbol: 'BNBUSDT', price: 1065.3, changePercent24h: 6.24 },
+      SOLUSDT: { symbol: 'SOLUSDT', price: 240.4, changePercent24h: 0.55 },
+    };
+
+    Object.values(mockTickers).forEach(ticker => {
+      console.log(`🎭 Using mock ticker for ${ticker.symbol}:`, ticker);
+      updateTickerRef.current(ticker as any);
+    });
+  }, []);
+
+  // Initialize real market data from Binance with fallback
   const initializeMarketData = useCallback(async () => {
     if (isInitialized.current) return;
     
-    console.log(`🚀 INITIALIZING REAL MARKET DATA FROM BINANCE`);
+    console.log(`🚀 INITIALIZING MARKET DATA FROM BINANCE`);
     
     try {
-      // Fetch initial ticker data for all pairs
+      // Fetch initial ticker data for all pairs with timeout
       const tickerPromises = POPULAR_PAIRS.map(async (symbol) => {
         try {
-          const tickerResult = await binanceService.getTicker24hr(symbol);
+          const timeoutPromise = new Promise((_, reject) => 
+            setTimeout(() => reject(new Error('Timeout')), 5000)
+          );
+          
+          const tickerPromise = binanceService.getTicker24hr(symbol);
+          const tickerResult = await Promise.race([tickerPromise, timeoutPromise]);
           const ticker = Array.isArray(tickerResult) ? tickerResult[0] : tickerResult;
           
           console.log(`✅ Fetched real ticker for ${symbol}:`, {
@@ -47,19 +68,48 @@ export const MarketData: React.FC = () => {
           updateTickerRef.current(ticker as any);
           return ticker;
         } catch (error) {
-          console.error(`❌ Error fetching ticker for ${symbol}:`, error);
+          console.warn(`⚠️ Error fetching ticker for ${symbol}, will use mock data:`, error);
           return null;
         }
       });
 
-      await Promise.all(tickerPromises);
-      isInitialized.current = true;
+      const results = await Promise.all(tickerPromises);
+      const successfulFetches = results.filter(result => result !== null);
       
+      if (successfulFetches.length === 0) {
+        console.warn(`⚠️ All Binance API calls failed, using mock data`);
+        generateMockTickers();
+      } else {
+        console.log(`✅ Successfully fetched ${successfulFetches.length}/${POPULAR_PAIRS.length} real tickers`);
+        
+        // Fill in missing tickers with mock data
+        const failedSymbols = POPULAR_PAIRS.filter((_, index) => results[index] === null);
+        if (failedSymbols.length > 0) {
+          console.log(`🎭 Generating mock data for failed symbols:`, failedSymbols);
+          failedSymbols.forEach(symbol => {
+            const mockTicker = {
+              BTCUSDT: { symbol: 'BTCUSDT', price: 95550, changePercent24h: -0.04 },
+              ETHUSDT: { symbol: 'ETHUSDT', price: 3469, changePercent24h: -0.14 },
+              ADAUSDT: { symbol: 'ADAUSDT', price: 0.8984, changePercent24h: 0.19 },
+              BNBUSDT: { symbol: 'BNBUSDT', price: 1065.3, changePercent24h: 6.24 },
+              SOLUSDT: { symbol: 'SOLUSDT', price: 240.4, changePercent24h: 0.55 },
+            }[symbol];
+            
+            if (mockTicker) {
+              updateTickerRef.current(mockTicker as any);
+            }
+          });
+        }
+      }
+      
+      isInitialized.current = true;
       console.log(`✅ MARKET DATA INITIALIZATION COMPLETE`);
     } catch (error) {
-      console.error(`❌ Error initializing market data:`, error);
+      console.error(`❌ Error initializing market data, using mock data:`, error);
+      generateMockTickers();
+      isInitialized.current = true;
     }
-  }, []);
+  }, [generateMockTickers]);
 
   // Setup real-time WebSocket subscriptions
   const setupRealTimeUpdates = useCallback(() => {
