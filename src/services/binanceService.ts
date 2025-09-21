@@ -196,57 +196,62 @@ class BinanceService {
 
   /**
    * Get only the latest candles efficiently - minimizes data transfer
+   * ULTRA-OPTIMIZED for 10ms cycle requests
    */
   async getLatestKlines(
     symbol: string,
     interval: string,
-    limit: number = 20 // Reduced default for faster response
+    limit: number = 1 // Default to 1 for ultra-fast updates
   ): Promise<CandleData[]> {
+    // For ultra-fast updates (limit=1), skip cache to ensure freshest data
+    const useCache = limit > 1;
     const cacheKey = `${symbol}_${interval}`;
-    const cached = this.candleCache.get(cacheKey);
     
-    // Check cache first
-    if (cached && (Date.now() - cached.lastUpdate) < this.CACHE_DURATION) {
-      console.log(`📚 Using cached data for ${symbol} ${interval}`);
-      return cached.data.slice(-limit);
+    if (useCache) {
+      const cached = this.candleCache.get(cacheKey);
+      if (cached && (Date.now() - cached.lastUpdate) < this.CACHE_DURATION) {
+        return cached.data.slice(-limit);
+      }
     }
 
     try {
       const params = new URLSearchParams({
         symbol: symbol.toUpperCase(),
         interval,
-        limit: Math.min(limit, 100).toString(), // Cap at 100 for speed
+        limit: Math.min(limit, 100).toString(),
       });
 
-      console.log(`⚡ Fast fetching latest ${limit} klines for ${symbol} ${interval}`);
+      // Use minimal logging for ultra-fast requests
+      if (limit === 1) {
+        // Solo log cada 1000 requests para no saturar
+        if (!this.logCounters) this.logCounters = new Map();
+        const count = (this.logCounters.get(symbol) || 0) + 1;
+        this.logCounters.set(symbol, count);
+        
+        if (count % 1000 === 0) {
+          console.log(`🚀 Ultra-fast kline ${count} for ${symbol}`);
+        }
+      }
 
-      const response = await fetch(`${this.BASE_URL}/klines?${params}`);
+      const response = await fetch(`${this.BASE_URL}/klines?${params}`, {
+        // Optimized headers for minimal overhead
+        headers: {
+          'Accept': 'application/json',
+          'Cache-Control': 'no-cache'
+        }
+      });
       
       if (!response.ok) {
-        throw new Error(`Binance API error: ${response.status} ${response.statusText}`);
+        throw new Error(`API error: ${response.status}`);
       }
 
       const data: BinanceKlineData[] = await response.json();
       
+      // Ultra-optimized candle mapping
       const candles: CandleData[] = data.map(kline => {
-        // Ensure timestamp is a valid number - Binance returns timestamps as numbers
-        let timestamp: number;
-        
-        if (typeof kline.openTime === 'number' && !isNaN(kline.openTime)) {
-          timestamp = kline.openTime;
-        } else if (typeof kline.openTime === 'string' && kline.openTime) {
-          timestamp = parseInt(kline.openTime);
-        } else {
-          // Fallback to current time if invalid
-          console.warn('Invalid timestamp in kline data:', kline.openTime);
-          timestamp = Date.now();
-        }
-        
-        // Additional validation
-        if (isNaN(timestamp) || timestamp <= 0) {
-          console.warn('Invalid timestamp after parsing:', timestamp);
-          timestamp = Date.now();
-        }
+        const timestamp = typeof kline.openTime === 'number' && !isNaN(kline.openTime) 
+          ? kline.openTime 
+          : Date.now();
         
         return {
           timestamp: new Date(timestamp).toISOString(),
@@ -260,19 +265,28 @@ class BinanceService {
         };
       });
 
-      // Update cache
-      this.candleCache.set(cacheKey, {
-        data: candles,
-        lastUpdate: Date.now()
-      });
+      // Only cache if not ultra-fast single requests
+      if (useCache && candles.length > 1) {
+        this.candleCache.set(cacheKey, {
+          data: candles,
+          lastUpdate: Date.now()
+        });
+      }
 
-      console.log(`✅ Fast loaded ${candles.length} candles for ${symbol}`);
       return candles;
     } catch (error) {
-      console.error(`❌ Error fetching latest klines for ${symbol}:`, error);
+      // Minimal error logging for ultra-fast requests
+      if (limit === 1) {
+        console.error(`❌ Ultra-fast error ${symbol}:`, (error as Error).message);
+      } else {
+        console.error(`❌ Error fetching klines for ${symbol}:`, error);
+      }
       throw error;
     }
   }
+
+  // Add log counters for ultra-fast logging
+  private logCounters?: Map<string, number>;
 
   /**
    * Get missing candles efficiently when switching timeframes
