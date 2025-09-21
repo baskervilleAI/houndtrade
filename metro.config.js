@@ -18,6 +18,9 @@ config.resolver.alias = {
   '@assets': './assets',
 };
 
+// Fix for import.meta issues in web builds
+config.resolver.platforms = ['ios', 'android', 'native', 'web'];
+
 // Tamagui configuration
 config.transformer.minifierConfig = {
   keep_fnames: true,
@@ -25,5 +28,13 @@ config.transformer.minifierConfig = {
     keep_fnames: true,
   },
 };
+
+// Web-specific configuration
+config.transformer.getTransformOptions = async () => ({
+  transform: {
+    experimentalImportSupport: false,
+    inlineRequires: false,
+  },
+});
 
 module.exports = config;

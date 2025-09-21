@@ -14,6 +14,7 @@ import { config } from '../config/env';
 interface TradingStore extends TradingState {
   // Actions
   placeOrder: (orderData: PlaceOrderRequest) => Promise<string>;
+  executeOrder: (orderId: string, executionPrice: number) => void;
   cancelOrder: (orderId: string) => Promise<void>;
   updatePositions: (prices: Record<string, number>) => void;
   resetAccount: () => void;
