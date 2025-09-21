@@ -10,9 +10,11 @@ import {
 import { useAuth, useTrading, useMarket } from '../../context/AppContext';
 import { useMarketData } from '../../hooks/useMarketData';
 import { CandlestickChart } from '../../components/chart/CandlestickChart_improved';
+import { LiveCandlestickChart } from '../../components/chart/LiveCandlestickChart';
 import { OrderForm } from '../../components/trading/OrderForm';
 import { PositionsList } from '../../components/trading/PositionsList';
 import { MarketData } from '../../components/trading/MarketData';
+import { StreamingDebugPanel } from '../../components/debug/StreamingDebugPanel';
 
 const { width: screenWidth } = Dimensions.get('window');
 
@@ -114,7 +116,7 @@ export const TradingScreen: React.FC = () => {
       <View style={styles.content}>
         {selectedTab === 'chart' && (
           <View style={styles.chartContainer}>
-            <CandlestickChart />
+            <LiveCandlestickChart />
             <OrderForm />
           </View>
         )}
@@ -125,6 +127,9 @@ export const TradingScreen: React.FC = () => {
           </View>
         )}
       </View>
+
+      {/* Debug Panel - Solo en desarrollo */}
+      {__DEV__ && <StreamingDebugPanel />}
     </View>
   );
 };
