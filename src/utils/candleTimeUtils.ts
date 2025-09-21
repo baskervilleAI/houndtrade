@@ -88,23 +88,28 @@ export function shouldUpdateLastCandle(
   }
 
   const newTimestamp = new Date(newCandle.timestamp).getTime();
+  const newWindowStart = getCandleWindowStart(newTimestamp, interval);
   const lastCandle = existingCandles[existingCandles.length - 1];
   const lastTimestamp = new Date(lastCandle.timestamp).getTime();
+  const lastWindowStart = getCandleWindowStart(lastTimestamp, interval);
 
   // Si la nueva vela es de la misma ventana de tiempo que la última
-  if (isSameCandleWindow(newTimestamp, lastTimestamp, interval)) {
+  if (newWindowStart === lastWindowStart) {
     return { action: 'update', index: existingCandles.length - 1 };
   }
 
   // Si la nueva vela es más nueva (nueva ventana de tiempo)
-  if (newTimestamp > lastTimestamp) {
+  if (newWindowStart > lastWindowStart) {
     return { action: 'append' };
   }
 
   // Si la nueva vela es más antigua, buscar si corresponde a alguna vela existente
-  for (let i = existingCandles.length - 2; i >= 0; i--) {
+  // Buscar hacia atrás en las últimas 10 velas para eficiencia
+  const searchLimit = Math.min(10, existingCandles.length - 1);
+  for (let i = existingCandles.length - 2; i >= existingCandles.length - 1 - searchLimit && i >= 0; i--) {
     const candleTimestamp = new Date(existingCandles[i].timestamp).getTime();
-    if (isSameCandleWindow(newTimestamp, candleTimestamp, interval)) {
+    const candleWindowStart = getCandleWindowStart(candleTimestamp, interval);
+    if (newWindowStart === candleWindowStart) {
       return { action: 'update', index: i };
     }
   }
@@ -225,5 +230,145 @@ export function fixInvalidCandle(candle: CandleData, referencePrice?: number): C
     low: isNaN(candle.low) || candle.low <= 0 ? safePrice : candle.low,
     close: isNaN(candle.close) || candle.close <= 0 ? safePrice : candle.close,
     volume: isNaN(candle.volume) || candle.volume < 0 ? 0 : candle.volume,
+  };
+}
+
+/**
+ * Calcula un rango de precios optimizado para visualización
+ */
+export function calculateOptimalPriceRange(
+  candles: CandleData[],
+  paddingPercent: number = 0.05,
+  minRangePercent: number = 0.02
+): { minPrice: number; maxPrice: number; priceRange: number; tickSize: number } {
+  if (candles.length === 0) {
+    return { minPrice: 0, maxPrice: 100, priceRange: 100, tickSize: 10 };
+  }
+
+  let minPrice = Infinity;
+  let maxPrice = -Infinity;
+
+  // Encontrar rango real de precios
+  for (const candle of candles) {
+    if (candle.high > maxPrice) maxPrice = candle.high;
+    if (candle.low < minPrice) minPrice = candle.low;
+  }
+
+  // Calcular el rango base
+  let baseRange = maxPrice - minPrice;
+  
+  // Si el rango es muy pequeño, establecer un mínimo basado en el precio promedio
+  const avgPrice = (maxPrice + minPrice) / 2;
+  const minRange = avgPrice * minRangePercent;
+  
+  if (baseRange < minRange) {
+    baseRange = minRange;
+    const center = (maxPrice + minPrice) / 2;
+    minPrice = center - baseRange / 2;
+    maxPrice = center + baseRange / 2;
+  }
+
+  // Agregar padding
+  const padding = baseRange * paddingPercent;
+  minPrice -= padding;
+  maxPrice += padding;
+  
+  // Calcular el tamaño de tick apropiado
+  const priceRange = maxPrice - minPrice;
+  const tickSize = calculateTickSize(priceRange);
+
+  // Redondear límites a múltiplos del tick size para una mejor visualización
+  minPrice = Math.floor(minPrice / tickSize) * tickSize;
+  maxPrice = Math.ceil(maxPrice / tickSize) * tickSize;
+
+  return {
+    minPrice,
+    maxPrice,
+    priceRange: maxPrice - minPrice,
+    tickSize
+  };
+}
+
+/**
+ * Calcula el tamaño de tick apropiado basado en el rango de precios
+ */
+export function calculateTickSize(priceRange: number): number {
+  if (priceRange <= 0) return 1;
+
+  const magnitude = Math.pow(10, Math.floor(Math.log10(priceRange)));
+  const normalizedRange = priceRange / magnitude;
+
+  if (normalizedRange <= 1) return magnitude * 0.1;
+  if (normalizedRange <= 2) return magnitude * 0.2;
+  if (normalizedRange <= 5) return magnitude * 0.5;
+  return magnitude;
+}
+
+/**
+ * Genera etiquetas de precio para el eje Y
+ */
+export function generatePriceLabels(
+  minPrice: number,
+  maxPrice: number,
+  tickSize: number,
+  maxLabels: number = 5
+): number[] {
+  const labels: number[] = [];
+  const startPrice = Math.ceil(minPrice / tickSize) * tickSize;
+  
+  for (let price = startPrice; price <= maxPrice && labels.length < maxLabels; price += tickSize) {
+    labels.push(price);
+  }
+
+  // Asegurar que siempre tenemos al menos los extremos
+  if (labels.length === 0 || labels[0] > minPrice + tickSize) {
+    labels.unshift(minPrice);
+  }
+  if (labels[labels.length - 1] < maxPrice - tickSize) {
+    labels.push(maxPrice);
+  }
+
+  return labels;
+}
+
+/**
+ * Calcula métricas de rendimiento para el streaming de velas
+ */
+export function calculateStreamingMetrics(
+  updateCount: number,
+  startTime: number,
+  responseTimes: number[]
+): {
+  updatesPerSecond: number;
+  averageResponseTime: number;
+  minResponseTime: number;
+  maxResponseTime: number;
+  efficiency: number;
+} {
+  const currentTime = Date.now();
+  const elapsedSeconds = (currentTime - startTime) / 1000;
+  
+  const updatesPerSecond = elapsedSeconds > 0 ? updateCount / elapsedSeconds : 0;
+  
+  let averageResponseTime = 0;
+  let minResponseTime = Infinity;
+  let maxResponseTime = 0;
+  
+  if (responseTimes.length > 0) {
+    averageResponseTime = responseTimes.reduce((sum, time) => sum + time, 0) / responseTimes.length;
+    minResponseTime = Math.min(...responseTimes);
+    maxResponseTime = Math.max(...responseTimes);
+  }
+
+  // Calcular eficiencia (0-1, donde 1 es perfecto)
+  const targetUpdatesPerSecond = 10; // Target ideal
+  const efficiency = Math.min(1, updatesPerSecond / targetUpdatesPerSecond);
+
+  return {
+    updatesPerSecond: Math.round(updatesPerSecond * 100) / 100,
+    averageResponseTime: Math.round(averageResponseTime),
+    minResponseTime: Math.round(minResponseTime),
+    maxResponseTime: Math.round(maxResponseTime),
+    efficiency: Math.round(efficiency * 100) / 100,
   };
 }

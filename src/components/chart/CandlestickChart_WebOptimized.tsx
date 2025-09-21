@@ -11,9 +11,9 @@ import {
 } from 'react-native';
 import { useMarket } from '../../context/AppContext';
 import { useUltraFastChart } from '../../hooks/useUltraFastChart';
+import { useWebGestures } from '../../hooks/useWebGestures';
 import { CandleData } from '../../services/binanceService';
 import { 
-  updateCandlesArray, 
   validateCandleData, 
   fixInvalidCandle,
   calculateOptimalPriceRange,
@@ -58,7 +58,7 @@ const formatPrice = (price: number, symbol: string): string => {
   }
 };
 
-export const CandlestickChartEnhanced: React.FC = () => {
+export const CandlestickChartFinal: React.FC = () => {
   // State management
   const [selectedTimeframe, setSelectedTimeframe] = useState<{ label: string; value: string; cycleDelay: number }>(
     TIMEFRAMES[0]
@@ -71,15 +71,11 @@ export const CandlestickChartEnhanced: React.FC = () => {
     visibleStart: 0,
     visibleEnd: 100,
   });
-  const [isDragging, setIsDragging] = useState(false);
-  const [lastGestureTime, setLastGestureTime] = useState(0);
   const [streamingStartTime, setStreamingStartTime] = useState(Date.now());
   const [responseTimes, setResponseTimes] = useState<number[]>([]);
   
   const fadeAnim = useRef(new Animated.Value(1)).current;
-  const scrollViewRef = useRef<ScrollView>(null);
   const chartContainerRef = useRef<View>(null);
-  const gestureStartRef = useRef<{ x: number; y: number; panX: number; panY: number; zoom: number } | null>(null);
   
   // Use contexts
   const { selectedPair, tickers } = useMarket();
@@ -126,10 +122,14 @@ export const CandlestickChartEnhanced: React.FC = () => {
     const totalWidth = totalCandles * (chartState.candleWidth + CANDLE_SPACING);
     const maxPanX = Math.max(0, totalWidth - (screenWidth - 64));
     
-    // Calculate which candles are visible
-    const startIndex = Math.floor((chartState.panX / maxPanX) * totalCandles);
-    const endIndex = Math.min(totalCandles, startIndex + candlesPerScreen + 5); // +5 for smooth scrolling
+    // Calculate which candles are visible based on pan position
+    let startIndex = 0;
+    if (maxPanX > 0) {
+      startIndex = Math.floor((chartState.panX / maxPanX) * Math.max(0, totalCandles - candlesPerScreen));
+    }
+    const endIndex = Math.min(totalCandles, startIndex + candlesPerScreen + 10); // +10 for smooth scrolling
     
+    // Update visible range in state
     setChartState(prev => ({
       ...prev,
       visibleStart: startIndex,
@@ -158,8 +158,9 @@ export const CandlestickChartEnhanced: React.FC = () => {
     );
 
     // Apply vertical pan offset
-    const adjustedMin = minPrice - (chartState.panY * priceRange * 0.5);
-    const adjustedMax = maxPrice - (chartState.panY * priceRange * 0.5);
+    const panOffset = chartState.panY * priceRange * 0.5;
+    const adjustedMin = minPrice - panOffset;
+    const adjustedMax = maxPrice - panOffset;
     
     const priceLabels = generatePriceLabels(adjustedMin, adjustedMax, tickSize, 7);
     
@@ -172,24 +173,17 @@ export const CandlestickChartEnhanced: React.FC = () => {
     };
   }, [visibleCandles, chartState.panY]);
 
-  // Mouse wheel handler for web
-  const handleWheel = useCallback((event: any) => {
-    if (!Platform.select({ web: true, default: false })) return;
-    
-    event.preventDefault();
-    event.stopPropagation();
-    
-    const now = Date.now();
-    if (now - lastGestureTime < 16) return; // Throttle to ~60fps
-    setLastGestureTime(now);
-
-    const { deltaY, deltaX, ctrlKey, metaKey } = event;
-    const isZooming = ctrlKey || metaKey;
-    
-    if (isZooming) {
-      // Zoom with mouse wheel
-      const zoomFactor = deltaY > 0 ? 0.9 : 1.1;
-      const newZoom = Math.max(0.1, Math.min(5.0, chartState.zoom * zoomFactor));
+  // Web gesture handlers
+  const {
+    attachGestures,
+    simulateZoom,
+    simulatePan,
+    simulateDoubleClick,
+    isDragging,
+    isWebSupported,
+  } = useWebGestures({
+    onZoom: useCallback((factor: number, centerX?: number, centerY?: number) => {
+      const newZoom = Math.max(0.1, Math.min(5.0, chartState.zoom * factor));
       const newCandleWidth = Math.max(MIN_CANDLE_WIDTH, Math.min(MAX_CANDLE_WIDTH, 
         DEFAULT_CANDLE_WIDTH * newZoom
       ));
@@ -199,93 +193,61 @@ export const CandlestickChartEnhanced: React.FC = () => {
         zoom: newZoom,
         candleWidth: newCandleWidth,
       }));
-    } else {
-      // Pan with mouse wheel
-      const panSpeed = 0.1;
-      const newPanX = Math.max(0, chartState.panX + deltaX * panSpeed);
-      const newPanY = Math.max(-1, Math.min(1, chartState.panY + deltaY * panSpeed * 0.01));
+    }, [chartState.zoom]),
+    
+    onPan: useCallback((deltaX: number, deltaY: number) => {
+      const totalCandles = processedCandles.length;
+      const candlesPerScreen = Math.floor((screenWidth - 64) / (chartState.candleWidth + CANDLE_SPACING));
+      const maxPanX = Math.max(0, totalCandles - candlesPerScreen);
+      
+      const newPanX = Math.max(0, Math.min(maxPanX, chartState.panX + deltaX * 100));
+      const newPanY = Math.max(-1, Math.min(1, chartState.panY + deltaY * 2));
       
       setChartState(prev => ({
         ...prev,
         panX: newPanX,
         panY: newPanY,
       }));
-    }
-  }, [chartState, lastGestureTime]);
-
-  // Enhanced mouse/touch handlers
-  const handleGestureStart = useCallback((event: any) => {
-    setIsDragging(true);
-    const touch = event.touches ? event.touches[0] : event;
-    gestureStartRef.current = {
-      x: touch.clientX || touch.pageX,
-      y: touch.clientY || touch.pageY,
-      panX: chartState.panX,
-      panY: chartState.panY,
-      zoom: chartState.zoom,
-    };
-  }, [chartState]);
-
-  const handleGestureMove = useCallback((event: any) => {
-    if (!isDragging || !gestureStartRef.current) return;
+    }, [processedCandles.length, chartState.candleWidth, chartState.panX, chartState.panY]),
     
-    event.preventDefault();
-    const touch = event.touches ? event.touches[0] : event;
-    const currentX = touch.clientX || touch.pageX;
-    const currentY = touch.clientY || touch.pageY;
+    onDoubleClick: useCallback((x: number, y: number) => {
+      // Double click to zoom in/out
+      if (chartState.zoom < 2) {
+        const newZoom = Math.max(0.1, Math.min(5.0, chartState.zoom * 2));
+        const newCandleWidth = Math.max(MIN_CANDLE_WIDTH, Math.min(MAX_CANDLE_WIDTH, 
+          DEFAULT_CANDLE_WIDTH * newZoom
+        ));
+        
+        setChartState(prev => ({
+          ...prev,
+          zoom: newZoom,
+          candleWidth: newCandleWidth,
+        }));
+      } else {
+        setChartState(prev => ({
+          ...prev,
+          zoom: 1.0,
+          candleWidth: DEFAULT_CANDLE_WIDTH,
+          panX: 0,
+          panY: 0,
+        }));
+      }
+    }, [chartState.zoom]),
     
-    const deltaX = currentX - gestureStartRef.current.x;
-    const deltaY = currentY - gestureStartRef.current.y;
-    
-    // Apply pan with sensitivity
-    const panSensitivity = 2.0;
-    const newPanX = Math.max(0, gestureStartRef.current.panX - deltaX * panSensitivity);
-    const newPanY = Math.max(-1, Math.min(1, 
-      gestureStartRef.current.panY + deltaY * 0.002 // Vertical pan sensitivity
-    ));
-    
-    setChartState(prev => ({
-      ...prev,
-      panX: newPanX,
-      panY: newPanY,
-    }));
-  }, [isDragging]);
+    enabled: true,
+    zoomSensitivity: 0.15,
+    panSensitivity: 1.5,
+  });
 
-  const handleGestureEnd = useCallback(() => {
-    setIsDragging(false);
-    gestureStartRef.current = null;
-  }, []);
-
-  // Setup web event listeners
+  // Setup web gestures
   useEffect(() => {
-    if (!Platform.select({ web: true, default: false })) return;
+    if (!isWebSupported) return;
     
     const chartElement = chartContainerRef.current as any;
     if (!chartElement) return;
 
-    // Mouse wheel for zoom/pan
-    chartElement.addEventListener('wheel', handleWheel, { passive: false });
-    
-    // Mouse drag for pan
-    chartElement.addEventListener('mousedown', handleGestureStart);
-    document.addEventListener('mousemove', handleGestureMove);
-    document.addEventListener('mouseup', handleGestureEnd);
-    
-    // Touch events for mobile/tablet
-    chartElement.addEventListener('touchstart', handleGestureStart, { passive: false });
-    chartElement.addEventListener('touchmove', handleGestureMove, { passive: false });
-    chartElement.addEventListener('touchend', handleGestureEnd);
-
-    return () => {
-      chartElement.removeEventListener('wheel', handleWheel);
-      chartElement.removeEventListener('mousedown', handleGestureStart);
-      document.removeEventListener('mousemove', handleGestureMove);
-      document.removeEventListener('mouseup', handleGestureEnd);
-      chartElement.removeEventListener('touchstart', handleGestureStart);
-      chartElement.removeEventListener('touchmove', handleGestureMove);
-      chartElement.removeEventListener('touchend', handleGestureEnd);
-    };
-  }, [handleWheel, handleGestureStart, handleGestureMove, handleGestureEnd]);
+    return attachGestures(chartElement);
+  }, [attachGestures, isWebSupported]);
 
   // Track response times for performance metrics
   useEffect(() => {
@@ -410,8 +372,7 @@ export const CandlestickChartEnhanced: React.FC = () => {
     if (totalCandles === 0) return;
     
     const candlesPerScreen = Math.floor((screenWidth - 64) / (chartState.candleWidth + CANDLE_SPACING));
-    const totalWidth = totalCandles * (chartState.candleWidth + CANDLE_SPACING);
-    const maxPanX = Math.max(0, totalWidth - (screenWidth - 64));
+    const maxPanX = Math.max(0, totalCandles - candlesPerScreen);
     
     setChartState(prev => ({
       ...prev,
@@ -538,7 +499,7 @@ export const CandlestickChartEnhanced: React.FC = () => {
         
         <View style={styles.infoDisplay}>
           <Text style={styles.infoText}>
-            Rueda: Zoom | Ctrl+Rueda: Pan | Arrastrar: Mover
+            {isWebSupported ? 'Rueda: Pan | Ctrl+Rueda: Zoom | Arrastrar: Mover' : 'Touch: Pan/Zoom'}
           </Text>
         </View>
       </View>
@@ -594,348 +555,14 @@ export const CandlestickChartEnhanced: React.FC = () => {
       {/* Chart Info Overlay */}
       <View style={styles.chartInfo}>
         <Text style={styles.chartInfoText}>
-          📊 Rango: {chartState.visibleStart}-{chartState.visibleEnd} de {processedCandles.length} | 
-          💰 ${formatPrice(priceMetrics.minPrice, selectedPair)} - ${formatPrice(priceMetrics.maxPrice, selectedPair)}
+          📊 Velas: {chartState.visibleStart}-{chartState.visibleEnd} de {processedCandles.length} | 
+          💰 ${formatPrice(priceMetrics.minPrice, selectedPair)} - ${formatPrice(priceMetrics.maxPrice, selectedPair)} | 
+          🎯 Zoom: {chartState.zoom.toFixed(1)}x
         </Text>
       </View>
     </View>
   );
 };
-  const scrollViewRef = useRef<ScrollView>(null);
-  
-  // Use contexts
-  const { selectedPair, tickers } = useMarket();
-  
-  // Ultra-fast chart hook
-  const { 
-    candles,
-    isStreaming,
-    lastUpdate,
-    performanceStats,
-    startStream,
-    stopStream,
-    restartStream,
-    changeCycleSpeed,
-    clearCandles,
-    hasData,
-    isActive
-  } = useUltraFastChart({
-    symbol: selectedPair,
-    timeframe: selectedTimeframe.value,
-    cycleDelay: selectedTimeframe.cycleDelay,
-    maxCandles: 500,
-    autoStart: !isHistoricalMode,
-  });
-
-  // Get data to display (live or historical)
-  const displayCandles = isHistoricalMode ? historicalData : candles;
-
-  // Load historical data
-  const loadHistoricalData = useCallback(async (offset: number = 0) => {
-    setIsLoadingHistorical(true);
-    try {
-      // Calculate time range for historical data
-      const now = Date.now();
-      const timeframe = selectedTimeframe.value;
-      const intervals = {
-        '1m': 60 * 1000,
-        '5m': 5 * 60 * 1000,
-        '15m': 15 * 60 * 1000,
-        '1h': 60 * 60 * 1000,
-        '4h': 4 * 60 * 60 * 1000,
-        '1d': 24 * 60 * 60 * 1000,
-      };
-      
-      const intervalMs = intervals[timeframe as keyof typeof intervals] || 60 * 1000;
-      const endTime = now - (offset * intervalMs);
-      const startTime = endTime - (500 * intervalMs); // 500 velas hacia atrás
-      
-      console.log(`📊 Cargando datos históricos: ${selectedPair} ${timeframe} desde ${new Date(startTime).toISOString()}`);
-      
-      const historical = await binanceService.getKlines(
-        selectedPair,
-        timeframe,
-        500,
-        startTime,
-        endTime
-      );
-      
-      setHistoricalData(historical);
-      setHistoricalOffset(offset);
-      
-      // Scroll to the end to show the most recent data
-      setTimeout(() => {
-        scrollViewRef.current?.scrollToEnd({ animated: true });
-      }, 100);
-      
-    } catch (error) {
-      console.error('❌ Error cargando datos históricos:', error);
-      Alert.alert('Error', 'No se pudieron cargar los datos históricos');
-    } finally {
-      setIsLoadingHistorical(false);
-    }
-  }, [selectedPair, selectedTimeframe.value]);
-
-  // Toggle between live and historical mode
-  const toggleHistoricalMode = useCallback(async () => {
-    if (isHistoricalMode) {
-      // Switch to live mode
-      setIsHistoricalMode(false);
-      setHistoricalData([]);
-      setHistoricalOffset(0);
-      startStream();
-    } else {
-      // Switch to historical mode
-      setIsHistoricalMode(true);
-      stopStream();
-      await loadHistoricalData(0);
-    }
-  }, [isHistoricalMode, startStream, stopStream, loadHistoricalData]);
-
-  // Navigate historical data
-  const navigateHistorical = useCallback(async (direction: 'back' | 'forward') => {
-    if (!isHistoricalMode) return;
-    
-    const newOffset = direction === 'back' 
-      ? historicalOffset + 100 // Go 100 candles further back
-      : Math.max(0, historicalOffset - 100); // Go 100 candles forward
-      
-    await loadHistoricalData(newOffset);
-  }, [isHistoricalMode, historicalOffset, loadHistoricalData]);
-
-  // Clear cache and restart data collection
-  const clearCacheAndRestart = useCallback(async () => {
-    Alert.alert(
-      'Limpiar Cache',
-      '¿Estás seguro de que quieres limpiar el cache y reiniciar la recolección de datos?',
-      [
-        { text: 'Cancelar', style: 'cancel' },
-        {
-          text: 'Limpiar',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              console.log('🧹 Limpiando cache y reiniciando...');
-              
-              // Stop current streaming
-              stopStream();
-              
-              // Clear local data
-              clearCandles();
-              setHistoricalData([]);
-              setHistoricalOffset(0);
-              
-              // Clear service cache (if available)
-              if (binanceService.clearCache) {
-                binanceService.clearCache();
-              }
-              
-              // Update timestamp
-              setLastCacheCleared(new Date());
-              
-              // Wait a moment then restart
-              setTimeout(() => {
-                if (isHistoricalMode) {
-                  loadHistoricalData(0);
-                } else {
-                  startStream();
-                }
-              }, 1000);
-              
-              Alert.alert('Éxito', 'Cache limpiado y datos reiniciados');
-            } catch (error) {
-              console.error('❌ Error limpiando cache:', error);
-              Alert.alert('Error', 'No se pudo limpiar el cache completamente');
-            }
-          }
-        }
-      ]
-    );
-  }, [stopStream, clearCandles, isHistoricalMode, loadHistoricalData, startStream]);
-
-  // Refresh all panels and data
-  const refreshAllData = useCallback(async () => {
-    try {
-      console.log('🔄 Actualizando todos los paneles...');
-      
-      // Stop current streaming temporarily
-      const wasStreaming = isStreaming;
-      if (wasStreaming) {
-        stopStream();
-      }
-      
-      // Request fresh data from server
-      await new Promise(resolve => setTimeout(resolve, 500)); // Wait for clean state
-      
-      if (isHistoricalMode) {
-        // Reload historical data
-        await loadHistoricalData(historicalOffset);
-      } else if (wasStreaming) {
-        // Restart live streaming
-        startStream();
-      }
-      
-      console.log('✅ Todos los paneles actualizados');
-    } catch (error) {
-      console.error('❌ Error actualizando paneles:', error);
-      Alert.alert('Error', 'No se pudieron actualizar todos los paneles');
-    }
-  }, [isStreaming, stopStream, isHistoricalMode, loadHistoricalData, historicalOffset, startStream]);
-
-  // Calculate price range for chart scaling - optimized
-  const { minPrice, maxPrice, priceRange } = useMemo(() => {
-    if (displayCandles.length === 0) return { minPrice: 0, maxPrice: 100, priceRange: 100 };
-    
-    let minPrice = Infinity;
-    let maxPrice = -Infinity;
-    
-    // Fast calculation without array allocation
-    for (const candle of displayCandles) {
-      if (candle.high > maxPrice) maxPrice = candle.high;
-      if (candle.low < minPrice) minPrice = candle.low;
-    }
-    
-    // Add small padding for better visualization
-    const padding = (maxPrice - minPrice) * 0.05;
-    minPrice -= padding;
-    maxPrice += padding;
-    const priceRange = maxPrice - minPrice;
-    
-    return { minPrice, maxPrice, priceRange };
-  }, [displayCandles]);
-
-  // Optimized candle rendering with memoization
-  const renderCandle = useCallback((candle: CandleData, index: number) => {
-    const isGreen = candle.close >= candle.open;
-    const bodyHeight = Math.abs(candle.close - candle.open) / priceRange * CHART_HEIGHT;
-    const wickHeight = (candle.high - candle.low) / priceRange * CHART_HEIGHT;
-    const bodyTop = (maxPrice - Math.max(candle.open, candle.close)) / priceRange * CHART_HEIGHT;
-    const wickTop = (maxPrice - candle.high) / priceRange * CHART_HEIGHT;
-    
-    return (
-      <View key={`${candle.timestamp}_${index}`} style={[styles.candleContainer, { left: index * (CANDLE_WIDTH + CANDLE_SPACING) }]}>
-        {/* Wick */}
-        <View
-          style={[
-            styles.wick,
-            {
-              top: wickTop,
-              height: Math.max(wickHeight, 1),
-              backgroundColor: isGreen ? '#00ff88' : '#ff4444',
-            },
-          ]}
-        />
-        {/* Body */}
-        <View
-          style={[
-            styles.candleBody,
-            {
-              top: bodyTop,
-              height: Math.max(bodyHeight, 1),
-              backgroundColor: isGreen ? '#00ff88' : '#ff4444',
-            },
-          ]}
-        />
-      </View>
-    );
-  }, [maxPrice, priceRange]);
-
-  // Handle timeframe change with ultra-fast optimization
-  const handleTimeframeChange = useCallback(async (timeframe: typeof TIMEFRAMES[0]) => {
-    if (timeframe.value === selectedTimeframe.value) return;
-    
-    console.log(`🚀 Ultra-fast timeframe change: ${selectedTimeframe.value} → ${timeframe.value} (${timeframe.cycleDelay}ms)`);
-    
-    // Immediate UI update
-    setSelectedTimeframe(timeframe);
-    
-    // Fade animation for smooth transition
-    Animated.timing(fadeAnim, {
-      toValue: 0.7,
-      duration: 150,
-      useNativeDriver: true,
-    }).start();
-
-    try {
-      if (isHistoricalMode) {
-        // Reload historical data with new timeframe
-        await loadHistoricalData(historicalOffset);
-      }
-      
-      // Restore opacity
-      Animated.timing(fadeAnim, {
-        toValue: 1,
-        duration: 150,
-        useNativeDriver: true,
-      }).start();
-
-      console.log(`✅ Ultra-fast timeframe change complete`);
-    } catch (error) {
-      console.error(`❌ Error changing timeframe:`, error);
-      // Restore opacity even on error
-      Animated.timing(fadeAnim, {
-        toValue: 1,
-        duration: 150,
-        useNativeDriver: true,
-      }).start();
-    }
-  }, [selectedTimeframe, fadeAnim, isHistoricalMode, loadHistoricalData, historicalOffset]);
-
-  // Speed control functions
-  const increaseSpeed = useCallback(() => {
-    const newDelay = Math.max(selectedTimeframe.cycleDelay / 2, 5); // Mínimo 5ms
-    changeCycleSpeed(newDelay);
-    setSelectedTimeframe(prev => ({ ...prev, cycleDelay: newDelay }));
-  }, [selectedTimeframe.cycleDelay, changeCycleSpeed]);
-
-  const decreaseSpeed = useCallback(() => {
-    const newDelay = Math.min(selectedTimeframe.cycleDelay * 2, 10000); // Máximo 10s
-    changeCycleSpeed(newDelay);
-    setSelectedTimeframe(prev => ({ ...prev, cycleDelay: newDelay }));
-  }, [selectedTimeframe.cycleDelay, changeCycleSpeed]);
-
-  // Get current price info from ticker
-  const currentTicker = tickers[selectedPair];
-  const currentPrice = currentTicker?.price || 0;
-  const priceChange = currentTicker?.changePercent24h || 0;
-
-  // Get last candle price if available
-  const lastCandle = displayCandles[displayCandles.length - 1];
-  const displayPrice = lastCandle?.close || currentPrice;
-
-  // Memoized chart content to prevent unnecessary re-renders
-  const chartContent = useMemo(() => {
-    if (displayCandles.length === 0) {
-      return (
-        <View style={styles.loadingContainer}>
-          <Text style={styles.loadingText}>
-            {isLoadingHistorical 
-              ? 'Cargando datos históricos...' 
-              : isStreaming 
-                ? 'Iniciando stream ultra-rápido...' 
-                : 'Preparando gráfico...'
-            }
-          </Text>
-        </View>
-      );
-    }
-
-    return (
-      <ScrollView
-        ref={scrollViewRef}
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={{
-          width: displayCandles.length * (CANDLE_WIDTH + CANDLE_SPACING),
-          height: CHART_HEIGHT,
-        }}
-      >
-        <View style={styles.chart}>
-          {displayCandles.map((candle, index) => renderCandle(candle, index))}
-        </View>
-      </ScrollView>
-    );
-  }, [displayCandles, isLoadingHistorical, isStreaming, renderCandle]);
 
 const styles = StyleSheet.create({
   container: {
@@ -1094,7 +721,7 @@ const styles = StyleSheet.create({
     height: CHART_HEIGHT,
     justifyContent: 'space-between',
     paddingVertical: 8,
-    pointerEvents: 'none',
+    pointerEvents: 'none' as any,
   },
   priceLabel: {
     fontSize: 10,
@@ -1121,4 +748,4 @@ const styles = StyleSheet.create({
   },
 });
 
-export default CandlestickChartEnhanced;
+export default CandlestickChartFinal;
