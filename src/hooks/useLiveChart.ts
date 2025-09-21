@@ -41,12 +41,27 @@ export const useLiveChart = (options: UseLiveChartOptions) => {
   // Referencias
   const unsubscribeRef = useRef<(() => void) | null>(null);
   const responseTimesRef = useRef<number[]>([]);
-  const isInitializedRef = useRef(false);
+  const isInitializedRef = useRef<string | null>(null); // Store symbol-interval key
+  const lastLoadTimeRef = useRef<number>(0); // Prevent excessive reloads
 
   // Función para cargar datos históricos iniciales
   const loadInitialData = useCallback(async () => {
-    if (isInitializedRef.current) return;
+    const now = Date.now();
+    const cacheKey = `${symbol}-${interval}`;
     
+    // Evitar cargas duplicadas para el mismo symbol/interval
+    if (isInitializedRef.current && isInitializedRef.current === cacheKey) {
+      console.log(`📊 Data already loaded for ${symbol} ${interval}, skipping...`);
+      return;
+    }
+    
+    // Evitar cargas demasiado frecuentes (debouncing)
+    if (now - lastLoadTimeRef.current < 2000) { // 2 segundos de cooldown
+      console.log(`⏰ Too frequent load attempt for ${symbol} ${interval}, skipping...`);
+      return;
+    }
+    
+    lastLoadTimeRef.current = now;
     setIsLoading(true);
     console.log(`📊 Loading initial data for ${symbol} ${interval}...`);
     
@@ -59,7 +74,7 @@ export const useLiveChart = (options: UseLiveChartOptions) => {
       
       console.log(`✅ Loaded ${historicalCandles.length} historical candles for ${symbol}`);
       setCandles(historicalCandles);
-      isInitializedRef.current = true;
+      isInitializedRef.current = cacheKey; // Mark this symbol-interval as loaded
     } catch (error) {
       console.error(`❌ Error loading initial data for ${symbol}:`, error);
       setStats(prev => ({ ...prev, errorCount: prev.errorCount + 1 }));
@@ -68,7 +83,7 @@ export const useLiveChart = (options: UseLiveChartOptions) => {
     }
   }, [symbol, interval, maxCandles]);
 
-  // Función para actualizar velas
+  // Función para actualizar velas (OPTIMIZADA - solo actualizar última vela)
   const updateCandles = useCallback((newCandle: CandleData) => {
     const updateTime = Date.now();
     
@@ -82,34 +97,35 @@ export const useLiveChart = (options: UseLiveChartOptions) => {
     const avgResponseTime = responseTimesRef.current.reduce((a, b) => a + b, 0) / responseTimesRef.current.length;
 
     setCandles(prevCandles => {
+      if (prevCandles.length === 0) return prevCandles;
+      
       const newCandles = [...prevCandles];
       const newTimestamp = new Date(newCandle.timestamp).getTime();
       
-      // Buscar vela existente con mismo timestamp
-      const existingIndex = newCandles.findIndex(
-        candle => Math.abs(new Date(candle.timestamp).getTime() - newTimestamp) < 60000 // 1 minuto de tolerancia
-      );
+      // Solo actualizar la última vela (la más reciente)
+      const lastIndex = newCandles.length - 1;
+      const lastCandleTime = new Date(newCandles[lastIndex].timestamp).getTime();
       
-      if (existingIndex >= 0) {
-        // Actualizar vela existente
-        newCandles[existingIndex] = newCandle;
+      // Si la nueva vela corresponde a la misma ventana de tiempo que la última
+      const timeDiff = Math.abs(newTimestamp - lastCandleTime);
+      const intervalMs = interval === '1m' ? 60000 : interval === '5m' ? 300000 : 60000;
+      
+      if (timeDiff < intervalMs) {
+        // Actualizar la última vela existente (esto es lo más común)
+        newCandles[lastIndex] = newCandle;
         console.log(`🔄 Updated candle for ${symbol}: $${newCandle.close}`);
-      } else {
-        // Agregar nueva vela
+      } else if (newTimestamp > lastCandleTime) {
+        // Solo agregar si es realmente una nueva vela (nueva ventana de tiempo)
         newCandles.push(newCandle);
         
         // Mantener solo las últimas velas
         if (newCandles.length > maxCandles) {
-          newCandles.splice(0, newCandles.length - maxCandles);
+          newCandles.shift();
         }
         
-        console.log(`📈 New candle for ${symbol}: $${newCandle.close}`);
+        console.log(`➕ New candle for ${symbol}: $${newCandle.close}`);
       }
-      
-      // Ordenar por timestamp
-      newCandles.sort((a, b) => 
-        new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
-      );
+      // Si es una vela antigua, ignorarla completamente
       
       return newCandles;
     });
@@ -121,7 +137,7 @@ export const useLiveChart = (options: UseLiveChartOptions) => {
       averageResponseTime: Math.round(avgResponseTime),
       lastUpdate: new Date(),
     }));
-  }, [symbol, maxCandles]);
+  }, [symbol, maxCandles, interval]);
 
   // Función para manejar errores
   const handleError = useCallback((error: Error) => {
@@ -215,7 +231,7 @@ export const useLiveChart = (options: UseLiveChartOptions) => {
   useEffect(() => {
     return () => {
       stopStreaming();
-      isInitializedRef.current = false;
+      isInitializedRef.current = null;
     };
   }, [stopStreaming]);
 

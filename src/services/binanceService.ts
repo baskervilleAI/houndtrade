@@ -1,17 +1,19 @@
-interface BinanceKlineData {
-  openTime: number;
-  open: string;
-  high: string;
-  low: string;
-  close: string;
-  volume: string;
-  closeTime: number;
-  quoteAssetVolume: string;
-  numberOfTrades: number;
-  takerBuyBaseAssetVolume: string;
-  takerBuyQuoteAssetVolume: string;
-  ignore: string;
-}
+// Binance API returns arrays, not objects
+// [openTime, open, high, low, close, volume, closeTime, quoteAssetVolume, numberOfTrades, takerBuyBaseAssetVolume, takerBuyQuoteAssetVolume, ignore]
+type BinanceKlineData = [
+  number, // openTime
+  string, // open
+  string, // high
+  string, // low
+  string, // close
+  string, // volume
+  number, // closeTime
+  string, // quoteAssetVolume
+  number, // numberOfTrades
+  string, // takerBuyBaseAssetVolume
+  string, // takerBuyQuoteAssetVolume
+  string  // ignore
+];
 
 interface BinanceTicker24hr {
   symbol: string;
@@ -258,8 +260,11 @@ class BinanceService {
       
       // Ultra-optimized candle mapping with NaN validation
       const candles: CandleData[] = data.map(kline => {
-        const timestamp = typeof kline.openTime === 'number' && !isNaN(kline.openTime) 
-          ? kline.openTime 
+        // Binance API returns arrays: [openTime, open, high, low, close, volume, closeTime, quoteAssetVolume, numberOfTrades, ...]
+        const [openTime, open, high, low, close, volume, closeTime, quoteAssetVolume, numberOfTrades] = kline;
+        
+        const timestamp = typeof openTime === 'number' && !isNaN(openTime) 
+          ? openTime 
           : Date.now();
         
         // Safe parseFloat with fallback values to prevent NaN
@@ -269,15 +274,15 @@ class BinanceService {
           return isNaN(parsed) ? fallback : parsed;
         };
 
-        const open = parseFloatSafe(kline.open);
-        const high = parseFloatSafe(kline.high);
-        const low = parseFloatSafe(kline.low);
-        const close = parseFloatSafe(kline.close);
-        const volume = parseFloatSafe(kline.volume);
-        const quoteVolume = parseFloatSafe(kline.quoteAssetVolume);
+        const open_val = parseFloatSafe(open);
+        const high_val = parseFloatSafe(high);
+        const low_val = parseFloatSafe(low);
+        const close_val = parseFloatSafe(close);
+        const volume_val = parseFloatSafe(volume);
+        const quoteVolume_val = parseFloatSafe(quoteAssetVolume);
         
         // Validate that we have valid OHLC data
-        if (open === 0 && high === 0 && low === 0 && close === 0) {
+        if (open_val === 0 && high_val === 0 && low_val === 0 && close_val === 0) {
           console.warn(`⚠️ Invalid candle data for ${symbol}:`, kline);
           // Use previous valid values or current market price as fallback
           const fallbackPrice = this.lastValidPrice || 50000; // Default BTC price
@@ -287,24 +292,24 @@ class BinanceService {
             high: fallbackPrice,
             low: fallbackPrice,
             close: fallbackPrice,
-            volume,
-            trades: kline.numberOfTrades || 0,
-            quoteVolume,
+            volume: volume_val,
+            trades: numberOfTrades || 0,
+            quoteVolume: quoteVolume_val,
           };
         }
 
         // Store last valid price for fallback
-        this.lastValidPrice = close;
+        this.lastValidPrice = close_val;
         
         return {
           timestamp: new Date(timestamp).toISOString(),
-          open,
-          high,
-          low,
-          close,
-          volume,
-          trades: kline.numberOfTrades || 0,
-          quoteVolume,
+          open: open_val,
+          high: high_val,
+          low: low_val,
+          close: close_val,
+          volume: volume_val,
+          trades: numberOfTrades || 0,
+          quoteVolume: quoteVolume_val,
         };
       });
 
@@ -363,16 +368,19 @@ class BinanceService {
       const data: BinanceKlineData[] = await response.json();
       
       const candles: CandleData[] = data.map(kline => {
+        // Binance API returns arrays: [openTime, open, high, low, close, volume, closeTime, quoteAssetVolume, numberOfTrades, ...]
+        const [openTime, open, high, low, close, volume, closeTime, quoteAssetVolume, numberOfTrades] = kline;
+        
         // Ensure timestamp is a valid number with proper validation
         let timestamp: number;
         
-        if (typeof kline.openTime === 'number' && !isNaN(kline.openTime)) {
-          timestamp = kline.openTime;
-        } else if (typeof kline.openTime === 'string' && kline.openTime) {
-          timestamp = parseInt(kline.openTime);
+        if (typeof openTime === 'number' && !isNaN(openTime)) {
+          timestamp = openTime;
+        } else if (typeof openTime === 'string' && openTime) {
+          timestamp = parseInt(openTime);
         } else {
           // Fallback to current time if invalid
-          console.warn('Invalid timestamp in getMissingKlines:', kline.openTime);
+          console.warn('Invalid timestamp in getMissingKlines:', openTime);
           timestamp = Date.now();
         }
         
@@ -384,13 +392,13 @@ class BinanceService {
         
         return {
           timestamp: new Date(timestamp).toISOString(),
-          open: parseFloat(kline.open),
-          high: parseFloat(kline.high),
-          low: parseFloat(kline.low),
-          close: parseFloat(kline.close),
-          volume: parseFloat(kline.volume),
-          trades: kline.numberOfTrades,
-          quoteVolume: parseFloat(kline.quoteAssetVolume),
+          open: parseFloat(open),
+          high: parseFloat(high),
+          low: parseFloat(low),
+          close: parseFloat(close),
+          volume: parseFloat(volume),
+          trades: numberOfTrades,
+          quoteVolume: parseFloat(quoteAssetVolume),
         };
       });
 
@@ -441,16 +449,19 @@ class BinanceService {
       const data: BinanceKlineData[] = await response.json();
       
       const candles: CandleData[] = data.map(kline => {
+        // Binance API returns arrays: [openTime, open, high, low, close, volume, closeTime, quoteAssetVolume, numberOfTrades, ...]
+        const [openTime, open, high, low, close, volume, closeTime, quoteAssetVolume, numberOfTrades] = kline;
+        
         // Ensure timestamp is a valid number with proper validation
         let timestamp: number;
         
-        if (typeof kline.openTime === 'number' && !isNaN(kline.openTime)) {
-          timestamp = kline.openTime;
-        } else if (typeof kline.openTime === 'string' && kline.openTime) {
-          timestamp = parseInt(kline.openTime);
+        if (typeof openTime === 'number' && !isNaN(openTime)) {
+          timestamp = openTime;
+        } else if (typeof openTime === 'string' && openTime) {
+          timestamp = parseInt(openTime);
         } else {
           // Fallback to current time if invalid
-          console.warn('Invalid timestamp in getKlines:', kline.openTime);
+          console.warn('Invalid timestamp in getKlines:', openTime);
           timestamp = Date.now();
         }
         
@@ -462,13 +473,13 @@ class BinanceService {
         
         return {
           timestamp: new Date(timestamp).toISOString(),
-          open: parseFloat(kline.open),
-          high: parseFloat(kline.high),
-          low: parseFloat(kline.low),
-          close: parseFloat(kline.close),
-          volume: parseFloat(kline.volume),
-          trades: kline.numberOfTrades,
-          quoteVolume: parseFloat(kline.quoteAssetVolume),
+          open: parseFloat(open),
+          high: parseFloat(high),
+          low: parseFloat(low),
+          close: parseFloat(close),
+          volume: parseFloat(volume),
+          trades: numberOfTrades,
+          quoteVolume: parseFloat(quoteAssetVolume),
         };
       });
 
