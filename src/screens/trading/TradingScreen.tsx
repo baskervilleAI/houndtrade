@@ -6,17 +6,24 @@ import {
   ScrollView,
   TouchableOpacity,
   Dimensions,
+  Platform,
 } from 'react-native';
 import { useAuth, useTrading, useMarket } from '../../context/AppContext';
 import { useMarketData } from '../../hooks/useMarketData';
-import { CandlestickChart } from '../../components/chart/CandlestickChart_improved';
-import { LiveCandlestickChart } from '../../components/chart/LiveCandlestickChart';
+import { formatPrice, formatPercentage, formatCurrency } from '../../utils/formatters';
+import CandlestickChart from '../../components/chart/CandlestickChart_improved';
+import LiveCandlestickChart from '../../components/chart/LiveCandlestickChart';
 import { OrderForm } from '../../components/trading/OrderForm';
 import { PositionsList } from '../../components/trading/PositionsList';
 import { MarketData } from '../../components/trading/MarketData';
 import { StreamingDebugPanel } from '../../components/debug/StreamingDebugPanel';
 
-const { width: screenWidth } = Dimensions.get('window');
+const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
+
+// Responsive breakpoints
+const isTablet = screenWidth >= 768;
+const isMobile = screenWidth < 768;
+const isSmallMobile = screenWidth < 400;
 
 export const TradingScreen: React.FC = () => {
   const [selectedTab, setSelectedTab] = useState<'chart' | 'positions' | 'orders'>('chart');
@@ -64,19 +71,19 @@ export const TradingScreen: React.FC = () => {
       <View style={styles.portfolioSummary}>
         <View style={styles.balanceContainer}>
           <Text style={styles.balanceLabel}>Balance</Text>
-          <Text style={styles.balanceValue}>${balance.toLocaleString()}</Text>
+          <Text style={styles.balanceValue}>${formatCurrency(balance)}</Text>
         </View>
         <View style={styles.equityContainer}>
           <Text style={styles.equityLabel}>Equity</Text>
-          <Text style={styles.equityValue}>${equity.toLocaleString()}</Text>
+          <Text style={styles.equityValue}>${formatCurrency(equity)}</Text>
         </View>
         <View style={styles.pnlContainer}>
           <Text style={styles.pnlLabel}>PnL</Text>
           <Text style={[
             styles.pnlValue,
-            { color: totalPnl >= 0 ? '#00ff88' : '#ff4444' }
+            { color: (totalPnl || 0) >= 0 ? '#00ff88' : '#ff4444' }
           ]}>
-            ${totalPnl.toLocaleString()} ({pnlPercentage.toFixed(2)}%)
+            ${formatCurrency(totalPnl)} ({formatPercentage(pnlPercentage)})
           </Text>
         </View>
       </View>
@@ -116,8 +123,27 @@ export const TradingScreen: React.FC = () => {
       <View style={styles.content}>
         {selectedTab === 'chart' && (
           <View style={styles.chartContainer}>
-            <LiveCandlestickChart />
-            <OrderForm />
+            {isTablet ? (
+              // Tablet layout: side by side
+              <View style={styles.tabletLayout}>
+                <View style={styles.tabletChartSection}>
+                  <LiveCandlestickChart />
+                </View>
+                <View style={styles.tabletOrderSection}>
+                  <OrderForm />
+                </View>
+              </View>
+            ) : (
+              // Mobile layout: stacked
+              <View style={styles.mobileLayout}>
+                <View style={styles.mobileChartSection}>
+                  <LiveCandlestickChart />
+                </View>
+                <View style={styles.mobileOrderSection}>
+                  <OrderForm />
+                </View>
+              </View>
+            )}
           </View>
         )}
         {selectedTab === 'positions' && <PositionsList />}
@@ -129,7 +155,7 @@ export const TradingScreen: React.FC = () => {
       </View>
 
       {/* Debug Panel - Solo en desarrollo */}
-      {__DEV__ && <StreamingDebugPanel />}
+      {__DEV__ && !isSmallMobile && <StreamingDebugPanel />}
     </View>
   );
 };
@@ -147,95 +173,103 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     borderBottomWidth: 1,
     borderBottomColor: '#333333',
+    minHeight: isSmallMobile ? 60 : 70,
   },
   headerLeft: {
     flex: 1,
   },
   appName: {
-    fontSize: 20,
+    fontSize: isSmallMobile ? 18 : 20,
     fontWeight: 'bold',
     color: '#ffffff',
   },
   userName: {
-    fontSize: 14,
+    fontSize: isSmallMobile ? 12 : 14,
     color: '#888888',
     marginTop: 2,
   },
   logoutButton: {
     backgroundColor: '#ff4444',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
+    paddingHorizontal: isSmallMobile ? 12 : 16,
+    paddingVertical: isSmallMobile ? 6 : 8,
     borderRadius: 6,
   },
   logoutText: {
     color: '#ffffff',
-    fontSize: 14,
+    fontSize: isSmallMobile ? 12 : 14,
     fontWeight: '500',
   },
   portfolioSummary: {
-    flexDirection: 'row',
+    flexDirection: isSmallMobile ? 'column' : 'row',
     paddingHorizontal: 16,
     paddingVertical: 12,
     borderBottomWidth: 1,
     borderBottomColor: '#333333',
+    gap: isSmallMobile ? 8 : 0,
   },
   balanceContainer: {
-    flex: 1,
+    flex: isSmallMobile ? 0 : 1,
     alignItems: 'center',
+    paddingVertical: isSmallMobile ? 8 : 0,
   },
   balanceLabel: {
-    fontSize: 12,
+    fontSize: isSmallMobile ? 14 : 12,
     color: '#888888',
     marginBottom: 4,
   },
   balanceValue: {
-    fontSize: 16,
+    fontSize: isSmallMobile ? 18 : 16,
     fontWeight: 'bold',
     color: '#ffffff',
   },
   equityContainer: {
-    flex: 1,
+    flex: isSmallMobile ? 0 : 1,
     alignItems: 'center',
+    paddingVertical: isSmallMobile ? 8 : 0,
   },
   equityLabel: {
-    fontSize: 12,
+    fontSize: isSmallMobile ? 14 : 12,
     color: '#888888',
     marginBottom: 4,
   },
   equityValue: {
-    fontSize: 16,
+    fontSize: isSmallMobile ? 18 : 16,
     fontWeight: 'bold',
     color: '#ffffff',
   },
   pnlContainer: {
-    flex: 1,
+    flex: isSmallMobile ? 0 : 1,
     alignItems: 'center',
+    paddingVertical: isSmallMobile ? 8 : 0,
   },
   pnlLabel: {
-    fontSize: 12,
+    fontSize: isSmallMobile ? 14 : 12,
     color: '#888888',
     marginBottom: 4,
   },
   pnlValue: {
-    fontSize: 16,
+    fontSize: isSmallMobile ? 18 : 16,
     fontWeight: 'bold',
+    textAlign: 'center',
   },
   tabContainer: {
     flexDirection: 'row',
     borderBottomWidth: 1,
     borderBottomColor: '#333333',
+    minHeight: isSmallMobile ? 40 : 48,
   },
   tab: {
     flex: 1,
-    paddingVertical: 12,
+    paddingVertical: isSmallMobile ? 8 : 12,
     alignItems: 'center',
+    justifyContent: 'center',
   },
   activeTab: {
     borderBottomWidth: 2,
     borderBottomColor: '#00ff88',
   },
   tabText: {
-    fontSize: 14,
+    fontSize: isSmallMobile ? 12 : 14,
     color: '#888888',
     fontWeight: '500',
   },
@@ -247,6 +281,32 @@ const styles = StyleSheet.create({
   },
   chartContainer: {
     flex: 1,
+  },
+  // Tablet layouts
+  tabletLayout: {
+    flex: 1,
+    flexDirection: 'row',
+  },
+  tabletChartSection: {
+    flex: 0.7,
+    paddingRight: 8,
+  },
+  tabletOrderSection: {
+    flex: 0.3,
+    paddingLeft: 8,
+    minWidth: 300,
+  },
+  // Mobile layouts
+  mobileLayout: {
+    flex: 1,
+  },
+  mobileChartSection: {
+    flex: 0.65,
+    minHeight: screenHeight * 0.4,
+  },
+  mobileOrderSection: {
+    flex: 0.35,
+    minHeight: 200,
   },
   ordersContainer: {
     flex: 1,
