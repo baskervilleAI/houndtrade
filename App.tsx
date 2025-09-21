@@ -6,8 +6,16 @@ import { LoginScreen } from './src/screens/auth/LoginScreen';
 import { TradingScreen } from './src/screens/trading/TradingScreen';
 
 const AppContent: React.FC = () => {
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, login } = useAuth();
   const { tickers, updatePositions } = useMarket();
+
+  // Auto-login on app start for development/testing
+  useEffect(() => {
+    if (!isAuthenticated) {
+      console.log('🔑 Auto-login iniciado...');
+      login('baskerville@houndtrade.com', '444binance').catch(console.error);
+    }
+  }, [isAuthenticated, login]);
 
   // Update positions with current prices
   useEffect(() => {

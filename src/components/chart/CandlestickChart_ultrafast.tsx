@@ -9,7 +9,7 @@ import {
   Animated,
 } from 'react-native';
 import { useMarket } from '../../context/AppContext';
-import { useChart } from '../../context/ChartContext';
+import { useChartData } from '../../hooks/useChartData';
 import { CandleData } from '../../services/binanceService';
 
 const { width: screenWidth } = Dimensions.get('window');
@@ -40,28 +40,24 @@ const formatPrice = (price: number, symbol: string): string => {
 export const CandlestickChart: React.FC = () => {
   const [selectedTimeframe, setSelectedTimeframe] = useState<string>('1h');
   const fadeAnim = useRef(new Animated.Value(1)).current;
-  const unsubscribeRef = useRef<(() => void) | null>(null);
-  const lastUpdateRef = useRef<number>(0);
   
   // Use contexts
   const { selectedPair, tickers } = useMarket();
   const { 
-    loadCandles, 
-    subscribeToUpdates, 
-    getCandles, 
-    isLoading: isChartLoading,
-    setTimeframe,
-    clearCache 
-  } = useChart();
-
-  // Get current candles with memoization
-  const candles = useMemo(() => {
-    return getCandles(selectedPair, selectedTimeframe);
-  }, [getCandles, selectedPair, selectedTimeframe]);
-
-  const isLoading = useMemo(() => {
-    return isChartLoading(selectedPair, selectedTimeframe);
-  }, [isChartLoading, selectedPair, selectedTimeframe]);
+    candles,
+    isLoading,
+    isStreaming,
+    lastUpdate,
+    hasData,
+    isRealtime,
+    refresh,
+    reconnectStreaming
+  } = useChartData({
+    symbol: selectedPair,
+    timeframe: selectedTimeframe,
+    autoLoad: true,
+    autoStream: true,
+  });
 
   // Calculate price range for chart scaling - optimized
   const { minPrice, maxPrice, priceRange } = useMemo(() => {
@@ -87,41 +83,9 @@ export const CandlestickChart: React.FC = () => {
 
   // Load initial data and setup real-time updates
   useEffect(() => {
-    let isMounted = true;
-
-    const setupChart = async () => {
-      try {
-        console.log(`🚀 Setting up chart for ${selectedPair} ${selectedTimeframe}`);
-        
-        // Load candles
-        await loadCandles(selectedPair, selectedTimeframe);
-        
-        if (!isMounted) return;
-
-        // Clean up previous subscription
-        if (unsubscribeRef.current) {
-          unsubscribeRef.current();
-        }
-
-        // Subscribe to real-time updates
-        unsubscribeRef.current = subscribeToUpdates(selectedPair, selectedTimeframe);
-        
-        console.log(`✅ Chart setup complete for ${selectedPair} ${selectedTimeframe}`);
-      } catch (error) {
-        console.error(`❌ Error setting up chart:`, error);
-      }
-    };
-
-    setupChart();
-
-    return () => {
-      isMounted = false;
-      if (unsubscribeRef.current) {
-        unsubscribeRef.current();
-        unsubscribeRef.current = null;
-      }
-    };
-  }, [selectedPair, selectedTimeframe, loadCandles, subscribeToUpdates]);
+    // The useChartData hook already handles this automatically
+    console.log(`📊 Chart component mounted for ${selectedPair} ${selectedTimeframe}`);
+  }, [selectedPair, selectedTimeframe]);
 
   // Optimized candle rendering with memoization
   const renderCandle = useCallback((candle: CandleData, index: number) => {
@@ -167,7 +131,6 @@ export const CandlestickChart: React.FC = () => {
     
     // Immediate UI update
     setSelectedTimeframe(timeframe);
-    setTimeframe(timeframe);
     
     // Fade animation for smooth transition
     Animated.timing(fadeAnim, {
@@ -177,14 +140,8 @@ export const CandlestickChart: React.FC = () => {
     }).start();
 
     try {
-      // Load new timeframe data
-      await loadCandles(selectedPair, timeframe);
-      
-      // Setup new subscription
-      if (unsubscribeRef.current) {
-        unsubscribeRef.current();
-      }
-      unsubscribeRef.current = subscribeToUpdates(selectedPair, timeframe);
+      // The useChartData hook will automatically handle the timeframe change
+      // since selectedTimeframe is a dependency
       
       // Restore opacity
       Animated.timing(fadeAnim, {
@@ -203,7 +160,7 @@ export const CandlestickChart: React.FC = () => {
         useNativeDriver: true,
       }).start();
     }
-  }, [selectedTimeframe, setTimeframe, loadCandles, subscribeToUpdates, selectedPair, fadeAnim]);
+  }, [selectedTimeframe, fadeAnim]);
 
   // Get current price info from ticker
   const currentTicker = tickers[selectedPair];
@@ -240,16 +197,14 @@ export const CandlestickChart: React.FC = () => {
 
   // Performance info for debugging
   const performanceInfo = useMemo(() => {
-    const now = Date.now();
-    const timeSinceLastUpdate = now - lastUpdateRef.current;
-    lastUpdateRef.current = now;
-    
     return {
       candleCount: candles.length,
       lastCandle: candles[candles.length - 1],
-      updateInterval: timeSinceLastUpdate,
+      lastUpdate: lastUpdate?.getTime() || 0,
+      isRealtime,
+      isStreaming,
     };
-  }, [candles]);
+  }, [candles, lastUpdate, isRealtime, isStreaming]);
 
   // Log performance for debugging
   useEffect(() => {
@@ -259,7 +214,8 @@ export const CandlestickChart: React.FC = () => {
         timeframe: selectedTimeframe,
         candles: performanceInfo.candleCount,
         lastPrice: performanceInfo.lastCandle?.close,
-        updateSpeed: `${performanceInfo.updateInterval}ms`,
+        isRealtime: performanceInfo.isRealtime,
+        isStreaming: performanceInfo.isStreaming,
       });
     }
   }, [performanceInfo, selectedPair, selectedTimeframe]);
@@ -281,13 +237,21 @@ export const CandlestickChart: React.FC = () => {
           </Text>
           {isLoading && (
             <View style={styles.liveIndicator}>
-              <Text style={styles.liveText}>ACTUALIZANDO</Text>
+              <Text style={styles.liveText}>CARGANDO</Text>
             </View>
           )}
-          {!isLoading && candles.length > 0 && (
+          {!isLoading && isRealtime && (
             <View style={styles.liveIndicator}>
               <Text style={styles.liveText}>● LIVE</Text>
             </View>
+          )}
+          {!isLoading && !isRealtime && hasData && (
+            <TouchableOpacity
+              style={[styles.liveIndicator, { backgroundColor: 'rgba(255, 68, 68, 0.2)' }]}
+              onPress={reconnectStreaming}
+            >
+              <Text style={[styles.liveText, { color: '#ff4444' }]}>🔄 RECONECTAR</Text>
+            </TouchableOpacity>
           )}
         </View>
       </View>
