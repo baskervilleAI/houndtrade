@@ -1,3 +1,3 @@
-// Enhanced Candlestick Chart with Historical Navigation and Cache Management
-// Includes: Live streaming, Historical data, Cache management, Full refresh pipeline
-export { default } from './CandlestickChart_Enhanced';
+// Enhanced Candlestick Chart with Camera Controls and Advanced Navigation
+// Includes: Live streaming, Historical data, Camera controls, Zoom, Pan, Time navigation
+export { default } from './CandlestickChart_WithCamera';
