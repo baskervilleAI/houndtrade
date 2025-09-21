@@ -46,13 +46,11 @@ export const useServiceIntegration = (options: ServiceIntegrationOptions = {}) =
   ) => {
     try {
       setLoading(true);
-      console.log(`📊 Loading historical data: ${symbol} ${timeframe}`);
       
       const candles = await binanceService.getKlines(symbol, timeframe, limit);
       
       if (candles && candles.length > 0) {
         setCandles(symbol, timeframe, candles);
-        console.log(`✅ Loaded ${candles.length} candles for ${symbol} ${timeframe}`);
         return candles;
       } else {
         throw new Error('No data received');
@@ -69,13 +67,10 @@ export const useServiceIntegration = (options: ServiceIntegrationOptions = {}) =
   // Load ticker data
   const loadTickerData = useCallback(async (symbol: string) => {
     try {
-      console.log(`💰 Loading ticker data: ${symbol}`);
-      
       const tickerData = await binanceService.getTicker24hr(symbol);
       const ticker = Array.isArray(tickerData) ? tickerData[0] : tickerData;
       
       updateTicker(symbol, ticker);
-      console.log(`✅ Updated ticker for ${symbol}: $${ticker.price}`);
     } catch (error) {
       console.error(`❌ Failed to load ticker for ${symbol}:`, error);
       
@@ -98,7 +93,6 @@ export const useServiceIntegration = (options: ServiceIntegrationOptions = {}) =
       };
       
       updateTicker(symbol, fallbackTicker);
-      console.log(`🎭 Using fallback ticker for ${symbol}`);
     }
   }, [updateTicker]);
 
@@ -107,8 +101,6 @@ export const useServiceIntegration = (options: ServiceIntegrationOptions = {}) =
     if (!config.enableStreaming) return;
 
     try {
-      console.log(`📡 Starting streaming for ${symbol}:`, timeframes);
-      
       // Initialize streaming service if needed
       await streamingService.initialize([symbol]);
       
@@ -124,7 +116,6 @@ export const useServiceIntegration = (options: ServiceIntegrationOptions = {}) =
       );
 
       setStreamingStatus(symbol, true);
-      console.log(`✅ Streaming started for ${symbol}`);
     } catch (error) {
       console.error(`❌ Failed to start streaming for ${symbol}:`, error);
       setStreamingStatus(symbol, false);
@@ -133,7 +124,6 @@ export const useServiceIntegration = (options: ServiceIntegrationOptions = {}) =
 
   // Stop streaming for a symbol
   const stopStreaming = useCallback((symbol: string) => {
-    console.log(`🛑 Stopping streaming for ${symbol}`);
     setStreamingStatus(symbol, false);
     // Note: streamingService doesn't have a method to unsubscribe from specific symbols
     // This would need to be implemented in the streaming service
@@ -148,8 +138,6 @@ export const useServiceIntegration = (options: ServiceIntegrationOptions = {}) =
       setCurrentSymbol(symbol);
       setCurrentTimeframe(timeframe);
       
-      console.log(`🚀 Initializing trading pair: ${symbol} ${timeframe}`);
-      
       // Load initial data in parallel
       const [historicalData] = await Promise.all([
         loadHistoricalData(symbol, timeframe),
@@ -161,7 +149,6 @@ export const useServiceIntegration = (options: ServiceIntegrationOptions = {}) =
         await startStreaming(symbol, [timeframe]);
       }
       
-      console.log(`✅ Trading pair initialized: ${symbol} ${timeframe}`);
       return historicalData;
     } catch (error) {
       console.error(`❌ Failed to initialize trading pair ${symbol}:`, error);
@@ -197,8 +184,6 @@ export const useServiceIntegration = (options: ServiceIntegrationOptions = {}) =
     symbols: string[] = config.symbols || [],
     timeframe: string = '1m'
   ) => {
-    console.log(`🔄 Bulk initializing ${symbols.length} symbols`);
-    
     const results = await Promise.allSettled(
       symbols.map(symbol => 
         Promise.all([
@@ -221,7 +206,6 @@ export const useServiceIntegration = (options: ServiceIntegrationOptions = {}) =
 
   // Cleanup function
   const cleanup = useCallback(() => {
-    console.log('🧹 Cleaning up service integration');
     if (currentSymbol) {
       stopStreaming(currentSymbol);
     }

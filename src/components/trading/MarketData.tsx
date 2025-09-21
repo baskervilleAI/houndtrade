@@ -24,15 +24,8 @@ export const MarketData: React.FC = () => {
   // Debug: Log ticker data changes only when count changes
   React.useEffect(() => {
     const tickerCount = Object.keys(tickers).length;
-    console.log('🔍 MarketData Component - Ticker count changed:', tickerCount);
-    
     if (tickerCount > 0) {
-      POPULAR_PAIRS.forEach(symbol => {
-        const ticker = tickers[symbol];
-        if (ticker) {
-          console.log(`📊 ${symbol}: $${ticker.price}`);
-        }
-      });
+      console.log(`� Datos de mercado actualizados: ${tickerCount} pares`);
     }
   }, [Object.keys(tickers).length]); // Only re-run when count changes
 

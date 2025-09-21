@@ -272,7 +272,6 @@ export const TradingScreenModern: React.FC = () => {
       if (!mounted) return;
       
       try {
-        console.log(`📊 Initializing trading screen with ${selectedSymbol} ${selectedTimeframe}`);
         await initializeTradingPair(selectedSymbol, selectedTimeframe);
         setIsConnected(true);
         setLastUpdate(new Date());

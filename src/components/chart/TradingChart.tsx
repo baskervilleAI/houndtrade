@@ -221,7 +221,7 @@ export const TradingChart: React.FC<TradingChartProps> = ({
   height = 400,
   onOrderCreate,
   showIndicators = true,
-  showVolume = true,
+  showVolume: propShowVolume = true,
 }) => {
   const screenWidth = Dimensions.get('window').width;
   const [selectedCandle, setSelectedCandle] = useState<CandleData | null>(null);
@@ -229,6 +229,7 @@ export const TradingChart: React.FC<TradingChartProps> = ({
   const [showOrderSheet, setShowOrderSheet] = useState(false);
   const [orderPrice, setOrderPrice] = useState(0);
   const [orderType, setOrderType] = useState<'buy' | 'sell'>('buy');
+  const [showVolume, setShowVolume] = useState(propShowVolume);
   const [indicatorConfig, setIndicatorConfig] = useState<IndicatorConfig>({
     sma: { enabled: true, periods: [10, 20, 50] },
     ema: { enabled: true, periods: [12, 26] },
@@ -248,6 +249,14 @@ export const TradingChart: React.FC<TradingChartProps> = ({
   const ticker = getTicker(symbol);
   const indicators = getIndicators(symbol, timeframe);
   const priceDirection = getPriceDirection(symbol);
+
+  // Debug: Log only chart updates (candle data changes)
+  useEffect(() => {
+    if (candles.length > 0) {
+      const lastCandle = candles[candles.length - 1];
+      console.log(`🕯️ Gráfico actualizado ${symbol} ${timeframe}: ${candles.length} velas, último precio: $${lastCandle.close}`);
+    }
+  }, [candles.length, symbol, timeframe]);
 
   // Chart dimensions calculation
   const dimensions: ChartDimensions = useMemo(() => {
@@ -279,28 +288,52 @@ export const TradingChart: React.FC<TradingChartProps> = ({
     // Show last 50 candles for better performance
     const visible = candles.slice(-50);
     
-    const prices = visible.flatMap(c => [c.high, c.low, c.open, c.close]);
-    const volumes = visible.map(c => c.volume);
+    const prices = visible.flatMap(c => [c.high, c.low, c.open, c.close]).filter(p => p > 0 && isFinite(p));
+    const volumes = visible.map(c => c.volume).filter(v => v > 0 && isFinite(v));
+    
+    if (prices.length === 0) {
+      return {
+        priceRange: { min: 0, max: 100 },
+        volumeRange: { min: 0, max: 1000 },
+        visibleCandles: visible,
+      };
+    }
     
     const minPrice = Math.min(...prices);
     const maxPrice = Math.max(...prices);
     const priceBuffer = (maxPrice - minPrice) * 0.1; // 10% buffer
     
+    const maxVolume = volumes.length > 0 ? Math.max(...volumes) : 1000;
+    
     return {
       priceRange: {
-        min: minPrice - priceBuffer,
+        min: Math.max(0, minPrice - priceBuffer),
         max: maxPrice + priceBuffer,
       },
       volumeRange: {
         min: 0,
-        max: Math.max(...volumes) * 1.1,
+        max: maxVolume * 1.1,
       },
       visibleCandles: visible,
     };
   }, [candles]);
 
   // Current price for price zones
-  const currentPrice = ticker?.price || (candles[candles.length - 1]?.close || 0);
+  const currentPrice = useMemo(() => {
+    const tickerPrice = ticker?.price;
+    const lastCandlePrice = candles[candles.length - 1]?.close;
+    
+    if (tickerPrice && isFinite(tickerPrice) && tickerPrice > 0) {
+      return tickerPrice;
+    }
+    
+    if (lastCandlePrice && isFinite(lastCandlePrice) && lastCandlePrice > 0) {
+      return lastCandlePrice;
+    }
+    
+    // Fallback to middle of price range if no valid price found
+    return (priceRange.min + priceRange.max) / 2;
+  }, [ticker?.price, candles, priceRange]);
 
   // Scale functions
   const xScale = (index: number) => {
@@ -625,6 +658,15 @@ export const TradingChart: React.FC<TradingChartProps> = ({
       {showIndicators && (
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.indicatorControls}>
           <View style={styles.indicatorRow}>
+            {/* Volume Controls */}
+            <View style={styles.indicatorControl}>
+              <Text style={styles.indicatorLabel}>Volumen</Text>
+              <Switch
+                value={showVolume}
+                onValueChange={setShowVolume}
+              />
+            </View>
+
             {/* SMA Controls */}
             <View style={styles.indicatorControl}>
               <Text style={styles.indicatorLabel}>SMA</Text>

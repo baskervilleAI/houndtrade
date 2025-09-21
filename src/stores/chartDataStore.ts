@@ -120,8 +120,6 @@ export const useChartDataStore = create<ChartDataState>()(
       
       // Calculate indicators
       get().calculateIndicators(symbol, timeframe, limitedCandles);
-      
-      console.log(`📊 Cached ${limitedCandles.length} candles for ${symbol} ${timeframe}`);
     },
 
     // Add or update a single candle (for real-time streaming)
