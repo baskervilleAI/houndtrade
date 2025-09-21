@@ -29,9 +29,9 @@ export const useMarketData = (options: UseMarketDataOptions = {}) => {
     const mockData = {
       BTCUSDT: { price: 95550, changePercent24h: -0.04 },
       ETHUSDT: { price: 3469, changePercent24h: -0.14 },
-      ADAUSDT: { price: 0.8984, changePercent24h: 0.19 },
-      BNBUSDT: { price: 1065.3, changePercent24h: 6.24 },
-      SOLUSDT: { price: 240.4, changePercent24h: 0.55 },
+      ADAUSDT: { price: 0.8975, changePercent24h: -0.16 },
+      BNBUSDT: { price: 1064.8, changePercent24h: 6.81 },
+      SOLUSDT: { price: 240.4, changePercent24h: 0.47 },
     }[symbol] || { price: 100, changePercent24h: 0 };
 
     return {
@@ -65,7 +65,7 @@ export const useMarketData = (options: UseMarketDataOptions = {}) => {
       const dataPromises = symbols.map(async (symbol) => {
         try {
           const timeoutPromise = new Promise<never>((_, reject) => 
-            setTimeout(() => reject(new Error('Timeout')), 5000)
+            setTimeout(() => reject(new Error('Timeout')), 10000) // Increased timeout
           );
           
           const dataPromise = binanceService.getTicker24hr(symbol);

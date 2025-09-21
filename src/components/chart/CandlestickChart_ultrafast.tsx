@@ -38,7 +38,7 @@ const formatPrice = (price: number, symbol: string): string => {
 };
 
 export const CandlestickChart: React.FC = () => {
-  const [selectedTimeframe, setSelectedTimeframe] = useState<string>('1h');
+  const [selectedTimeframe, setSelectedTimeframe] = useState<string>('1m');
   const fadeAnim = useRef(new Animated.Value(1)).current;
   
   // Use contexts

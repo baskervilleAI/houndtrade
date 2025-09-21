@@ -69,8 +69,8 @@ class BinanceService {
   private readonly WS_BASE_URL = 'wss://stream.binance.com:9443/ws';
   private websockets: Map<string, WebSocket> = new Map();
   private reconnectAttempts: Map<string, number> = new Map();
-  private readonly MAX_RECONNECT_ATTEMPTS = 5;
-  private readonly RECONNECT_DELAY = 1000; // Reduced for faster reconnect
+  private readonly MAX_RECONNECT_ATTEMPTS = 10; // Increased for better resilience
+  private readonly RECONNECT_DELAY = 2000; // Increased slightly for stability
   private readonly MAX_CONCURRENT_CONNECTIONS = 10; // Increased limit
   private connectionQueue: Array<() => void> = [];
   private isProcessingQueue = false;

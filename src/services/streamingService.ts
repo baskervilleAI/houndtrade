@@ -56,7 +56,7 @@ class StreamingService {
    */
   subscribe(
     symbol: string, 
-    interval: string = '1h', 
+    interval: string = '1m', 
     callbacks: StreamingCallbacks
   ): () => void {
     const key = `${symbol}_${interval}`;
@@ -149,7 +149,7 @@ class StreamingService {
    * Subscribe only to ticker updates
    */
   subscribeToTicker(symbol: string, onUpdate: (ticker: TickerData) => void, onError?: (error: Error) => void): () => void {
-    return this.subscribe(symbol, '1h', { onTickerUpdate: onUpdate, onError });
+    return this.subscribe(symbol, '1m', { onTickerUpdate: onUpdate, onError });
   }
 
   /**
@@ -189,7 +189,7 @@ class StreamingService {
     // Recreate subscriptions
     currentSubscriptions.forEach(([key, sub]) => {
       setTimeout(() => {
-        this.subscribe(sub.symbol, sub.interval || '1h', sub.callbacks);
+        this.subscribe(sub.symbol, sub.interval || '1m', sub.callbacks);
       }, 1000); // Delay to avoid overwhelming the API
     });
   }
