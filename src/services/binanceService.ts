@@ -230,7 +230,23 @@ class BinanceService {
       
       const candles: CandleData[] = data.map(kline => {
         // Ensure timestamp is a valid number - Binance returns timestamps as numbers
-        const timestamp = typeof kline.openTime === 'number' ? kline.openTime : parseInt(String(kline.openTime));
+        let timestamp: number;
+        
+        if (typeof kline.openTime === 'number' && !isNaN(kline.openTime)) {
+          timestamp = kline.openTime;
+        } else if (typeof kline.openTime === 'string' && kline.openTime) {
+          timestamp = parseInt(kline.openTime);
+        } else {
+          // Fallback to current time if invalid
+          console.warn('Invalid timestamp in kline data:', kline.openTime);
+          timestamp = Date.now();
+        }
+        
+        // Additional validation
+        if (isNaN(timestamp) || timestamp <= 0) {
+          console.warn('Invalid timestamp after parsing:', timestamp);
+          timestamp = Date.now();
+        }
         
         return {
           timestamp: new Date(timestamp).toISOString(),
@@ -287,7 +303,24 @@ class BinanceService {
       const data: BinanceKlineData[] = await response.json();
       
       const candles: CandleData[] = data.map(kline => {
-        const timestamp = typeof kline.openTime === 'number' ? kline.openTime : parseInt(String(kline.openTime));
+        // Ensure timestamp is a valid number with proper validation
+        let timestamp: number;
+        
+        if (typeof kline.openTime === 'number' && !isNaN(kline.openTime)) {
+          timestamp = kline.openTime;
+        } else if (typeof kline.openTime === 'string' && kline.openTime) {
+          timestamp = parseInt(kline.openTime);
+        } else {
+          // Fallback to current time if invalid
+          console.warn('Invalid timestamp in getMissingKlines:', kline.openTime);
+          timestamp = Date.now();
+        }
+        
+        // Additional validation
+        if (isNaN(timestamp) || timestamp <= 0) {
+          console.warn('Invalid timestamp after parsing in getMissingKlines:', timestamp);
+          timestamp = Date.now();
+        }
         
         return {
           timestamp: new Date(timestamp).toISOString(),
@@ -345,7 +378,24 @@ class BinanceService {
       const data: BinanceKlineData[] = await response.json();
       
       const candles: CandleData[] = data.map(kline => {
-        const timestamp = typeof kline.openTime === 'number' ? kline.openTime : parseInt(String(kline.openTime));
+        // Ensure timestamp is a valid number with proper validation
+        let timestamp: number;
+        
+        if (typeof kline.openTime === 'number' && !isNaN(kline.openTime)) {
+          timestamp = kline.openTime;
+        } else if (typeof kline.openTime === 'string' && kline.openTime) {
+          timestamp = parseInt(kline.openTime);
+        } else {
+          // Fallback to current time if invalid
+          console.warn('Invalid timestamp in getKlines:', kline.openTime);
+          timestamp = Date.now();
+        }
+        
+        // Additional validation
+        if (isNaN(timestamp) || timestamp <= 0) {
+          console.warn('Invalid timestamp after parsing in getKlines:', timestamp);
+          timestamp = Date.now();
+        }
         
         return {
           timestamp: new Date(timestamp).toISOString(),
@@ -497,8 +547,24 @@ class BinanceService {
           const kline = data.k;
           
           if (kline) {
-            // Ensure timestamp is properly handled
-            const timestamp = typeof kline.t === 'number' ? kline.t : parseInt(String(kline.t));
+            // Ensure timestamp is a valid number with proper validation
+            let timestamp: number;
+            
+            if (typeof kline.t === 'number' && !isNaN(kline.t)) {
+              timestamp = kline.t;
+            } else if (typeof kline.t === 'string' && kline.t) {
+              timestamp = parseInt(kline.t);
+            } else {
+              // Fallback to current time if invalid
+              console.warn('Invalid timestamp in WebSocket kline data:', kline.t);
+              timestamp = Date.now();
+            }
+            
+            // Additional validation
+            if (isNaN(timestamp) || timestamp <= 0) {
+              console.warn('Invalid timestamp after parsing:', timestamp);
+              timestamp = Date.now();
+            }
             
             const candle: CandleData = {
               timestamp: new Date(timestamp).toISOString(),
