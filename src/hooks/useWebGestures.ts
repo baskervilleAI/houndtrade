@@ -6,9 +6,11 @@ interface UseWebGesturesProps {
   onPan?: (deltaX: number, deltaY: number) => void;
   onDoubleClick?: (x: number, y: number) => void;
   onRightClick?: (x: number, y: number) => void;
+  onKeyboard?: (key: string, ctrlKey: boolean, shiftKey: boolean, altKey: boolean) => void;
   enabled?: boolean;
   zoomSensitivity?: number;
   panSensitivity?: number;
+  enableKeyboard?: boolean;
 }
 
 interface GestureState {
@@ -18,6 +20,8 @@ interface GestureState {
   lastX: number;
   lastY: number;
   lastClickTime: number;
+  wheelThrottle: number;
+  animationFrame: number | null;
 }
 
 export const useWebGestures = ({
@@ -25,9 +29,11 @@ export const useWebGestures = ({
   onPan,
   onDoubleClick,
   onRightClick,
+  onKeyboard,
   enabled = true,
   zoomSensitivity = 0.1,
   panSensitivity = 1.0,
+  enableKeyboard = true,
 }: UseWebGesturesProps) => {
   const gestureState = useRef<GestureState>({
     isDragging: false,
@@ -36,16 +42,23 @@ export const useWebGestures = ({
     lastX: 0,
     lastY: 0,
     lastClickTime: 0,
+    wheelThrottle: 0,
+    animationFrame: null,
   });
 
   const isWeb = Platform.select({ web: true, default: false });
 
-  // Mouse wheel handler for zoom and pan
+  // Enhanced mouse wheel handler with throttling and smooth zoom
   const handleWheel = useCallback((event: WheelEvent) => {
-    if (!enabled || !onZoom || !onPan) return;
+    if (!enabled || (!onZoom && !onPan)) return;
     
     event.preventDefault();
     event.stopPropagation();
+
+    // Throttle wheel events for better performance
+    const now = Date.now();
+    if (now - gestureState.current.wheelThrottle < 16) return; // ~60fps
+    gestureState.current.wheelThrottle = now;
 
     const { deltaY, deltaX, ctrlKey, metaKey, shiftKey } = event;
     
@@ -54,20 +67,36 @@ export const useWebGestures = ({
     const centerX = (event.clientX - rect.left) / rect.width;
     const centerY = (event.clientY - rect.top) / rect.height;
 
-    if (ctrlKey || metaKey) {
-      // Zoom with Ctrl/Cmd + scroll
-      const zoomFactor = 1 + (deltaY > 0 ? -zoomSensitivity : zoomSensitivity);
-      onZoom(zoomFactor, centerX, centerY);
-    } else if (shiftKey) {
-      // Horizontal pan with Shift + scroll
-      const panDeltaX = deltaY * panSensitivity * 0.01;
-      onPan(panDeltaX, 0);
-    } else {
-      // Normal pan with scroll
-      const panDeltaX = deltaX * panSensitivity * 0.01;
-      const panDeltaY = deltaY * panSensitivity * 0.01;
-      onPan(panDeltaX, panDeltaY);
+    // Cancel any pending animation frame
+    if (gestureState.current.animationFrame) {
+      cancelAnimationFrame(gestureState.current.animationFrame);
     }
+
+    // Use requestAnimationFrame for smooth updates
+    gestureState.current.animationFrame = requestAnimationFrame(() => {
+      if (ctrlKey || metaKey) {
+        // Enhanced zoom with better scaling
+        if (onZoom) {
+          const normalizedDelta = Math.max(-1, Math.min(1, deltaY / 100));
+          const zoomFactor = Math.pow(1.1, -normalizedDelta * (zoomSensitivity * 10));
+          onZoom(zoomFactor, centerX, centerY);
+        }
+      } else if (shiftKey) {
+        // Horizontal pan with Shift + scroll
+        if (onPan) {
+          const panDeltaX = (deltaY * panSensitivity * 0.005);
+          onPan(panDeltaX, 0);
+        }
+      } else {
+        // Natural scrolling with improved sensitivity
+        if (onPan) {
+          const panDeltaX = (deltaX * panSensitivity * 0.003);
+          const panDeltaY = -(deltaY * panSensitivity * 0.001); // Negative for natural vertical scrolling
+          onPan(panDeltaX, panDeltaY);
+        }
+      }
+      gestureState.current.animationFrame = null;
+    });
   }, [enabled, onZoom, onPan, zoomSensitivity, panSensitivity]);
 
   // Mouse down handler
@@ -90,7 +119,7 @@ export const useWebGestures = ({
     element.style.cursor = 'grabbing';
   }, [enabled]);
 
-  // Mouse move handler
+  // Enhanced mouse move with smoother panning
   const handleMouseMove = useCallback((event: MouseEvent) => {
     if (!enabled || !gestureState.current.isDragging || !onPan) return;
 
@@ -99,9 +128,9 @@ export const useWebGestures = ({
     const deltaX = event.clientX - gestureState.current.lastX;
     const deltaY = event.clientY - gestureState.current.lastY;
 
-    // Apply pan with sensitivity
-    const panDeltaX = -deltaX * panSensitivity * 0.01; // Negative for natural direction
-    const panDeltaY = deltaY * panSensitivity * 0.01;
+    // Apply momentum-based panning with improved sensitivity
+    const panDeltaX = -deltaX * panSensitivity * 0.005; // Reduced for smoother movement
+    const panDeltaY = deltaY * panSensitivity * 0.002; // Reduced vertical sensitivity
 
     onPan(panDeltaX, panDeltaY);
 
@@ -171,6 +200,7 @@ export const useWebGestures = ({
     };
   }, [enabled]);
 
+  // Enhanced touch move with improved sensitivity
   const handleTouchMove = useCallback((event: TouchEvent) => {
     if (!enabled || !gestureState.current.isDragging || event.touches.length !== 1 || !onPan) return;
 
@@ -180,9 +210,9 @@ export const useWebGestures = ({
     const deltaX = touch.clientX - gestureState.current.lastX;
     const deltaY = touch.clientY - gestureState.current.lastY;
 
-    // Apply pan with sensitivity
-    const panDeltaX = -deltaX * panSensitivity * 0.01;
-    const panDeltaY = deltaY * panSensitivity * 0.01;
+    // Apply pan with optimized sensitivity for touch
+    const panDeltaX = -deltaX * panSensitivity * 0.003; // Slightly reduced for touch
+    const panDeltaY = deltaY * panSensitivity * 0.001;
 
     onPan(panDeltaX, panDeltaY);
 
@@ -196,14 +226,39 @@ export const useWebGestures = ({
     gestureState.current.isDragging = false;
   }, [enabled]);
 
-  // Attach/detach event listeners
+  // Keyboard handler for shortcuts
+  const handleKeyDown = useCallback((event: KeyboardEvent) => {
+    if (!enabled || !enableKeyboard || !onKeyboard) return;
+
+    // Don't interfere with form inputs
+    const target = event.target as HTMLElement;
+    if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.contentEditable === 'true') {
+      return;
+    }
+
+    const { key, ctrlKey, shiftKey, altKey } = event;
+    
+    // Handle specific keys
+    const handledKeys = [
+      '+', '=', '-', '_', 'r', 'R', 'End', 'Home', 'ArrowLeft', 'ArrowRight', 
+      'ArrowUp', 'ArrowDown', ' ', 'Escape'
+    ];
+
+    if (handledKeys.includes(key) || (ctrlKey && ['0', '1', '2', '3', '4', '5'].includes(key))) {
+      event.preventDefault();
+      onKeyboard(key, ctrlKey, shiftKey, altKey);
+    }
+  }, [enabled, enableKeyboard, onKeyboard]);
+
+  // Enhanced attach/detach event listeners with keyboard support
   const attachGestures = useCallback((element: HTMLElement) => {
     if (!isWeb || !element) return () => {};
 
-    // Set initial cursor
+    // Set initial cursor and styles
     element.style.cursor = 'grab';
     element.style.userSelect = 'none';
     element.style.touchAction = 'none';
+    element.tabIndex = 0; // Make element focusable for keyboard events
 
     // Mouse events
     element.addEventListener('wheel', handleWheel, { passive: false });
@@ -215,6 +270,14 @@ export const useWebGestures = ({
     element.addEventListener('touchmove', handleTouchMove, { passive: false });
     element.addEventListener('touchend', handleTouchEnd);
 
+    // Keyboard events
+    if (enableKeyboard) {
+      element.addEventListener('keydown', handleKeyDown);
+      // Focus element on click to enable keyboard
+      const focusHandler = () => element.focus();
+      element.addEventListener('mousedown', focusHandler);
+    }
+
     // Global mouse events for proper drag handling
     const globalMouseMove = (e: MouseEvent) => handleMouseMove(e);
     const globalMouseUp = (e: MouseEvent) => handleMouseUp(e);
@@ -222,7 +285,14 @@ export const useWebGestures = ({
     document.addEventListener('mousemove', globalMouseMove);
     document.addEventListener('mouseup', globalMouseUp);
 
+    // Cleanup function
     return () => {
+      // Cancel any pending animation frame
+      if (gestureState.current.animationFrame) {
+        cancelAnimationFrame(gestureState.current.animationFrame);
+        gestureState.current.animationFrame = null;
+      }
+
       // Mouse events
       element.removeEventListener('wheel', handleWheel);
       element.removeEventListener('mousedown', handleMouseDown);
@@ -233,6 +303,11 @@ export const useWebGestures = ({
       element.removeEventListener('touchmove', handleTouchMove);
       element.removeEventListener('touchend', handleTouchEnd);
 
+      // Keyboard events
+      if (enableKeyboard) {
+        element.removeEventListener('keydown', handleKeyDown);
+      }
+
       // Global events
       document.removeEventListener('mousemove', globalMouseMove);
       document.removeEventListener('mouseup', globalMouseUp);
@@ -241,9 +316,11 @@ export const useWebGestures = ({
       element.style.cursor = '';
       element.style.userSelect = '';
       element.style.touchAction = '';
+      element.tabIndex = -1;
     };
   }, [
     isWeb,
+    enableKeyboard,
     handleWheel,
     handleMouseDown,
     handleMouseMove,
@@ -252,6 +329,7 @@ export const useWebGestures = ({
     handleTouchStart,
     handleTouchMove,
     handleTouchEnd,
+    handleKeyDown,
   ]);
 
   // Programmatic gestures
