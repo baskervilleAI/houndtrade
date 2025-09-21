@@ -1,6 +1,11 @@
 import { useEffect, useRef, useCallback, useState } from 'react';
 import { CandleData, binanceService } from '../services/binanceService';
 import { ultraFastStreamingService } from '../services/ultraFastStreamingService';
+import { 
+  updateCandlesArray, 
+  validateCandleData, 
+  fixInvalidCandle 
+} from '../utils/candleTimeUtils';
 
 interface UseLiveChartOptions {
   symbol: string;
@@ -16,6 +21,9 @@ interface LiveChartStats {
   lastUpdate: Date | null;
   errorCount: number;
   isStreaming: boolean;
+  lastAction: 'updated' | 'appended' | 'ignored';
+  lastActionIndex?: number;
+  currentCandle?: CandleData;
 }
 
 export const useLiveChart = (options: UseLiveChartOptions) => {
@@ -36,13 +44,16 @@ export const useLiveChart = (options: UseLiveChartOptions) => {
     lastUpdate: null,
     errorCount: 0,
     isStreaming: false,
+    lastAction: 'ignored',
+    currentCandle: undefined,
   });
 
   // Referencias
   const unsubscribeRef = useRef<(() => void) | null>(null);
   const responseTimesRef = useRef<number[]>([]);
-  const isInitializedRef = useRef<string | null>(null); // Store symbol-interval key
-  const lastLoadTimeRef = useRef<number>(0); // Prevent excessive reloads
+  const isInitializedRef = useRef<string | null>(null);
+  const lastLoadTimeRef = useRef<number>(0);
+  const lastValidCandleRef = useRef<CandleData | null>(null);
 
   // Función para cargar datos históricos iniciales
   const loadInitialData = useCallback(async () => {
@@ -56,7 +67,7 @@ export const useLiveChart = (options: UseLiveChartOptions) => {
     }
     
     // Evitar cargas demasiado frecuentes (debouncing)
-    if (now - lastLoadTimeRef.current < 2000) { // 2 segundos de cooldown
+    if (now - lastLoadTimeRef.current < 2000) {
       console.log(`⏰ Too frequent load attempt for ${symbol} ${interval}, skipping...`);
       return;
     }
@@ -74,7 +85,16 @@ export const useLiveChart = (options: UseLiveChartOptions) => {
       
       console.log(`✅ Loaded ${historicalCandles.length} historical candles for ${symbol}`);
       setCandles(historicalCandles);
-      isInitializedRef.current = cacheKey; // Mark this symbol-interval as loaded
+      
+      // Guardar la última vela válida como referencia
+      if (historicalCandles.length > 0) {
+        const lastCandle = historicalCandles[historicalCandles.length - 1];
+        if (validateCandleData(lastCandle)) {
+          lastValidCandleRef.current = lastCandle;
+        }
+      }
+      
+      isInitializedRef.current = cacheKey;
     } catch (error) {
       console.error(`❌ Error loading initial data for ${symbol}:`, error);
       setStats(prev => ({ ...prev, errorCount: prev.errorCount + 1 }));
@@ -83,12 +103,31 @@ export const useLiveChart = (options: UseLiveChartOptions) => {
     }
   }, [symbol, interval, maxCandles]);
 
-  // Función para actualizar velas (OPTIMIZADA - solo actualizar última vela)
+  // Función para actualizar velas usando la nueva lógica de temporalidad
   const updateCandles = useCallback((newCandle: CandleData) => {
     const updateTime = Date.now();
+    const requestStartTime = responseTimesRef.current[responseTimesRef.current.length - 1] || updateTime;
     
+    // Validar y corregir la nueva vela si es necesario
+    let validatedCandle = newCandle;
+    if (!validateCandleData(newCandle)) {
+      console.warn(`⚠️ Invalid candle data received for ${symbol}, attempting to fix...`);
+      const referencePrice = lastValidCandleRef.current?.close;
+      validatedCandle = fixInvalidCandle(newCandle, referencePrice);
+      
+      if (!validateCandleData(validatedCandle)) {
+        console.error(`❌ Could not fix invalid candle for ${symbol}, ignoring update`);
+        setStats(prev => ({ 
+          ...prev, 
+          errorCount: prev.errorCount + 1,
+          lastAction: 'ignored'
+        }));
+        return;
+      }
+    }
+
     // Calcular tiempo de respuesta
-    const responseTime = updateTime - (responseTimesRef.current[responseTimesRef.current.length - 1] || updateTime);
+    const responseTime = updateTime - requestStartTime;
     responseTimesRef.current.push(responseTime);
     if (responseTimesRef.current.length > 20) {
       responseTimesRef.current.shift();
@@ -97,47 +136,37 @@ export const useLiveChart = (options: UseLiveChartOptions) => {
     const avgResponseTime = responseTimesRef.current.reduce((a, b) => a + b, 0) / responseTimesRef.current.length;
 
     setCandles(prevCandles => {
-      if (prevCandles.length === 0) return prevCandles;
+      // Usar la nueva utilidad de temporalidad para manejar las actualizaciones
+      const result = updateCandlesArray(prevCandles, validatedCandle, interval, maxCandles);
       
-      const newCandles = [...prevCandles];
-      const newTimestamp = new Date(newCandle.timestamp).getTime();
+      // Log detallado de las acciones
+      const actionEmoji = {
+        'updated': '🔄',
+        'appended': '➕',
+        'ignored': '⏭️'
+      };
       
-      // Solo actualizar la última vela (la más reciente)
-      const lastIndex = newCandles.length - 1;
-      const lastCandleTime = new Date(newCandles[lastIndex].timestamp).getTime();
+      console.log(`${actionEmoji[result.action]} ${symbol} ${interval}: ${result.action.toUpperCase()} candle at index ${result.index || 'N/A'} - $${validatedCandle.close.toFixed(4)}`);
       
-      // Si la nueva vela corresponde a la misma ventana de tiempo que la última
-      const timeDiff = Math.abs(newTimestamp - lastCandleTime);
-      const intervalMs = interval === '1m' ? 60000 : interval === '5m' ? 300000 : 60000;
-      
-      if (timeDiff < intervalMs) {
-        // Actualizar la última vela existente (esto es lo más común)
-        newCandles[lastIndex] = newCandle;
-        console.log(`🔄 Updated candle for ${symbol}: $${newCandle.close}`);
-      } else if (newTimestamp > lastCandleTime) {
-        // Solo agregar si es realmente una nueva vela (nueva ventana de tiempo)
-        newCandles.push(newCandle);
-        
-        // Mantener solo las últimas velas
-        if (newCandles.length > maxCandles) {
-          newCandles.shift();
-        }
-        
-        console.log(`➕ New candle for ${symbol}: $${newCandle.close}`);
-      }
-      // Si es una vela antigua, ignorarla completamente
-      
-      return newCandles;
-    });
+      // Actualizar estadísticas
+      setStats(prev => ({
+        ...prev,
+        updateCount: prev.updateCount + 1,
+        averageResponseTime: Math.round(avgResponseTime),
+        lastUpdate: new Date(),
+        lastAction: result.action,
+        lastActionIndex: result.index,
+        currentCandle: validatedCandle,
+      }));
 
-    // Actualizar estadísticas
-    setStats(prev => ({
-      ...prev,
-      updateCount: prev.updateCount + 1,
-      averageResponseTime: Math.round(avgResponseTime),
-      lastUpdate: new Date(),
-    }));
-  }, [symbol, maxCandles, interval]);
+      // Guardar como última vela válida si fue exitosa
+      if (result.action !== 'ignored') {
+        lastValidCandleRef.current = validatedCandle;
+      }
+
+      return result.candles;
+    });
+  }, [symbol, interval, maxCandles]);
 
   // Función para manejar errores
   const handleError = useCallback((error: Error) => {
@@ -213,6 +242,14 @@ export const useLiveChart = (options: UseLiveChartOptions) => {
     }, 1000);
   }, [enableUltraFast, symbol, stopStreaming, startStreaming]);
 
+  // Obtener estadísticas del servicio ultra fast si está habilitado
+  const getUltraFastStats = useCallback(() => {
+    if (enableUltraFast) {
+      return ultraFastStreamingService.getStreamStat(symbol, interval);
+    }
+    return null;
+  }, [enableUltraFast, symbol, interval]);
+
   // Efecto principal: cargar datos iniciales y iniciar streaming
   useEffect(() => {
     const initializeChart = async () => {
@@ -232,18 +269,33 @@ export const useLiveChart = (options: UseLiveChartOptions) => {
     return () => {
       stopStreaming();
       isInitializedRef.current = null;
+      lastValidCandleRef.current = null;
     };
   }, [stopStreaming]);
+
+  // Obtener estadísticas combinadas
+  const getCombinedStats = useCallback(() => {
+    const ultraFastStats = getUltraFastStats();
+    
+    return {
+      ...stats,
+      responseTime: ultraFastStats?.avgResponseTime || stats.averageResponseTime,
+      cycleCount: ultraFastStats?.cycleCount || 0,
+    };
+  }, [stats, getUltraFastStats]);
 
   return {
     // Datos
     candles,
     isLoading,
-    stats,
+    stats: getCombinedStats(),
     
     // Estados
     hasData: candles.length > 0,
     isStreaming: stats.isStreaming,
+    currentCandle: stats.currentCandle,
+    lastAction: stats.lastAction,
+    lastActionIndex: stats.lastActionIndex,
     
     // Acciones
     startStreaming,
@@ -255,6 +307,12 @@ export const useLiveChart = (options: UseLiveChartOptions) => {
     isUltraFastMode: enableUltraFast,
     symbol,
     interval,
+    
+    // Métricas de rendimiento
+    responseTime: getCombinedStats().responseTime,
+    updateCount: stats.updateCount,
+    errorCount: stats.errorCount,
+    lastUpdate: stats.lastUpdate,
   };
 };
 

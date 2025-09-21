@@ -12,6 +12,7 @@ import { useMarket } from '../../context/AppContext';
 import { useLiveChart } from '../../hooks/useLiveChart';
 import { formatPrice, formatPercentage } from '../../utils/formatters';
 import { CandleData } from '../../services/binanceService';
+import { StreamingDebugPanel } from '../debug/StreamingDebugPanel';
 
 const { width: screenWidth } = Dimensions.get('window');
 const CHART_HEIGHT = 350;
@@ -47,6 +48,13 @@ export const LiveCandlestickChart: React.FC = () => {
     restartStreaming,
     toggleStreamingMode,
     isUltraFastMode,
+    currentCandle,
+    lastAction,
+    lastActionIndex,
+    responseTime,
+    updateCount,
+    errorCount,
+    lastUpdate,
   } = useLiveChart({
     symbol: selectedPair,
     interval: selectedTimeframe,
@@ -345,6 +353,22 @@ export const LiveCandlestickChart: React.FC = () => {
           </Text>
         </View>
       )}
+
+      {/* Debug Panel */}
+      <StreamingDebugPanel
+        currentCandle={currentCandle}
+        symbol={selectedPair}
+        interval={selectedTimeframe}
+        updateCount={updateCount}
+        lastUpdateTime={lastUpdate || undefined}
+        responseTime={responseTime}
+        errorCount={errorCount}
+        isStreaming={isStreaming}
+        streamingMode={isUltraFastMode ? 'ultra-fast' : 'websocket'}
+        candleCount={validCandles.length}
+        action={lastAction}
+        actionIndex={lastActionIndex}
+      />
     </View>
   );
 };

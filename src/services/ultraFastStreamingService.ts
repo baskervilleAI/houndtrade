@@ -1,4 +1,5 @@
 import { binanceService, CandleData } from './binanceService';
+import { validateCandleData, fixInvalidCandle } from '../utils/candleTimeUtils';
 
 interface UltraFastStreamConfig {
   symbol: string;
@@ -16,17 +17,22 @@ interface ActiveStream {
   errorCount: number;
   timeoutId?: NodeJS.Timeout;
   requestInProgress: boolean;
+  lastValidCandle?: CandleData; // Para validación de datos
+  lastResponseTime: number;
+  avgResponseTime: number;
+  responseTimes: number[];
 }
 
 /**
  * Servicio de streaming ultra-rápido que mantiene un ciclo continuo:
- * API Request → Actualización → 10ms espera → Nueva Request
+ * API Request → Validación → Actualización → 10ms espera → Nueva Request
  */
 class UltraFastStreamingService {
   private streams: Map<string, ActiveStream> = new Map();
   private readonly MAX_ERRORS = 10;
   private readonly DEFAULT_CYCLE_DELAY = 10; // 10ms como solicitas
   private readonly BACKOFF_MULTIPLIER = 1.5;
+  private readonly MAX_RESPONSE_TIMES = 50; // Para calcular promedio
   
   /**
    * Inicia un stream ultra-rápido para un símbolo
@@ -46,14 +52,17 @@ class UltraFastStreamingService {
       cycleCount: 0,
       lastUpdate: new Date(),
       errorCount: 0,
-      requestInProgress: false
+      requestInProgress: false,
+      lastResponseTime: 0,
+      avgResponseTime: 0,
+      responseTimes: []
     };
     
     this.streams.set(streamKey, stream);
     
     // Solo log si es debug mode (silencioso por defecto)
     if (process.env.NODE_ENV === 'development') {
-      console.log(`🚀 Stream iniciado: ${streamKey}`);
+      console.log(`🚀 Ultra-fast stream iniciado: ${streamKey} (${config.cycleDelay}ms)`);
     }
     
     // Iniciar el ciclo inmediatamente
@@ -64,7 +73,7 @@ class UltraFastStreamingService {
   }
   
   /**
-   * Ejecuta un ciclo del stream: Request → Update → Wait → Repeat
+   * Ejecuta un ciclo del stream: Request → Validate → Update → Wait → Repeat
    */
   private async runStreamCycle(streamKey: string): Promise<void> {
     const stream = this.streams.get(streamKey);
@@ -88,24 +97,50 @@ class UltraFastStreamingService {
       const latestCandles = await this.getLatestCandle(stream.config.symbol, stream.config.interval);
       const requestTime = performance.now() - startTime;
       
+      // Actualizar métricas de rendimiento
+      stream.lastResponseTime = requestTime;
+      stream.responseTimes.push(requestTime);
+      if (stream.responseTimes.length > this.MAX_RESPONSE_TIMES) {
+        stream.responseTimes.shift();
+      }
+      stream.avgResponseTime = stream.responseTimes.reduce((a, b) => a + b, 0) / stream.responseTimes.length;
+      
       if (latestCandles && latestCandles.length > 0) {
-        const latestCandle = latestCandles[latestCandles.length - 1];
+        let latestCandle = latestCandles[latestCandles.length - 1];
         
-        // 2. ACTUALIZACIÓN - Notificar inmediatamente
+        // 2. VALIDACIÓN - Verificar que los datos sean válidos
+        if (!validateCandleData(latestCandle)) {
+          console.warn(`⚠️ Invalid candle data for ${streamKey}, attempting to fix...`);
+          
+          // Intentar corregir usando la última vela válida como referencia
+          const referencePrice = stream.lastValidCandle?.close;
+          latestCandle = fixInvalidCandle(latestCandle, referencePrice);
+          
+          // Si aún no es válida después de la corrección, usar datos sintéticos
+          if (!validateCandleData(latestCandle)) {
+            console.error(`❌ Could not fix invalid candle for ${streamKey}`);
+            throw new Error(`Invalid candle data for ${streamKey}`);
+          }
+        }
+        
+        // Guardar como última vela válida
+        stream.lastValidCandle = latestCandle;
+        
+        // 3. ACTUALIZACIÓN - Notificar inmediatamente
         stream.config.onUpdate(latestCandle);
         stream.lastUpdate = new Date();
         stream.errorCount = 0; // Reset error count en success
         
         // Log de performance solo en debug y cada 1000 ciclos
         if (process.env.NODE_ENV === 'development' && stream.cycleCount % 1000 === 0) {
-          console.log(`⚡ ${streamKey}: ${stream.cycleCount} ciclos, ${requestTime.toFixed(1)}ms`);
+          console.log(`⚡ ${streamKey}: ${stream.cycleCount} ciclos, ${requestTime.toFixed(1)}ms avg: ${stream.avgResponseTime.toFixed(1)}ms`);
         }
       }
       
     } catch (error) {
       stream.errorCount++;
       
-      // Solo log errores críticos
+      // Solo log errores críticos o cada 5 errores
       if (stream.errorCount === 1 || stream.errorCount % 5 === 0) {
         console.error(`❌ Error ${stream.errorCount} en ${streamKey}:`, error);
       }
@@ -123,7 +158,7 @@ class UltraFastStreamingService {
       stream.requestInProgress = false;
     }
     
-    // 3. ESPERA - Programar siguiente ciclo
+    // 4. ESPERA - Programar siguiente ciclo
     this.scheduleNextCycle(streamKey);
   }
   
@@ -199,7 +234,7 @@ class UltraFastStreamingService {
       
       // Solo log en desarrollo
       if (process.env.NODE_ENV === 'development') {
-        console.log(`🛑 Stream detenido: ${streamKey} (${stream.cycleCount} ciclos)`);
+        console.log(`🛑 Stream detenido: ${streamKey} (${stream.cycleCount} ciclos, avg: ${stream.avgResponseTime.toFixed(1)}ms)`);
       }
     }
   }
@@ -213,6 +248,9 @@ class UltraFastStreamingService {
     errorCount: number;
     isRunning: boolean;
     cycleDelay: number;
+    lastResponseTime: number;
+    avgResponseTime: number;
+    lastValidCandle?: CandleData;
   }} {
     const stats: any = {};
     
@@ -222,11 +260,44 @@ class UltraFastStreamingService {
         lastUpdate: stream.lastUpdate,
         errorCount: stream.errorCount,
         isRunning: stream.isRunning,
-        cycleDelay: stream.config.cycleDelay || this.DEFAULT_CYCLE_DELAY
+        cycleDelay: stream.config.cycleDelay || this.DEFAULT_CYCLE_DELAY,
+        lastResponseTime: stream.lastResponseTime,
+        avgResponseTime: stream.avgResponseTime,
+        lastValidCandle: stream.lastValidCandle
       };
     });
     
     return stats;
+  }
+  
+  /**
+   * Obtiene estadísticas de un stream específico
+   */
+  getStreamStat(symbol: string, interval: string): {
+    cycleCount: number;
+    lastUpdate: Date;
+    errorCount: number;
+    isRunning: boolean;
+    cycleDelay: number;
+    lastResponseTime: number;
+    avgResponseTime: number;
+    lastValidCandle?: CandleData;
+  } | null {
+    const streamKey = `${symbol}_${interval}`;
+    const stream = this.streams.get(streamKey);
+    
+    if (!stream) return null;
+    
+    return {
+      cycleCount: stream.cycleCount,
+      lastUpdate: stream.lastUpdate,
+      errorCount: stream.errorCount,
+      isRunning: stream.isRunning,
+      cycleDelay: stream.config.cycleDelay || this.DEFAULT_CYCLE_DELAY,
+      lastResponseTime: stream.lastResponseTime,
+      avgResponseTime: stream.avgResponseTime,
+      lastValidCandle: stream.lastValidCandle
+    };
   }
   
   /**
