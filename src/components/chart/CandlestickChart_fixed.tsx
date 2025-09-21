@@ -6,15 +6,18 @@ import {
   Dimensions,
   ScrollView,
   TouchableOpacity,
-  Animated,
+  ActivityIndicator,
 } from 'react-native';
 import { useMarket } from '../../context/AppContext';
+import { formatPrice, formatPercentage } from '../../utils/formatters';
 
 const { width: screenWidth } = Dimensions.get('window');
 const CHART_HEIGHT = 300;
 const CANDLE_WIDTH = 8;
 const CANDLE_SPACING = 2;
 const HISTORICAL_CANDLES_COUNT = 50;
+const LIVE_UPDATE_INTERVAL = 2000; // Update every 2 seconds
+const CHART_PADDING = 20; // Padding for better visualization
 
 const TIMEFRAMES: { label: string; value: string }[] = [
   { label: '1m', value: '1m' },
@@ -32,23 +35,38 @@ interface CandleData {
   low: number;
   close: number;
   volume: number;
+  isLive?: boolean;
 }
 
-// Utility function to format prices consistently
-const formatPrice = (price: number, symbol: string): string => {
-  if (symbol === 'BTCUSDT' || symbol === 'ETHUSDT') {
-    return price.toFixed(0);
-  } else if (symbol === 'BNBUSDT' || symbol === 'SOLUSDT') {
-    return price.toFixed(1);
-  } else {
-    return price.toFixed(4);
-  }
+// Validation function for candle data
+const isValidCandle = (candle: any): candle is CandleData => {
+  return (
+    candle &&
+    typeof candle.open === 'number' &&
+    typeof candle.high === 'number' &&
+    typeof candle.low === 'number' &&
+    typeof candle.close === 'number' &&
+    typeof candle.volume === 'number' &&
+    !isNaN(candle.open) &&
+    !isNaN(candle.high) &&
+    !isNaN(candle.low) &&
+    !isNaN(candle.close) &&
+    !isNaN(candle.volume) &&
+    candle.high >= candle.low &&
+    candle.high >= Math.max(candle.open, candle.close) &&
+    candle.low <= Math.min(candle.open, candle.close) &&
+    candle.open > 0 &&
+    candle.high > 0 &&
+    candle.low > 0 &&
+    candle.close > 0
+  );
 };
 
 export const CandlestickChart: React.FC = () => {
   const [selectedTimeframe, setSelectedTimeframe] = useState<string>('1h');
   const [candleData, setCandleData] = useState<Record<string, CandleData[]>>({});
   const [isLoading, setIsLoading] = useState(false);
+  const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
   const fadeAnim = useRef(new Animated.Value(1)).current;
   const isDataInitialized = useRef<Record<string, boolean>>({});
   const updateInterval = useRef<NodeJS.Timeout | null>(null);

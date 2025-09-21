@@ -9,7 +9,7 @@ import {
 } from 'react-native';
 import { useAuth, useTrading, useMarket } from '../../context/AppContext';
 import { useMarketData } from '../../hooks/useMarketData';
-import { CandlestickChart } from '../../components/chart/CandlestickChart_ultrafast';
+import { CandlestickChart } from '../../components/chart/CandlestickChart_improved';
 import { OrderForm } from '../../components/trading/OrderForm';
 import { PositionsList } from '../../components/trading/PositionsList';
 import { MarketData } from '../../components/trading/MarketData';
