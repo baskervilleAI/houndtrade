@@ -55,16 +55,16 @@ export const useMarketData = (options: UseMarketDataOptions = {}) => {
   const initializeMarketData = useCallback(async () => {
     if (isInitialized.current) return;
     
-    console.log('🚀 INITIALIZING MARKET DATA - Starting...');
+    // Solo log inicial
+    if (process.env.NODE_ENV === 'development') {
+      console.log('🚀 Iniciando datos de mercado...');
+    }
     
     try {
       // Initialize streaming service first
       await streamingService.initialize(symbols);
-      console.log('✅ Streaming service initialized');
       
       // Load initial data with timeout and fallback
-      console.log('📊 Loading initial ticker data for symbols:', symbols);
-      
       const dataPromises = symbols.map(async (symbol) => {
         try {
           const timeoutPromise = new Promise<never>((_, reject) => 
@@ -75,37 +75,36 @@ export const useMarketData = (options: UseMarketDataOptions = {}) => {
           const result = await Promise.race([dataPromise, timeoutPromise]);
           const ticker = Array.isArray(result) ? result[0] : result;
           
-          console.log(`✅ Real data loaded for ${symbol}:`, {
-            price: ticker.price,
-            change: ticker.changePercent24h
-          });
+          // Log solo éxito significativo
+          if (process.env.NODE_ENV === 'development') {
+            console.log(`✅ ${symbol}: $${ticker.price}`);
+          }
           
           // Immediately update the ticker in context
           updateTicker(ticker as TickerData);
           return ticker;
         } catch (error) {
-          console.warn(`⚠️ Failed to load ${symbol}, using mock data:`, error);
+          // Log solo errores importantes
+          if (process.env.NODE_ENV === 'development') {
+            console.warn(`⚠️ ${symbol}: usando datos mock`);
+          }
           const mockTicker = generateMockTicker(symbol);
-          console.log(`🎭 Using mock data for ${symbol}:`, {
-            price: mockTicker.price,
-            change: mockTicker.changePercent24h
-          });
           updateTicker(mockTicker);
           return mockTicker;
         }
       });
 
       await Promise.all(dataPromises);
-      console.log('✅ ALL TICKER DATA LOADED AND UPDATED');
+      if (process.env.NODE_ENV === 'development') {
+        console.log('✅ Datos de mercado inicializados');
+      }
       isInitialized.current = true;
     } catch (error) {
-      console.error('❌ Market data initialization failed:', error);
+      console.error('❌ Error inicializando datos:', error);
       
       // Fallback to all mock data
-      console.log('🎭 Using fallback mock data for all symbols');
       symbols.forEach(symbol => {
         const mockTicker = generateMockTicker(symbol);
-        console.log(`📊 Mock ticker for ${symbol}:`, mockTicker.price);
         updateTicker(mockTicker);
       });
       
@@ -115,12 +114,6 @@ export const useMarketData = (options: UseMarketDataOptions = {}) => {
 
   // Setup real-time streaming
   const setupStreaming = useCallback(() => {
-    if (isInitialized.current) {
-      console.log('📡 Setting up streaming for initialized data');
-    } else {
-      console.log('⚠️ Setting up streaming before data is loaded');
-    }
-    
     // Clean up existing subscriptions
     Object.values(unsubscribeFunctions.current).forEach(unsubscribe => unsubscribe());
     unsubscribeFunctions.current = {};
@@ -130,11 +123,14 @@ export const useMarketData = (options: UseMarketDataOptions = {}) => {
         const unsubscribe = streamingService.subscribeToTicker(
           symbol,
           (ticker) => {
-            console.log(`📈 Live update ${symbol}: $${ticker.price}`);
+            // Solo log ocasional para verificar funcionamiento
+            if (Math.random() < 0.001) { // 0.1% de las actualizaciones
+              console.log(`📈 Live update ${symbol}: $${ticker.price}`);
+            }
             updateTicker(ticker);
           },
           (error) => {
-            console.error(`❌ Streaming error for ${symbol}:`, error);
+            console.error(`❌ Streaming error para ${symbol}:`, error);
           }
         );
 
@@ -143,18 +139,17 @@ export const useMarketData = (options: UseMarketDataOptions = {}) => {
         console.error(`❌ Failed to setup streaming for ${symbol}:`, error);
       }
     });
-    
-    console.log('✅ Streaming setup complete');
   }, [symbols, updateTicker]);
 
   // Start market data service
   const start = useCallback(async () => {
     if (isInitialized.current) {
-      console.log('🟡 MARKET DATA: Already initialized, skipping start');
       return;
     }
     
-    console.log('💰 STARTING MARKET DATA SERVICE - ONCE');
+    if (process.env.NODE_ENV === 'development') {
+      console.log('💰 Iniciando servicio de datos...');
+    }
     
     await initializeMarketData();
     setupStreaming();
@@ -165,12 +160,13 @@ export const useMarketData = (options: UseMarketDataOptions = {}) => {
     }
     
     refreshInterval_ref.current = setInterval(() => {
-      console.log('🔄 Periodic refresh (background)');
-      // Don't reset initialization flag to prevent constant restarts
+      // Silent refresh
       initializeMarketData();
     }, refreshInterval * 4); // Quadruple the interval for stability
 
-    console.log('✅ MARKET DATA SERVICE STARTED AND INITIALIZED');
+    if (process.env.NODE_ENV === 'development') {
+      console.log('✅ Servicio de datos iniciado');
+    }
   }, [initializeMarketData, setupStreaming, refreshInterval]);
 
   // Stop market data service
@@ -199,15 +195,11 @@ export const useMarketData = (options: UseMarketDataOptions = {}) => {
   // Auto-start if enabled - with singleton pattern to prevent multiple instances
   useEffect(() => {
     if (autoStart && !isInitialized.current) {
-      console.log('🔥 AUTO-START: Starting market data for first time');
       start();
       
       return () => {
-        console.log('🛑 CLEANUP: Stopping market data on unmount');
         stop();
       };
-    } else if (autoStart && isInitialized.current) {
-      console.log('🟡 AUTO-START: Already initialized, skipping');
     }
   }, [autoStart]); // Remove start and stop from dependencies to prevent loops
 

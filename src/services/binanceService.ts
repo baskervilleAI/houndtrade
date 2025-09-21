@@ -98,7 +98,9 @@ class BinanceService {
   ): () => void {
     const pollKey = `${symbol}_poll`;
     
-    console.log(`🔄 Starting polling fallback for ${symbol}`);
+    if (process.env.NODE_ENV === 'development') {
+      console.log(`🔄 Iniciando polling para ${symbol}`);
+    }
     
     // Store callback
     if (!this.pollingCallbacks.has(pollKey)) {
@@ -167,7 +169,10 @@ class BinanceService {
       clearInterval(intervalId);
       this.pollingIntervals.delete(pollKey);
       this.pollingCallbacks.delete(pollKey);
-      console.log(`🛑 Stopped polling for ${pollKey}`);
+      // Solo log del polling stop en debug
+      if (process.env.NODE_ENV === 'development') {
+        console.log(`🛑 Polling detenido: ${pollKey}`);
+      }
     }
   }
 
@@ -229,7 +234,8 @@ class BinanceService {
         this.logCounters.set(symbol, count);
         
         if (count % 1000 === 0) {
-          console.log(`🚀 Ultra-fast kline ${count} for ${symbol}`);
+          // Eliminar log ultra-verbose
+          // console.log(`🚀 Ultra-fast kline ${count} for ${symbol}`);
         }
       }
 
@@ -306,7 +312,10 @@ class BinanceService {
         limit: limit.toString(),
       });
 
-      console.log(`⚡ Fetching missing klines for ${symbol} since ${lastTimestamp}`);
+      // Solo log en debug
+      if (process.env.NODE_ENV === 'development') {
+        console.log(`⚡ Buscando klines faltantes para ${symbol}`);
+      }
 
       const response = await fetch(`${this.BASE_URL}/klines?${params}`);
       
@@ -348,7 +357,10 @@ class BinanceService {
         };
       });
 
-      console.log(`✅ Loaded ${candles.length} missing candles for ${symbol}`);
+      // Solo log en debug
+      if (process.env.NODE_ENV === 'development') {
+        console.log(`✅ ${candles.length} velas cargadas para ${symbol}`);
+      }
       return candles;
     } catch (error) {
       console.error(`❌ Error fetching missing klines for ${symbol}:`, error);
@@ -762,14 +774,16 @@ class BinanceService {
           }
         };
 
-        // Set timeout for connection
+        // Set timeout for connection - reduced timeout
         setTimeout(() => {
           if (!wsConnected && ws.readyState !== WebSocket.OPEN) {
-            console.log(`⏰ WebSocket connection timeout for ${symbol}, switching to polling`);
+            if (process.env.NODE_ENV === 'development') {
+              console.log(`⏰ WS timeout ${symbol}, usando polling`);
+            }
             ws.close();
             switchToPolling();
           }
-        }, 5000);
+        }, 3000); // Reduced from 5000 to 3000 for faster fallback
 
       } catch (error) {
         console.error(`❌ Error creating WebSocket for ${streamName}:`, error);
@@ -780,7 +794,9 @@ class BinanceService {
     const switchToPolling = () => {
       if (pollingUnsubscribe) return; // Already polling
       
-      console.log(`🔄 Switching to polling fallback for ${symbol}`);
+      if (process.env.NODE_ENV === 'development') {
+        console.log(`🔄 Fallback a polling: ${symbol}`);
+      }
       isUsingWebSocket = false;
       pollingUnsubscribe = this.startPollingFallback(symbol, onUpdate, onError);
     };

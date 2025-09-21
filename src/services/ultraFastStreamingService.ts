@@ -51,7 +51,10 @@ class UltraFastStreamingService {
     
     this.streams.set(streamKey, stream);
     
-    console.log(`🚀 Iniciando stream ultra-rápido para ${streamKey} (ciclo: ${stream.config.cycleDelay}ms)`);
+    // Solo log si es debug mode (silencioso por defecto)
+    if (process.env.NODE_ENV === 'development') {
+      console.log(`🚀 Stream iniciado: ${streamKey}`);
+    }
     
     // Iniciar el ciclo inmediatamente
     this.runStreamCycle(streamKey);
@@ -93,15 +96,19 @@ class UltraFastStreamingService {
         stream.lastUpdate = new Date();
         stream.errorCount = 0; // Reset error count en success
         
-        // Log de performance cada 100 ciclos para no saturar
-        if (stream.cycleCount % 100 === 0) {
-          console.log(`⚡ Ciclo ${stream.cycleCount} - ${streamKey}: ${requestTime.toFixed(1)}ms request time`);
+        // Log de performance solo en debug y cada 1000 ciclos
+        if (process.env.NODE_ENV === 'development' && stream.cycleCount % 1000 === 0) {
+          console.log(`⚡ ${streamKey}: ${stream.cycleCount} ciclos, ${requestTime.toFixed(1)}ms`);
         }
       }
       
     } catch (error) {
       stream.errorCount++;
-      console.error(`❌ Error en ciclo ${stream.cycleCount} - ${streamKey}:`, error);
+      
+      // Solo log errores críticos
+      if (stream.errorCount === 1 || stream.errorCount % 5 === 0) {
+        console.error(`❌ Error ${stream.errorCount} en ${streamKey}:`, error);
+      }
       
       // Manejar errores con backoff
       if (stream.errorCount >= this.MAX_ERRORS) {
@@ -189,7 +196,11 @@ class UltraFastStreamingService {
       }
       
       this.streams.delete(streamKey);
-      console.log(`🛑 Stream ultra-rápido detenido: ${streamKey} (${stream.cycleCount} ciclos)`);
+      
+      // Solo log en desarrollo
+      if (process.env.NODE_ENV === 'development') {
+        console.log(`🛑 Stream detenido: ${streamKey} (${stream.cycleCount} ciclos)`);
+      }
     }
   }
   

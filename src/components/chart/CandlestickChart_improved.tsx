@@ -87,7 +87,10 @@ export const CandlestickChart: React.FC = () => {
     const candles: CandleData[] = [];
     let currentPrice = basePrice * 0.98; // Start slightly lower for trend
     
-    console.log(`🎯 Generating ${HISTORICAL_CANDLES_COUNT} candles for ${pair}, starting from $${currentPrice.toFixed(2)}`);
+    // Solo log en debug
+    if (process.env.NODE_ENV === 'development') {
+      console.log(`🎯 Generando ${HISTORICAL_CANDLES_COUNT} velas para ${pair}`);
+    }
     
     for (let i = 0; i < HISTORICAL_CANDLES_COUNT - 1; i++) {
       // More realistic price movement
@@ -123,7 +126,9 @@ export const CandlestickChart: React.FC = () => {
         candles.push(candle);
         currentPrice = close;
       } else {
-        console.warn('Generated invalid candle, skipping:', candle);
+        if (process.env.NODE_ENV === 'development') {
+          console.warn('Vela inválida generada:', candle);
+        }
       }
     }
     
@@ -143,7 +148,10 @@ export const CandlestickChart: React.FC = () => {
       candles.push(liveCandle);
     }
     
-    console.log(`✅ Generated ${candles.length} valid candles for ${pair}`);
+    // Solo log en debug
+    if (process.env.NODE_ENV === 'development') {
+      console.log(`✅ ${candles.length} velas válidas para ${pair}`);
+    }
     return candles;
   }, [tickers]);
 
@@ -159,7 +167,10 @@ export const CandlestickChart: React.FC = () => {
     // Filter valid candles and extract all prices
     const validCandles = candles.filter(isValidCandle);
     if (validCandles.length === 0) {
-      console.warn('No valid candles found for price range calculation');
+      // Solo warn en casos críticos
+      if (process.env.NODE_ENV === 'development') {
+        console.warn('Sin velas válidas para calcular rango');
+      }
       return { minPrice: 0, maxPrice: 100, priceRange: 100 };
     }
     
@@ -173,7 +184,8 @@ export const CandlestickChart: React.FC = () => {
     const paddedMaxPrice = maxPrice + padding;
     const priceRange = paddedMaxPrice - paddedMinPrice;
     
-    console.log(`📊 Price range for ${key}: $${paddedMinPrice.toFixed(2)} - $${paddedMaxPrice.toFixed(2)}`);
+    // Eliminar log de rango de precios (demasiado verbose)
+    // console.log(`📊 Price range for ${key}: $${paddedMinPrice.toFixed(2)} - $${paddedMaxPrice.toFixed(2)}`);
     
     return { 
       minPrice: paddedMinPrice, 
@@ -240,7 +252,10 @@ export const CandlestickChart: React.FC = () => {
     const key = `${selectedPair}_${selectedTimeframe}`;
     
     if (!isDataInitialized.current[key]) {
-      console.log(`🚀 Initializing data for ${key}`);
+      // Solo log en debug
+      if (process.env.NODE_ENV === 'development') {
+        console.log(`🚀 Inicializando datos para ${key}`);
+      }
       setIsLoading(true);
       
       setTimeout(() => {
@@ -252,7 +267,10 @@ export const CandlestickChart: React.FC = () => {
         
         isDataInitialized.current[key] = true;
         setIsLoading(false);
-        console.log(`✅ Data initialized for ${key}`);
+        // Solo log en debug
+        if (process.env.NODE_ENV === 'development') {
+          console.log(`✅ Datos inicializados para ${key}`);
+        }
       }, 300);
     }
   }, [selectedPair, selectedTimeframe, generateHistoricalCandles]);
@@ -275,7 +293,10 @@ export const CandlestickChart: React.FC = () => {
   // Optimized candle rendering with better positioning
   const renderCandle = useCallback((candle: CandleData, index: number) => {
     if (!isValidCandle(candle)) {
-      console.warn('Skipping invalid candle in render:', candle);
+      // Solo warn en debug
+      if (process.env.NODE_ENV === 'development') {
+        console.warn('Vela inválida en render:', candle);
+      }
       return null;
     }
     
@@ -346,7 +367,8 @@ export const CandlestickChart: React.FC = () => {
   const handleTimeframeChange = useCallback((timeframe: string) => {
     if (timeframe === selectedTimeframe || isLoading) return;
     
-    console.log(`📊 Changing timeframe from ${selectedTimeframe} to ${timeframe}`);
+    // Eliminar log de cambio de timeframe (demasiado verbose)
+    // console.log(`📊 Changing timeframe from ${selectedTimeframe} to ${timeframe}`);
     setSelectedTimeframe(timeframe);
   }, [selectedTimeframe, isLoading]);
 
