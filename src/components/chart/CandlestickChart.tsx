@@ -1,3 +1,3 @@
-// Ultra-Fast Candlestick Chart - Actualización cada 10ms con ciclo continuo
-// API Request → Actualización → 10ms espera → Nueva Request
-export { default } from './CandlestickChart_ultrafast';
+// Enhanced Candlestick Chart with Historical Navigation and Cache Management
+// Includes: Live streaming, Historical data, Cache management, Full refresh pipeline
+export { default } from './CandlestickChart_Enhanced';

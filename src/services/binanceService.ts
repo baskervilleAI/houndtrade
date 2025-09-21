@@ -87,6 +87,9 @@ class BinanceService {
   // Fast update optimization
   private lastCandleUpdates: Map<string, CandleData> = new Map();
   private updateCallbacks: Map<string, Set<(candle: CandleData) => void>> = new Map();
+  
+  // Fallback for invalid data to prevent NaN values
+  private lastValidPrice: number = 50000; // Default to reasonable BTC price
 
   /**
    * Start polling as fallback when WebSocket fails
@@ -253,21 +256,55 @@ class BinanceService {
 
       const data: BinanceKlineData[] = await response.json();
       
-      // Ultra-optimized candle mapping
+      // Ultra-optimized candle mapping with NaN validation
       const candles: CandleData[] = data.map(kline => {
         const timestamp = typeof kline.openTime === 'number' && !isNaN(kline.openTime) 
           ? kline.openTime 
           : Date.now();
         
+        // Safe parseFloat with fallback values to prevent NaN
+        const parseFloatSafe = (value: any, fallback: number = 0): number => {
+          if (value === null || value === undefined || value === '') return fallback;
+          const parsed = parseFloat(value);
+          return isNaN(parsed) ? fallback : parsed;
+        };
+
+        const open = parseFloatSafe(kline.open);
+        const high = parseFloatSafe(kline.high);
+        const low = parseFloatSafe(kline.low);
+        const close = parseFloatSafe(kline.close);
+        const volume = parseFloatSafe(kline.volume);
+        const quoteVolume = parseFloatSafe(kline.quoteAssetVolume);
+        
+        // Validate that we have valid OHLC data
+        if (open === 0 && high === 0 && low === 0 && close === 0) {
+          console.warn(`⚠️ Invalid candle data for ${symbol}:`, kline);
+          // Use previous valid values or current market price as fallback
+          const fallbackPrice = this.lastValidPrice || 50000; // Default BTC price
+          return {
+            timestamp: new Date(timestamp).toISOString(),
+            open: fallbackPrice,
+            high: fallbackPrice,
+            low: fallbackPrice,
+            close: fallbackPrice,
+            volume,
+            trades: kline.numberOfTrades || 0,
+            quoteVolume,
+          };
+        }
+
+        // Store last valid price for fallback
+        this.lastValidPrice = close;
+        
         return {
           timestamp: new Date(timestamp).toISOString(),
-          open: parseFloat(kline.open),
-          high: parseFloat(kline.high),
-          low: parseFloat(kline.low),
-          close: parseFloat(kline.close),
-          volume: parseFloat(kline.volume),
-          trades: kline.numberOfTrades,
-          quoteVolume: parseFloat(kline.quoteAssetVolume),
+          open,
+          high,
+          low,
+          close,
+          volume,
+          trades: kline.numberOfTrades || 0,
+          quoteVolume,
         };
       });
 
