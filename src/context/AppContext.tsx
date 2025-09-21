@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useReducer, ReactNode } from 'react';
+import { ChartProvider } from './ChartContext';
 
 // Types
 interface User {
@@ -172,7 +173,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   return (
     <AppContext.Provider value={{ state, dispatch }}>
-      {children}
+      <ChartProvider>
+        {children}
+      </ChartProvider>
     </AppContext.Provider>
   );
 };

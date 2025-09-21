@@ -70,10 +70,18 @@ class BinanceService {
   private websockets: Map<string, WebSocket> = new Map();
   private reconnectAttempts: Map<string, number> = new Map();
   private readonly MAX_RECONNECT_ATTEMPTS = 5;
-  private readonly RECONNECT_DELAY = 3000;
-  private readonly MAX_CONCURRENT_CONNECTIONS = 5;
+  private readonly RECONNECT_DELAY = 1000; // Reduced for faster reconnect
+  private readonly MAX_CONCURRENT_CONNECTIONS = 10; // Increased limit
   private connectionQueue: Array<() => void> = [];
   private isProcessingQueue = false;
+  
+  // Cache for storing candle data to avoid unnecessary requests
+  private candleCache: Map<string, { data: CandleData[], lastUpdate: number }> = new Map();
+  private readonly CACHE_DURATION = 30000; // 30 seconds cache
+  
+  // Fast update optimization
+  private lastCandleUpdates: Map<string, CandleData> = new Map();
+  private updateCallbacks: Map<string, Set<(candle: CandleData) => void>> = new Map();
 
   /**
    * Process queued WebSocket connections
@@ -95,6 +103,112 @@ class BinanceService {
       } else {
         this.isProcessingQueue = false;
       }
+    }
+  }
+
+  /**
+   * Get only the latest candles efficiently - minimizes data transfer
+   */
+  async getLatestKlines(
+    symbol: string,
+    interval: string,
+    limit: number = 20 // Reduced default for faster response
+  ): Promise<CandleData[]> {
+    const cacheKey = `${symbol}_${interval}`;
+    const cached = this.candleCache.get(cacheKey);
+    
+    // Check cache first
+    if (cached && (Date.now() - cached.lastUpdate) < this.CACHE_DURATION) {
+      console.log(`📚 Using cached data for ${symbol} ${interval}`);
+      return cached.data.slice(-limit);
+    }
+
+    try {
+      const params = new URLSearchParams({
+        symbol: symbol.toUpperCase(),
+        interval,
+        limit: Math.min(limit, 100).toString(), // Cap at 100 for speed
+      });
+
+      console.log(`⚡ Fast fetching latest ${limit} klines for ${symbol} ${interval}`);
+
+      const response = await fetch(`${this.BASE_URL}/klines?${params}`);
+      
+      if (!response.ok) {
+        throw new Error(`Binance API error: ${response.status} ${response.statusText}`);
+      }
+
+      const data: BinanceKlineData[] = await response.json();
+      
+      const candles: CandleData[] = data.map(kline => ({
+        timestamp: new Date(kline.openTime).toISOString(),
+        open: parseFloat(kline.open),
+        high: parseFloat(kline.high),
+        low: parseFloat(kline.low),
+        close: parseFloat(kline.close),
+        volume: parseFloat(kline.volume),
+        trades: kline.numberOfTrades,
+        quoteVolume: parseFloat(kline.quoteAssetVolume),
+      }));
+
+      // Update cache
+      this.candleCache.set(cacheKey, {
+        data: candles,
+        lastUpdate: Date.now()
+      });
+
+      console.log(`✅ Fast loaded ${candles.length} candles for ${symbol}`);
+      return candles;
+    } catch (error) {
+      console.error(`❌ Error fetching latest klines for ${symbol}:`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get missing candles efficiently when switching timeframes
+   */
+  async getMissingKlines(
+    symbol: string,
+    interval: string,
+    lastTimestamp: string,
+    limit: number = 50
+  ): Promise<CandleData[]> {
+    try {
+      const startTime = new Date(lastTimestamp).getTime() + 1;
+      const params = new URLSearchParams({
+        symbol: symbol.toUpperCase(),
+        interval,
+        startTime: startTime.toString(),
+        limit: limit.toString(),
+      });
+
+      console.log(`⚡ Fetching missing klines for ${symbol} since ${lastTimestamp}`);
+
+      const response = await fetch(`${this.BASE_URL}/klines?${params}`);
+      
+      if (!response.ok) {
+        throw new Error(`Binance API error: ${response.status} ${response.statusText}`);
+      }
+
+      const data: BinanceKlineData[] = await response.json();
+      
+      const candles: CandleData[] = data.map(kline => ({
+        timestamp: new Date(kline.openTime).toISOString(),
+        open: parseFloat(kline.open),
+        high: parseFloat(kline.high),
+        low: parseFloat(kline.low),
+        close: parseFloat(kline.close),
+        volume: parseFloat(kline.volume),
+        trades: kline.numberOfTrades,
+        quoteVolume: parseFloat(kline.quoteAssetVolume),
+      }));
+
+      console.log(`✅ Loaded ${candles.length} missing candles for ${symbol}`);
+      return candles;
+    } catch (error) {
+      console.error(`❌ Error fetching missing klines for ${symbol}:`, error);
+      return [];
     }
   }
 
@@ -234,7 +348,7 @@ class BinanceService {
   }
 
   /**
-   * Subscribe to real-time kline updates via WebSocket
+   * Subscribe to real-time kline updates via WebSocket - OPTIMIZED for speed
    */
   subscribeToKlines(
     symbol: string,
@@ -245,14 +359,26 @@ class BinanceService {
     const streamName = `${symbol.toLowerCase()}@kline_${interval}`;
     const wsUrl = `${this.WS_BASE_URL}/${streamName}`;
 
-    console.log(`🔌 Subscribing to Binance WebSocket:`, { symbol, interval, wsUrl });
+    console.log(`� FAST WebSocket subscription:`, { symbol, interval });
+
+    // Store callback for fast updates
+    if (!this.updateCallbacks.has(streamName)) {
+      this.updateCallbacks.set(streamName, new Set());
+    }
+    this.updateCallbacks.get(streamName)!.add(onUpdate);
 
     const connectWebSocket = () => {
+      // Reuse existing connection if available
+      if (this.websockets.has(streamName)) {
+        console.log(`♻️ Reusing existing WebSocket for ${streamName}`);
+        return;
+      }
+
       const ws = new WebSocket(wsUrl);
       this.websockets.set(streamName, ws);
 
       ws.onopen = () => {
-        console.log(`✅ WebSocket connected for ${streamName}`);
+        console.log(`⚡ FAST WebSocket connected for ${streamName}`);
         this.reconnectAttempts.set(streamName, 0);
       };
 
@@ -273,13 +399,29 @@ class BinanceService {
               quoteVolume: parseFloat(kline.q),
             };
 
-            console.log(`📊 Real-time candle update for ${symbol}:`, {
-              price: candle.close,
-              volume: candle.volume,
-              isClosed: kline.x, // true when kline is closed
-            });
+            // Cache last candle for instant access
+            this.lastCandleUpdates.set(streamName, candle);
 
-            onUpdate(candle);
+            // Fast broadcast to all callbacks
+            const callbacks = this.updateCallbacks.get(streamName);
+            if (callbacks) {
+              callbacks.forEach(callback => {
+                try {
+                  callback(candle);
+                } catch (error) {
+                  console.error(`❌ Error in callback for ${streamName}:`, error);
+                }
+              });
+            }
+
+            // Log only for new closed candles to reduce noise
+            if (kline.x) {
+              console.log(`📊 NEW CANDLE ${symbol}:`, {
+                price: candle.close,
+                volume: candle.volume,
+                time: new Date(candle.timestamp).toLocaleTimeString()
+              });
+            }
           }
         } catch (error) {
           console.error(`❌ Error parsing WebSocket message for ${streamName}:`, error);
@@ -293,18 +435,16 @@ class BinanceService {
       };
 
       ws.onclose = (event) => {
-        console.log(`🔌 WebSocket closed for ${streamName}:`, { code: event.code, reason: event.reason });
+        console.log(`🔌 WebSocket closed for ${streamName}:`, { code: event.code });
+        this.websockets.delete(streamName);
         
-        // Attempt to reconnect if not manually closed
-        if (event.code !== 1000) {
+        // Fast reconnect for critical streams
+        if (event.code !== 1000 && this.updateCallbacks.has(streamName) && this.updateCallbacks.get(streamName)!.size > 0) {
           const attempts = this.reconnectAttempts.get(streamName) || 0;
           if (attempts < this.MAX_RECONNECT_ATTEMPTS) {
             this.reconnectAttempts.set(streamName, attempts + 1);
-            console.log(`🔄 Attempting to reconnect ${streamName} (${attempts + 1}/${this.MAX_RECONNECT_ATTEMPTS})`);
-            setTimeout(connectWebSocket, this.RECONNECT_DELAY);
-          } else {
-            console.error(`❌ Max reconnection attempts reached for ${streamName}`);
-            onError?.(new Error(`Failed to reconnect to ${streamName} after ${this.MAX_RECONNECT_ATTEMPTS} attempts`));
+            console.log(`🔄 Fast reconnect ${streamName} (${attempts + 1}/${this.MAX_RECONNECT_ATTEMPTS})`);
+            setTimeout(connectWebSocket, this.RECONNECT_DELAY); // Fast reconnect
           }
         }
       };
@@ -312,14 +452,23 @@ class BinanceService {
 
     connectWebSocket();
 
-    // Return unsubscribe function
+    // Return optimized unsubscribe function
     return () => {
-      const ws = this.websockets.get(streamName);
-      if (ws) {
-        console.log(`🔌 Unsubscribing from ${streamName}`);
-        ws.close(1000, 'Manual disconnect');
-        this.websockets.delete(streamName);
-        this.reconnectAttempts.delete(streamName);
+      const callbacks = this.updateCallbacks.get(streamName);
+      if (callbacks) {
+        callbacks.delete(onUpdate);
+        
+        // Only close WebSocket if no more callbacks
+        if (callbacks.size === 0) {
+          const ws = this.websockets.get(streamName);
+          if (ws) {
+            console.log(`🔌 Closing unused WebSocket for ${streamName}`);
+            ws.close(1000, 'No more subscribers');
+            this.websockets.delete(streamName);
+            this.updateCallbacks.delete(streamName);
+            this.lastCandleUpdates.delete(streamName);
+          }
+        }
       }
     };
   }
@@ -439,6 +588,38 @@ class BinanceService {
   }
 
   /**
+   * Get the last cached candle update instantly
+   */
+  getLastCandleUpdate(symbol: string, interval: string): CandleData | null {
+    const streamName = `${symbol.toLowerCase()}@kline_${interval}`;
+    return this.lastCandleUpdates.get(streamName) || null;
+  }
+
+  /**
+   * Clear cache for a specific symbol/interval
+   */
+  clearCache(symbol?: string, interval?: string): void {
+    if (symbol && interval) {
+      const cacheKey = `${symbol}_${interval}`;
+      this.candleCache.delete(cacheKey);
+      console.log(`🗑️ Cleared cache for ${symbol} ${interval}`);
+    } else {
+      this.candleCache.clear();
+      console.log(`🗑️ Cleared all cache`);
+    }
+  }
+
+  /**
+   * Get cache statistics
+   */
+  getCacheStats(): { size: number; keys: string[] } {
+    return {
+      size: this.candleCache.size,
+      keys: Array.from(this.candleCache.keys())
+    };
+  }
+
+  /**
    * Convert timeframe to Binance interval format
    */
   getIntervalFromTimeframe(timeframe: string): string {
@@ -462,7 +643,7 @@ class BinanceService {
   }
 
   /**
-   * Cleanup all WebSocket connections
+   * Cleanup all WebSocket connections and cache
    */
   disconnect(): void {
     console.log(`🔌 Disconnecting all WebSocket connections (${this.websockets.size})`);
@@ -473,6 +654,11 @@ class BinanceService {
     
     this.websockets.clear();
     this.reconnectAttempts.clear();
+    this.updateCallbacks.clear();
+    this.lastCandleUpdates.clear();
+    this.candleCache.clear();
+    
+    console.log(`✅ All connections and cache cleared`);
   }
 }
 

@@ -8,7 +8,7 @@ import {
   Dimensions,
 } from 'react-native';
 import { useAuth, useTrading, useMarket } from '../../context/AppContext';
-import { CandlestickChart } from '../../components/chart/CandlestickChart';
+import { CandlestickChart } from '../../components/chart/CandlestickChart_ultrafast';
 import { OrderForm } from '../../components/trading/OrderForm';
 import { PositionsList } from '../../components/trading/PositionsList';
 import { MarketData } from '../../components/trading/MarketData';
