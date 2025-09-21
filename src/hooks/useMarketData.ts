@@ -115,6 +115,12 @@ export const useMarketData = (options: UseMarketDataOptions = {}) => {
 
   // Setup real-time streaming
   const setupStreaming = useCallback(() => {
+    if (isInitialized.current) {
+      console.log('📡 Setting up streaming for initialized data');
+    } else {
+      console.log('⚠️ Setting up streaming before data is loaded');
+    }
+    
     // Clean up existing subscriptions
     Object.values(unsubscribeFunctions.current).forEach(unsubscribe => unsubscribe());
     unsubscribeFunctions.current = {};
@@ -124,6 +130,7 @@ export const useMarketData = (options: UseMarketDataOptions = {}) => {
         const unsubscribe = streamingService.subscribeToTicker(
           symbol,
           (ticker) => {
+            console.log(`📈 Live update ${symbol}: $${ticker.price}`);
             updateTicker(ticker);
           },
           (error) => {
@@ -136,11 +143,18 @@ export const useMarketData = (options: UseMarketDataOptions = {}) => {
         console.error(`❌ Failed to setup streaming for ${symbol}:`, error);
       }
     });
+    
+    console.log('✅ Streaming setup complete');
   }, [symbols, updateTicker]);
 
   // Start market data service
   const start = useCallback(async () => {
-    if (isInitialized.current) return;
+    if (isInitialized.current) {
+      console.log('🟡 MARKET DATA: Already initialized, skipping start');
+      return;
+    }
+    
+    console.log('💰 STARTING MARKET DATA SERVICE - ONCE');
     
     await initializeMarketData();
     setupStreaming();
@@ -151,10 +165,12 @@ export const useMarketData = (options: UseMarketDataOptions = {}) => {
     }
     
     refreshInterval_ref.current = setInterval(() => {
+      console.log('🔄 Periodic refresh (background)');
       // Don't reset initialization flag to prevent constant restarts
-      // isInitialized.current = false;
       initializeMarketData();
-    }, refreshInterval * 2); // Double the interval for stability
+    }, refreshInterval * 4); // Quadruple the interval for stability
+
+    console.log('✅ MARKET DATA SERVICE STARTED AND INITIALIZED');
   }, [initializeMarketData, setupStreaming, refreshInterval]);
 
   // Stop market data service
@@ -183,13 +199,17 @@ export const useMarketData = (options: UseMarketDataOptions = {}) => {
   // Auto-start if enabled - with singleton pattern to prevent multiple instances
   useEffect(() => {
     if (autoStart && !isInitialized.current) {
+      console.log('🔥 AUTO-START: Starting market data for first time');
       start();
       
       return () => {
+        console.log('🛑 CLEANUP: Stopping market data on unmount');
         stop();
       };
+    } else if (autoStart && isInitialized.current) {
+      console.log('🟡 AUTO-START: Already initialized, skipping');
     }
-  }, [autoStart, start, stop]);
+  }, [autoStart]); // Remove start and stop from dependencies to prevent loops
 
   // Get service status
   const getStatus = useCallback(() => {

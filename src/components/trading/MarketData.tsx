@@ -21,14 +21,20 @@ export const MarketData: React.FC = () => {
     setSelectedPair(symbol);
   }, [selectedPair, setSelectedPair]);
 
-  // Debug: Log ticker data
+  // Debug: Log ticker data changes only when count changes
   React.useEffect(() => {
-    console.log('🔍 MarketData Component - Current tickers:', Object.keys(tickers).length);
-    POPULAR_PAIRS.forEach(symbol => {
-      const ticker = tickers[symbol];
-      console.log(`📊 ${symbol}:`, ticker ? `$${ticker.price}` : 'NO DATA');
-    });
-  }, [tickers]);
+    const tickerCount = Object.keys(tickers).length;
+    console.log('🔍 MarketData Component - Ticker count changed:', tickerCount);
+    
+    if (tickerCount > 0) {
+      POPULAR_PAIRS.forEach(symbol => {
+        const ticker = tickers[symbol];
+        if (ticker) {
+          console.log(`📊 ${symbol}: $${ticker.price}`);
+        }
+      });
+    }
+  }, [Object.keys(tickers).length]); // Only re-run when count changes
 
   return (
     <View style={styles.container}>

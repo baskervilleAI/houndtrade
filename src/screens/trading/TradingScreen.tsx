@@ -29,8 +29,14 @@ export const TradingScreen: React.FC = () => {
     refreshInterval: 30000,
   });
 
-  console.log('🏠 TradingScreen - Market data initialized:', isInitialized);
-  console.log('🏠 TradingScreen - Available tickers:', Object.keys(tickers));
+  // Only log once when status changes
+  useEffect(() => {
+    console.log('🏠 TradingScreen - Market data status changed:', {
+      initialized: isInitialized,
+      tickerCount: Object.keys(tickers).length,
+      symbols: Object.keys(tickers)
+    });
+  }, [isInitialized, Object.keys(tickers).length]); // Only depend on length, not the object itself
 
   const currentPrice = tickers[selectedPair]?.price || 0;
   const priceChange = tickers[selectedPair]?.changePercent24h || 0;
