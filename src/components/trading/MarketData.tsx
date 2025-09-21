@@ -79,6 +79,11 @@ export const MarketData: React.FC = () => {
                   <Text style={styles.updateText}>●</Text>
                 </View>
               )}
+              {!ticker && (
+                <View style={styles.updateIndicator}>
+                  <Text style={[styles.updateText, { color: '#888' }]}>○</Text>
+                </View>
+              )}
             </TouchableOpacity>
           );
         })}

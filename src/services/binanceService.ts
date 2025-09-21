@@ -69,11 +69,16 @@ class BinanceService {
   private readonly WS_BASE_URL = 'wss://stream.binance.com:9443/ws';
   private websockets: Map<string, WebSocket> = new Map();
   private reconnectAttempts: Map<string, number> = new Map();
-  private readonly MAX_RECONNECT_ATTEMPTS = 10; // Increased for better resilience
-  private readonly RECONNECT_DELAY = 2000; // Increased slightly for stability
-  private readonly MAX_CONCURRENT_CONNECTIONS = 10; // Increased limit
+  private readonly MAX_RECONNECT_ATTEMPTS = 3; // Reduced to fail faster
+  private readonly RECONNECT_DELAY = 3000;
+  private readonly MAX_CONCURRENT_CONNECTIONS = 5; // Reduced to avoid overload
   private connectionQueue: Array<() => void> = [];
   private isProcessingQueue = false;
+  
+  // Polling fallback system
+  private pollingIntervals: Map<string, NodeJS.Timeout> = new Map();
+  private pollingCallbacks: Map<string, Set<(data: any) => void>> = new Map();
+  private readonly POLLING_INTERVAL = 2000; // 2 seconds polling
   
   // Cache for storing candle data to avoid unnecessary requests
   private candleCache: Map<string, { data: CandleData[], lastUpdate: number }> = new Map();
@@ -82,6 +87,91 @@ class BinanceService {
   // Fast update optimization
   private lastCandleUpdates: Map<string, CandleData> = new Map();
   private updateCallbacks: Map<string, Set<(candle: CandleData) => void>> = new Map();
+
+  /**
+   * Start polling as fallback when WebSocket fails
+   */
+  private startPollingFallback(
+    symbol: string,
+    onUpdate: (ticker: TickerData) => void,
+    onError?: (error: Error) => void
+  ): () => void {
+    const pollKey = `${symbol}_poll`;
+    
+    console.log(`🔄 Starting polling fallback for ${symbol}`);
+    
+    // Store callback
+    if (!this.pollingCallbacks.has(pollKey)) {
+      this.pollingCallbacks.set(pollKey, new Set());
+    }
+    this.pollingCallbacks.get(pollKey)!.add(onUpdate);
+    
+    // Don't start new polling if already exists
+    if (this.pollingIntervals.has(pollKey)) {
+      return () => {
+        const callbacks = this.pollingCallbacks.get(pollKey);
+        if (callbacks) {
+          callbacks.delete(onUpdate);
+          if (callbacks.size === 0) {
+            this.stopPolling(pollKey);
+          }
+        }
+      };
+    }
+    
+    const pollFunction = async () => {
+      try {
+        const ticker = await this.getTicker24hr(symbol);
+        const tickerData = Array.isArray(ticker) ? ticker[0] : ticker;
+        
+        // Broadcast to all callbacks
+        const callbacks = this.pollingCallbacks.get(pollKey);
+        if (callbacks) {
+          callbacks.forEach(callback => {
+            try {
+              callback(tickerData as TickerData);
+            } catch (error) {
+              console.error(`❌ Error in polling callback for ${symbol}:`, error);
+            }
+          });
+        }
+      } catch (error) {
+        console.error(`❌ Polling error for ${symbol}:`, error);
+        onError?.(error as Error);
+      }
+    };
+    
+    // Start immediate poll and then interval
+    pollFunction();
+    const intervalId = setInterval(pollFunction, this.POLLING_INTERVAL);
+    this.pollingIntervals.set(pollKey, intervalId);
+    
+    console.log(`✅ Polling active for ${symbol} (${this.POLLING_INTERVAL}ms)`);
+    
+    // Return cleanup function
+    return () => {
+      const callbacks = this.pollingCallbacks.get(pollKey);
+      if (callbacks) {
+        callbacks.delete(onUpdate);
+        if (callbacks.size === 0) {
+          this.stopPolling(pollKey);
+        }
+      }
+    };
+  }
+
+  /**
+   * Stop polling for a symbol
+   */
+  private stopPolling(pollKey: string): void {
+    const intervalId = this.pollingIntervals.get(pollKey);
+    if (intervalId) {
+      clearInterval(intervalId);
+      this.pollingIntervals.delete(pollKey);
+      this.pollingCallbacks.delete(pollKey);
+      console.log(`🛑 Stopped polling for ${pollKey}`);
+    }
+  }
 
   /**
    * Process queued WebSocket connections
@@ -293,21 +383,39 @@ class BinanceService {
 
       const data: BinanceTicker24hr | BinanceTicker24hr[] = await response.json();
       
-      const transformTicker = (ticker: BinanceTicker24hr): TickerData => ({
-        symbol: ticker.symbol,
-        price: parseFloat(ticker.lastPrice),
-        change24h: parseFloat(ticker.priceChange),
-        changePercent24h: parseFloat(ticker.priceChangePercent),
-        high24h: parseFloat(ticker.highPrice),
-        low24h: parseFloat(ticker.lowPrice),
-        volume24h: parseFloat(ticker.volume),
-        quoteVolume24h: parseFloat(ticker.quoteVolume),
-        trades24h: ticker.count,
-        timestamp: new Date().toISOString(),
-        openPrice: parseFloat(ticker.openPrice),
-        prevClosePrice: parseFloat(ticker.prevClosePrice),
-        weightedAvgPrice: parseFloat(ticker.weightedAvgPrice),
-      });
+      const transformTicker = (ticker: BinanceTicker24hr): TickerData => {
+        const price = parseFloat(ticker.lastPrice);
+        
+        // Validate price ranges to catch API errors (updated for current market conditions)
+        const priceValidation = {
+          BTCUSDT: { min: 50000, max: 250000 },  // BTC is currently around $115k
+          ETHUSDT: { min: 1000, max: 15000 },
+          BNBUSDT: { min: 100, max: 2000 },
+          SOLUSDT: { min: 10, max: 1000 },
+          ADAUSDT: { min: 0.1, max: 5 },
+        };
+        
+        const validation = priceValidation[ticker.symbol as keyof typeof priceValidation];
+        if (validation && (price < validation.min || price > validation.max)) {
+          console.warn(`⚠️ Suspicious price for ${ticker.symbol}: ${price} (expected ${validation.min}-${validation.max})`);
+        }
+        
+        return {
+          symbol: ticker.symbol,
+          price: price,
+          change24h: parseFloat(ticker.priceChange),
+          changePercent24h: parseFloat(ticker.priceChangePercent),
+          high24h: parseFloat(ticker.highPrice),
+          low24h: parseFloat(ticker.lowPrice),
+          volume24h: parseFloat(ticker.volume),
+          quoteVolume24h: parseFloat(ticker.quoteVolume),
+          trades24h: ticker.count,
+          timestamp: new Date().toISOString(),
+          openPrice: parseFloat(ticker.openPrice),
+          prevClosePrice: parseFloat(ticker.prevClosePrice),
+          weightedAvgPrice: parseFloat(ticker.weightedAvgPrice),
+        };
+      };
 
       if (Array.isArray(data)) {
         const tickers = data.map(transformTicker);
@@ -474,7 +582,7 @@ class BinanceService {
   }
 
   /**
-   * Subscribe to real-time ticker updates via WebSocket
+   * Subscribe to real-time ticker updates via WebSocket with polling fallback
    */
   subscribeToTicker(
     symbol: string,
@@ -482,11 +590,16 @@ class BinanceService {
     onError?: (error: Error) => void
   ): () => void {
     const streamName = `${symbol.toLowerCase()}@ticker`;
-    const wsUrl = `${this.WS_BASE_URL}/${streamName}`;
+    
+    console.log(`🔌 Subscribing to ticker with hybrid approach:`, { symbol });
 
-    console.log(`🔌 Subscribing to ticker WebSocket:`, { symbol, wsUrl });
+    let wsUnsubscribe: (() => void) | null = null;
+    let pollingUnsubscribe: (() => void) | null = null;
+    let isUsingWebSocket = true;
 
-    const connectWebSocket = () => {
+    const tryWebSocket = () => {
+      const wsUrl = `${this.WS_BASE_URL}/${streamName}`;
+      
       // Check if we already have this connection
       if (this.websockets.has(streamName)) {
         console.log(`⚠️ WebSocket already exists for ${streamName}, skipping`);
@@ -495,87 +608,108 @@ class BinanceService {
 
       // Check connection limit
       if (this.websockets.size >= this.MAX_CONCURRENT_CONNECTIONS) {
-        console.log(`⚠️ Max connections reached (${this.MAX_CONCURRENT_CONNECTIONS}), queueing ${streamName}`);
-        this.connectionQueue.push(connectWebSocket);
-        this.processConnectionQueue();
+        console.log(`⚠️ Max connections reached, using polling for ${symbol}`);
+        switchToPolling();
         return;
       }
 
       try {
         const ws = new WebSocket(wsUrl);
         this.websockets.set(streamName, ws);
+        let wsConnected = false;
 
         ws.onopen = () => {
           console.log(`✅ Ticker WebSocket connected for ${streamName}`);
           this.reconnectAttempts.set(streamName, 0);
-          this.processConnectionQueue(); // Process any queued connections
+          wsConnected = true;
+          isUsingWebSocket = true;
+          
+          // Stop polling if it was running
+          if (pollingUnsubscribe) {
+            pollingUnsubscribe();
+            pollingUnsubscribe = null;
+          }
         };
 
-      ws.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data);
-          
-          const ticker: TickerData = {
-            symbol: data.s,
-            price: parseFloat(data.c),
-            change24h: parseFloat(data.P),
-            changePercent24h: parseFloat(data.P),
-            high24h: parseFloat(data.h),
-            low24h: parseFloat(data.l),
-            volume24h: parseFloat(data.v),
-            quoteVolume24h: parseFloat(data.q),
-            trades24h: data.n,
-            timestamp: new Date().toISOString(),
-            openPrice: parseFloat(data.o),
-            prevClosePrice: parseFloat(data.x),
-            weightedAvgPrice: parseFloat(data.w),
-          };
+        ws.onmessage = (event) => {
+          try {
+            const data = JSON.parse(event.data);
+            
+            const ticker: TickerData = {
+              symbol: data.s,
+              price: parseFloat(data.c),
+              change24h: parseFloat(data.P),
+              changePercent24h: parseFloat(data.P),
+              high24h: parseFloat(data.h),
+              low24h: parseFloat(data.l),
+              volume24h: parseFloat(data.v),
+              quoteVolume24h: parseFloat(data.q),
+              trades24h: data.n,
+              timestamp: new Date().toISOString(),
+              openPrice: parseFloat(data.o),
+              prevClosePrice: parseFloat(data.x),
+              weightedAvgPrice: parseFloat(data.w),
+            };
 
-          console.log(`📈 Real-time ticker update for ${symbol}:`, {
-            price: ticker.price,
-            change: ticker.changePercent24h,
-          });
+            onUpdate(ticker);
+          } catch (error) {
+            console.error(`❌ Error parsing ticker WebSocket message for ${streamName}:`, error);
+          }
+        };
 
-          onUpdate(ticker);
-        } catch (error) {
-          console.error(`❌ Error parsing ticker WebSocket message for ${streamName}:`, error);
-          onError?.(error as Error);
-        }
-      };
-
-      ws.onerror = (error) => {
-        console.error(`❌ Ticker WebSocket error for ${streamName}:`, error);
-        onError?.(new Error(`Ticker WebSocket error for ${streamName}`));
-      };
+        ws.onerror = (error) => {
+          console.error(`❌ Ticker WebSocket error for ${streamName}:`, error);
+          if (!wsConnected) {
+            // Connection failed, switch to polling immediately
+            switchToPolling();
+          }
+        };
 
         ws.onclose = (event) => {
-          console.log(`🔌 Ticker WebSocket closed for ${streamName}:`, { code: event.code, reason: event.reason });
+          console.log(`🔌 Ticker WebSocket closed for ${streamName}:`, { code: event.code });
           this.websockets.delete(streamName);
           
-          // Attempt to reconnect if not manually closed
-          if (event.code !== 1000) {
+          // Switch to polling if WebSocket failed
+          if (event.code !== 1000 && !pollingUnsubscribe) {
             const attempts = this.reconnectAttempts.get(streamName) || 0;
             if (attempts < this.MAX_RECONNECT_ATTEMPTS) {
               this.reconnectAttempts.set(streamName, attempts + 1);
               console.log(`🔄 Attempting to reconnect ticker ${streamName} (${attempts + 1}/${this.MAX_RECONNECT_ATTEMPTS})`);
-              setTimeout(connectWebSocket, this.RECONNECT_DELAY * (attempts + 1)); // Exponential backoff
+              setTimeout(tryWebSocket, this.RECONNECT_DELAY * (attempts + 1));
             } else {
-              console.error(`❌ Max reconnection attempts reached for ticker ${streamName}`);
-              onError?.(new Error(`Failed to reconnect to ticker ${streamName} after ${this.MAX_RECONNECT_ATTEMPTS} attempts`));
+              console.log(`❌ Max reconnection attempts reached, switching to polling for ${symbol}`);
+              switchToPolling();
             }
           }
-          
-          this.processConnectionQueue(); // Process any queued connections
         };
+
+        // Set timeout for connection
+        setTimeout(() => {
+          if (!wsConnected && ws.readyState !== WebSocket.OPEN) {
+            console.log(`⏰ WebSocket connection timeout for ${symbol}, switching to polling`);
+            ws.close();
+            switchToPolling();
+          }
+        }, 5000);
+
       } catch (error) {
         console.error(`❌ Error creating WebSocket for ${streamName}:`, error);
-        onError?.(error as Error);
+        switchToPolling();
       }
     };
 
-    connectWebSocket();
+    const switchToPolling = () => {
+      if (pollingUnsubscribe) return; // Already polling
+      
+      console.log(`🔄 Switching to polling fallback for ${symbol}`);
+      isUsingWebSocket = false;
+      pollingUnsubscribe = this.startPollingFallback(symbol, onUpdate, onError);
+    };
 
-    // Return unsubscribe function
+    // Try WebSocket first
+    tryWebSocket();
+
+    // Return combined unsubscribe function
     return () => {
       const ws = this.websockets.get(streamName);
       if (ws) {
@@ -583,6 +717,11 @@ class BinanceService {
         ws.close(1000, 'Manual disconnect');
         this.websockets.delete(streamName);
         this.reconnectAttempts.delete(streamName);
+      }
+      
+      if (pollingUnsubscribe) {
+        pollingUnsubscribe();
+        pollingUnsubscribe = null;
       }
     };
   }
@@ -643,20 +782,29 @@ class BinanceService {
   }
 
   /**
-   * Cleanup all WebSocket connections and cache
+   * Cleanup all WebSocket connections, polling, and cache
    */
   disconnect(): void {
-    console.log(`🔌 Disconnecting all WebSocket connections (${this.websockets.size})`);
+    console.log(`🔌 Disconnecting all connections (${this.websockets.size} WebSockets, ${this.pollingIntervals.size} polling)`);
     
+    // Close all WebSockets
     this.websockets.forEach((ws, streamName) => {
       ws.close(1000, 'Service shutdown');
     });
     
+    // Stop all polling
+    this.pollingIntervals.forEach((intervalId, pollKey) => {
+      clearInterval(intervalId);
+    });
+    
+    // Clear all data structures
     this.websockets.clear();
     this.reconnectAttempts.clear();
     this.updateCallbacks.clear();
     this.lastCandleUpdates.clear();
     this.candleCache.clear();
+    this.pollingIntervals.clear();
+    this.pollingCallbacks.clear();
     
     console.log(`✅ All connections and cache cleared`);
   }

@@ -27,12 +27,17 @@ export const useMarketData = (options: UseMarketDataOptions = {}) => {
   // Generate mock ticker for fallback
   const generateMockTicker = useCallback((symbol: string): TickerData => {
     const mockData = {
-      BTCUSDT: { price: 95550, changePercent24h: -0.04 },
-      ETHUSDT: { price: 3469, changePercent24h: -0.14 },
-      ADAUSDT: { price: 0.8975, changePercent24h: -0.16 },
+      BTCUSDT: { price: 115500, changePercent24h: -0.04 },  // Updated to current BTC price
+      ETHUSDT: { price: 4474, changePercent24h: -0.05 },
+      ADAUSDT: { price: 0.8981, changePercent24h: -0.067 },
       BNBUSDT: { price: 1064.8, changePercent24h: 6.81 },
       SOLUSDT: { price: 240.4, changePercent24h: 0.47 },
     }[symbol] || { price: 100, changePercent24h: 0 };
+
+    console.log(`🎭 Generated mock ticker for ${symbol}:`, {
+      price: mockData.price,
+      change: mockData.changePercent24h
+    });
 
     return {
       symbol,
@@ -138,21 +143,27 @@ export const useMarketData = (options: UseMarketDataOptions = {}) => {
 
   // Start market data service
   const start = useCallback(async () => {
+    if (isInitialized.current) {
+      console.log('🟡 Market data service already initialized, skipping');
+      return;
+    }
+    
     console.log('💰 STARTING MARKET DATA SERVICE');
     
     await initializeMarketData();
     setupStreaming();
 
-    // Setup periodic refresh for resilience
+    // Setup periodic refresh for resilience - increased interval to reduce restarts
     if (refreshInterval_ref.current) {
       clearInterval(refreshInterval_ref.current);
     }
     
     refreshInterval_ref.current = setInterval(() => {
       console.log('🔄 Periodic market data refresh');
-      isInitialized.current = false;
+      // Don't reset initialization flag to prevent constant restarts
+      // isInitialized.current = false;
       initializeMarketData();
-    }, refreshInterval);
+    }, refreshInterval * 2); // Double the interval for stability
 
     console.log('✅ MARKET DATA SERVICE STARTED');
   }, [initializeMarketData, setupStreaming, refreshInterval]);
@@ -184,9 +195,9 @@ export const useMarketData = (options: UseMarketDataOptions = {}) => {
     streamingService.reconnectAll();
   }, []);
 
-  // Auto-start if enabled
+  // Auto-start if enabled - with singleton pattern to prevent multiple instances
   useEffect(() => {
-    if (autoStart) {
+    if (autoStart && !isInitialized.current) {
       start();
       
       return () => {
