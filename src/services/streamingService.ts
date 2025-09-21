@@ -23,11 +23,8 @@ class StreamingService {
    */
   async initialize(symbols: string[] = ['BTCUSDT', 'ETHUSDT', 'ADAUSDT', 'BNBUSDT', 'SOLUSDT']) {
     if (this.isInitialized) {
-      console.log('📡 Streaming service already initialized');
       return;
     }
-
-    console.log('🚀 Initializing streaming service for symbols:', symbols);
 
     // Load initial ticker data for all symbols
     try {
@@ -35,10 +32,6 @@ class StreamingService {
         try {
           const ticker = await binanceService.getTicker24hr(symbol);
           const tickerData = Array.isArray(ticker) ? ticker[0] : ticker;
-          console.log(`✅ Initial ticker loaded for ${symbol}:`, {
-            price: tickerData.price,
-            change: tickerData.changePercent24h
-          });
         } catch (error) {
           console.warn(`⚠️ Failed to load initial ticker for ${symbol}:`, error);
         }
@@ -48,7 +41,6 @@ class StreamingService {
     }
 
     this.isInitialized = true;
-    console.log('✅ Streaming service initialized');
   }
 
   /**
@@ -60,8 +52,6 @@ class StreamingService {
     callbacks: StreamingCallbacks
   ): () => void {
     const key = `${symbol}_${interval}`;
-    
-    console.log(`📡 Subscribing to streaming for ${key}`);
 
     // Check if we already have a subscription
     let subscription = this.subscriptions.get(key);
@@ -69,7 +59,6 @@ class StreamingService {
     if (subscription) {
       // Update callbacks
       subscription.callbacks = { ...subscription.callbacks, ...callbacks };
-      console.log(`🔄 Updated callbacks for existing subscription ${key}`);
     } else {
       // Create new subscription
       subscription = {
@@ -86,10 +75,6 @@ class StreamingService {
         subscription.unsubscribeTicker = binanceService.subscribeToTicker(
           symbol,
           (ticker) => {
-            console.log(`📈 Ticker update for ${symbol}:`, {
-              price: ticker.price,
-              change: ticker.changePercent24h
-            });
             callbacks.onTickerUpdate?.(ticker);
           },
           (error) => {
@@ -97,7 +82,6 @@ class StreamingService {
             callbacks.onError?.(error);
           }
         );
-        console.log(`✅ Ticker WebSocket active for ${symbol}`);
       } catch (error) {
         console.error(`❌ Failed to setup ticker subscription for ${symbol}:`, error);
         callbacks.onError?.(error as Error);
@@ -111,11 +95,6 @@ class StreamingService {
           symbol,
           binanceService.getIntervalFromTimeframe(interval),
           (candle) => {
-            console.log(`🕯️ Candle update for ${key}:`, {
-              timestamp: candle.timestamp,
-              close: candle.close,
-              volume: candle.volume
-            });
             callbacks.onCandleUpdate?.(candle);
           },
           (error) => {
@@ -123,7 +102,6 @@ class StreamingService {
             callbacks.onError?.(error);
           }
         );
-        console.log(`✅ Candle WebSocket active for ${key}`);
       } catch (error) {
         console.error(`❌ Failed to setup candle subscription for ${key}:`, error);
         callbacks.onError?.(error as Error);
@@ -134,13 +112,10 @@ class StreamingService {
     return () => {
       const sub = this.subscriptions.get(key);
       if (sub) {
-        console.log(`🔌 Unsubscribing from ${key}`);
-        
         sub.unsubscribeTicker?.();
         sub.unsubscribeCandle?.();
         
         this.subscriptions.delete(key);
-        console.log(`✅ Unsubscribed from ${key}`);
       }
     };
   }
@@ -175,8 +150,6 @@ class StreamingService {
    * Force reconnect all subscriptions
    */
   reconnectAll(): void {
-    console.log('🔄 Force reconnecting all subscriptions');
-    
     const currentSubscriptions = Array.from(this.subscriptions.entries());
     
     // Clear all subscriptions
@@ -198,8 +171,6 @@ class StreamingService {
    * Cleanup all subscriptions
    */
   cleanup(): void {
-    console.log('🧹 Cleaning up streaming service');
-    
     this.subscriptions.forEach((sub) => {
       sub.unsubscribeTicker?.();
       sub.unsubscribeCandle?.();
@@ -207,8 +178,6 @@ class StreamingService {
     
     this.subscriptions.clear();
     this.isInitialized = false;
-    
-    console.log('✅ Streaming service cleaned up');
   }
 
   /**

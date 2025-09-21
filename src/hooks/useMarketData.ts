@@ -34,11 +34,6 @@ export const useMarketData = (options: UseMarketDataOptions = {}) => {
       SOLUSDT: { price: 240.4, changePercent24h: 0.47 },
     }[symbol] || { price: 100, changePercent24h: 0 };
 
-    console.log(`🎭 Generated mock ticker for ${symbol}:`, {
-      price: mockData.price,
-      change: mockData.changePercent24h
-    });
-
     return {
       symbol,
       price: mockData.price,
@@ -60,8 +55,6 @@ export const useMarketData = (options: UseMarketDataOptions = {}) => {
   const initializeMarketData = useCallback(async () => {
     if (isInitialized.current) return;
     
-    console.log('🚀 INITIALIZING OPTIMIZED MARKET DATA');
-    
     try {
       // Initialize streaming service
       await streamingService.initialize(symbols);
@@ -77,11 +70,6 @@ export const useMarketData = (options: UseMarketDataOptions = {}) => {
           const result = await Promise.race([dataPromise, timeoutPromise]);
           const ticker = Array.isArray(result) ? result[0] : result;
           
-          console.log(`✅ Real data loaded for ${symbol}:`, {
-            price: ticker.price,
-            change: ticker.changePercent24h
-          });
-          
           updateTicker(ticker as TickerData);
           return ticker;
         } catch (error) {
@@ -94,8 +82,6 @@ export const useMarketData = (options: UseMarketDataOptions = {}) => {
 
       await Promise.all(dataPromises);
       isInitialized.current = true;
-      
-      console.log('✅ MARKET DATA INITIALIZATION COMPLETE');
     } catch (error) {
       console.error('❌ Market data initialization failed:', error);
       
@@ -111,8 +97,6 @@ export const useMarketData = (options: UseMarketDataOptions = {}) => {
 
   // Setup real-time streaming
   const setupStreaming = useCallback(() => {
-    console.log('📡 SETTING UP OPTIMIZED STREAMING');
-    
     // Clean up existing subscriptions
     Object.values(unsubscribeFunctions.current).forEach(unsubscribe => unsubscribe());
     unsubscribeFunctions.current = {};
@@ -122,10 +106,6 @@ export const useMarketData = (options: UseMarketDataOptions = {}) => {
         const unsubscribe = streamingService.subscribeToTicker(
           symbol,
           (ticker) => {
-            console.log(`📈 LIVE UPDATE ${symbol}:`, {
-              price: ticker.price,
-              change: ticker.changePercent24h
-            });
             updateTicker(ticker);
           },
           (error) => {
@@ -134,7 +114,6 @@ export const useMarketData = (options: UseMarketDataOptions = {}) => {
         );
 
         unsubscribeFunctions.current[symbol] = unsubscribe;
-        console.log(`✅ Streaming active for ${symbol}`);
       } catch (error) {
         console.error(`❌ Failed to setup streaming for ${symbol}:`, error);
       }
@@ -143,12 +122,7 @@ export const useMarketData = (options: UseMarketDataOptions = {}) => {
 
   // Start market data service
   const start = useCallback(async () => {
-    if (isInitialized.current) {
-      console.log('🟡 Market data service already initialized, skipping');
-      return;
-    }
-    
-    console.log('💰 STARTING MARKET DATA SERVICE');
+    if (isInitialized.current) return;
     
     await initializeMarketData();
     setupStreaming();
@@ -159,19 +133,14 @@ export const useMarketData = (options: UseMarketDataOptions = {}) => {
     }
     
     refreshInterval_ref.current = setInterval(() => {
-      console.log('🔄 Periodic market data refresh');
       // Don't reset initialization flag to prevent constant restarts
       // isInitialized.current = false;
       initializeMarketData();
     }, refreshInterval * 2); // Double the interval for stability
-
-    console.log('✅ MARKET DATA SERVICE STARTED');
   }, [initializeMarketData, setupStreaming, refreshInterval]);
 
   // Stop market data service
   const stop = useCallback(() => {
-    console.log('🛑 STOPPING MARKET DATA SERVICE');
-    
     // Clear refresh interval
     if (refreshInterval_ref.current) {
       clearInterval(refreshInterval_ref.current);
@@ -186,12 +155,10 @@ export const useMarketData = (options: UseMarketDataOptions = {}) => {
     streamingService.cleanup();
     
     isInitialized.current = false;
-    console.log('✅ MARKET DATA SERVICE STOPPED');
   }, []);
 
   // Force reconnect
   const reconnect = useCallback(() => {
-    console.log('🔄 FORCE RECONNECTING MARKET DATA');
     streamingService.reconnectAll();
   }, []);
 

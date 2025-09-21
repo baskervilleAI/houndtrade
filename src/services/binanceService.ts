@@ -146,8 +146,6 @@ class BinanceService {
     const intervalId = setInterval(pollFunction, this.POLLING_INTERVAL);
     this.pollingIntervals.set(pollKey, intervalId);
     
-    console.log(`✅ Polling active for ${symbol} (${this.POLLING_INTERVAL}ms)`);
-    
     // Return cleanup function
     return () => {
       const callbacks = this.pollingCallbacks.get(pollKey);
@@ -373,8 +371,6 @@ class BinanceService {
         ? `${this.BASE_URL}/ticker/24hr?symbol=${symbol.toUpperCase()}`
         : `${this.BASE_URL}/ticker/24hr`;
 
-      console.log(`📈 Fetching Binance 24hr ticker:`, { symbol, url });
-
       const response = await fetch(url);
       
       if (!response.ok) {
@@ -419,15 +415,9 @@ class BinanceService {
 
       if (Array.isArray(data)) {
         const tickers = data.map(transformTicker);
-        console.log(`✅ Successfully fetched ${tickers.length} tickers`);
         return tickers;
       } else {
         const ticker = transformTicker(data);
-        console.log(`✅ Successfully fetched ticker for ${symbol}:`, {
-          price: ticker.price,
-          change: ticker.changePercent24h,
-          volume: ticker.volume24h,
-        });
         return ticker;
       }
     } catch (error) {
@@ -570,7 +560,6 @@ class BinanceService {
         if (callbacks.size === 0) {
           const ws = this.websockets.get(streamName);
           if (ws) {
-            console.log(`🔌 Closing unused WebSocket for ${streamName}`);
             ws.close(1000, 'No more subscribers');
             this.websockets.delete(streamName);
             this.updateCallbacks.delete(streamName);
@@ -590,8 +579,6 @@ class BinanceService {
     onError?: (error: Error) => void
   ): () => void {
     const streamName = `${symbol.toLowerCase()}@ticker`;
-    
-    console.log(`🔌 Subscribing to ticker with hybrid approach:`, { symbol });
 
     let wsUnsubscribe: (() => void) | null = null;
     let pollingUnsubscribe: (() => void) | null = null;
@@ -602,13 +589,11 @@ class BinanceService {
       
       // Check if we already have this connection
       if (this.websockets.has(streamName)) {
-        console.log(`⚠️ WebSocket already exists for ${streamName}, skipping`);
         return;
       }
 
       // Check connection limit
       if (this.websockets.size >= this.MAX_CONCURRENT_CONNECTIONS) {
-        console.log(`⚠️ Max connections reached, using polling for ${symbol}`);
         switchToPolling();
         return;
       }
@@ -619,7 +604,6 @@ class BinanceService {
         let wsConnected = false;
 
         ws.onopen = () => {
-          console.log(`✅ Ticker WebSocket connected for ${streamName}`);
           this.reconnectAttempts.set(streamName, 0);
           wsConnected = true;
           isUsingWebSocket = true;
@@ -666,7 +650,6 @@ class BinanceService {
         };
 
         ws.onclose = (event) => {
-          console.log(`🔌 Ticker WebSocket closed for ${streamName}:`, { code: event.code });
           this.websockets.delete(streamName);
           
           // Switch to polling if WebSocket failed
@@ -674,10 +657,8 @@ class BinanceService {
             const attempts = this.reconnectAttempts.get(streamName) || 0;
             if (attempts < this.MAX_RECONNECT_ATTEMPTS) {
               this.reconnectAttempts.set(streamName, attempts + 1);
-              console.log(`🔄 Attempting to reconnect ticker ${streamName} (${attempts + 1}/${this.MAX_RECONNECT_ATTEMPTS})`);
               setTimeout(tryWebSocket, this.RECONNECT_DELAY * (attempts + 1));
             } else {
-              console.log(`❌ Max reconnection attempts reached, switching to polling for ${symbol}`);
               switchToPolling();
             }
           }
@@ -713,7 +694,6 @@ class BinanceService {
     return () => {
       const ws = this.websockets.get(streamName);
       if (ws) {
-        console.log(`🔌 Unsubscribing from ticker ${streamName}`);
         ws.close(1000, 'Manual disconnect');
         this.websockets.delete(streamName);
         this.reconnectAttempts.delete(streamName);

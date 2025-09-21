@@ -26,20 +26,8 @@ export const MarketData: React.FC = () => {
   const handlePairSelect = useCallback((symbol: string) => {
     if (symbol === selectedPair) return;
 
-    console.log(`🔄 CRYPTO PAIR CHANGED:`, {
-      from: selectedPair,
-      to: symbol,
-      timestamp: new Date().toISOString()
-    });
-
     setSelectedPair(symbol);
   }, [selectedPair, setSelectedPair]);
-
-  // Log service status for debugging
-  React.useEffect(() => {
-    const status = getStatus();
-    console.log('📊 Market Data Service Status:', status);
-  }, [getStatus, isInitialized]);
 
   return (
     <View style={styles.container}>

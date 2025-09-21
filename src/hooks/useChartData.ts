@@ -25,11 +25,8 @@ export const useChartData = (options: UseChartDataOptions) => {
 
   // Load initial candle data
   const loadInitialData = useCallback(async () => {
-    console.log(`📊 Loading initial chart data for ${symbol} ${timeframe}`);
-    
     try {
       await loadCandles(symbol, timeframe, true); // Force refresh
-      console.log(`✅ Initial chart data loaded for ${symbol} ${timeframe}`);
     } catch (error) {
       console.error(`❌ Failed to load initial chart data:`, error);
     }
@@ -38,8 +35,6 @@ export const useChartData = (options: UseChartDataOptions) => {
   // Setup real-time candle streaming
   const setupStreaming = useCallback(() => {
     if (!autoStream) return;
-
-    console.log(`📡 Setting up candle streaming for ${symbol} ${timeframe}`);
     
     // Clean up previous subscription
     if (unsubscribeRef.current) {
@@ -52,11 +47,6 @@ export const useChartData = (options: UseChartDataOptions) => {
         symbol,
         timeframe,
         (candle) => {
-          console.log(`🕯️ Live candle update for ${symbol} ${timeframe}:`, {
-            timestamp: candle.timestamp,
-            close: candle.close,
-            volume: candle.volume
-          });
           setLastUpdate(new Date());
           
           // The ChartContext will handle the candle update
@@ -70,7 +60,6 @@ export const useChartData = (options: UseChartDataOptions) => {
 
       unsubscribeRef.current = unsubscribe;
       setIsStreaming(true);
-      console.log(`✅ Candle streaming active for ${symbol} ${timeframe}`);
     } catch (error) {
       console.error(`❌ Failed to setup candle streaming:`, error);
       setIsStreaming(false);
@@ -80,7 +69,6 @@ export const useChartData = (options: UseChartDataOptions) => {
   // Stop streaming
   const stopStreaming = useCallback(() => {
     if (unsubscribeRef.current) {
-      console.log(`🔌 Stopping candle streaming for ${symbol} ${timeframe}`);
       unsubscribeRef.current();
       unsubscribeRef.current = null;
       setIsStreaming(false);
@@ -89,8 +77,6 @@ export const useChartData = (options: UseChartDataOptions) => {
 
   // Refresh chart data
   const refresh = useCallback(async () => {
-    console.log(`🔄 Refreshing chart data for ${symbol} ${timeframe}`);
-    
     stopStreaming();
     await loadInitialData();
     setupStreaming();
@@ -98,7 +84,6 @@ export const useChartData = (options: UseChartDataOptions) => {
 
   // Force reconnect streaming
   const reconnectStreaming = useCallback(() => {
-    console.log(`🔄 Reconnecting streaming for ${symbol} ${timeframe}`);
     stopStreaming();
     setTimeout(setupStreaming, 1000); // Delay for clean reconnection
   }, [setupStreaming, stopStreaming, symbol, timeframe]);
@@ -109,11 +94,6 @@ export const useChartData = (options: UseChartDataOptions) => {
     const timeframeChanged = lastTimeframeRef.current !== timeframe;
     
     if (symbolChanged || timeframeChanged) {
-      console.log(`🔄 Chart parameters changed:`, {
-        symbol: `${lastSymbolRef.current} → ${symbol}`,
-        timeframe: `${lastTimeframeRef.current} → ${timeframe}`
-      });
-
       lastSymbolRef.current = symbol;
       lastTimeframeRef.current = timeframe;
 
