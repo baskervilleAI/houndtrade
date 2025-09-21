@@ -55,47 +55,91 @@ export const LiveCandlestickChart: React.FC = () => {
     cycleDelay: 10, // 10ms para ultra fast
   });
 
-  // Calcular rango de precios
-  const { minPrice, maxPrice, priceRange } = useMemo(() => {
+  // Calcular rango de precios basado en velas recientes y válidas
+  const { minPrice, maxPrice, priceRange, validCandles } = useMemo(() => {
     if (candles.length === 0) {
-      return { minPrice: 0, maxPrice: 100, priceRange: 100 };
+      return { minPrice: 0, maxPrice: 100, priceRange: 100, validCandles: [] };
     }
     
-    const allPrices = candles.flatMap(candle => [candle.high, candle.low]);
+    // Filtrar velas válidas (sin valores extremos o anómalos)
+    const validCandles = candles.filter(candle => {
+      // Verificar que todos los valores sean números válidos
+      const isValid = candle.open > 0 && candle.high > 0 && candle.low > 0 && candle.close > 0 &&
+                     isFinite(candle.open) && isFinite(candle.high) && 
+                     isFinite(candle.low) && isFinite(candle.close) &&
+                     candle.high >= candle.low &&
+                     candle.high >= Math.max(candle.open, candle.close) &&
+                     candle.low <= Math.min(candle.open, candle.close);
+      
+      return isValid;
+    });
+
+    if (validCandles.length === 0) {
+      return { minPrice: 0, maxPrice: 100, priceRange: 100, validCandles: [] };
+    }
+
+    // Usar solo las últimas 50 velas para calcular la escala (más responsive)
+    const recentCandles = validCandles.slice(-50);
+    
+    // Calcular min/max de las velas recientes
+    const allPrices = recentCandles.flatMap(candle => [candle.high, candle.low]);
     const minPrice = Math.min(...allPrices);
     const maxPrice = Math.max(...allPrices);
     
-    // Agregar padding
-    const padding = (maxPrice - minPrice) * 0.1;
-    const paddedMinPrice = Math.max(0, minPrice - padding);
-    const paddedMaxPrice = maxPrice + padding;
-    const priceRange = paddedMaxPrice - paddedMinPrice;
+    // Filtrar outliers extremos (más del 50% fuera del rango típico)
+    const priceRange = maxPrice - minPrice;
+    const threshold = priceRange * 0.5;
+    const filteredPrices = allPrices.filter(price => 
+      price >= minPrice - threshold && price <= maxPrice + threshold
+    );
+    
+    const finalMinPrice = Math.min(...filteredPrices);
+    const finalMaxPrice = Math.max(...filteredPrices);
+    
+    // Agregar padding más conservador
+    const padding = (finalMaxPrice - finalMinPrice) * 0.05; // Reducido de 0.1 a 0.05
+    const paddedMinPrice = Math.max(0, finalMinPrice - padding);
+    const paddedMaxPrice = finalMaxPrice + padding;
+    const finalPriceRange = paddedMaxPrice - paddedMinPrice;
     
     return { 
       minPrice: paddedMinPrice, 
       maxPrice: paddedMaxPrice, 
-      priceRange: priceRange > 0 ? priceRange : 1 
+      priceRange: finalPriceRange > 0 ? finalPriceRange : 1,
+      validCandles
     };
   }, [candles]);
 
-  // Renderizar vela individual
+  // Renderizar vela individual con validaciones mejoradas
   const renderCandle = useCallback((candle: CandleData, index: number) => {
+    // Validar que la vela tenga datos válidos
+    if (!candle || candle.open <= 0 || candle.high <= 0 || candle.low <= 0 || candle.close <= 0 ||
+        !isFinite(candle.open) || !isFinite(candle.high) || !isFinite(candle.low) || !isFinite(candle.close) ||
+        candle.high < candle.low || 
+        candle.high < Math.max(candle.open, candle.close) ||
+        candle.low > Math.min(candle.open, candle.close)) {
+      return null; // No renderizar velas inválidas
+    }
+
     const isGreen = candle.close >= candle.open;
     
-    // Calcular alturas y posiciones
-    const bodyHeight = Math.max(1, Math.abs(candle.close - candle.open) / priceRange * (CHART_HEIGHT - CHART_PADDING));
-    const wickHeight = Math.max(1, (candle.high - candle.low) / priceRange * (CHART_HEIGHT - CHART_PADDING));
+    // Calcular alturas y posiciones con validaciones
+    const bodyHeight = Math.max(2, Math.abs(candle.close - candle.open) / priceRange * (CHART_HEIGHT - CHART_PADDING));
+    const wickHeight = Math.max(2, (candle.high - candle.low) / priceRange * (CHART_HEIGHT - CHART_PADDING));
     
     const bodyTop = (maxPrice - Math.max(candle.open, candle.close)) / priceRange * (CHART_HEIGHT - CHART_PADDING) + (CHART_PADDING / 2);
     const wickTop = (maxPrice - candle.high) / priceRange * (CHART_HEIGHT - CHART_PADDING) + (CHART_PADDING / 2);
     
-    const safeBodyTop = Math.max(0, Math.min(CHART_HEIGHT - bodyHeight, bodyTop));
-    const safeWickTop = Math.max(0, Math.min(CHART_HEIGHT - wickHeight, wickTop));
+    // Asegurar que las posiciones estén dentro de los límites del gráfico
+    const safeBodyTop = Math.max(0, Math.min(CHART_HEIGHT - bodyHeight - CHART_PADDING/2, bodyTop));
+    const safeWickTop = Math.max(0, Math.min(CHART_HEIGHT - wickHeight - CHART_PADDING/2, wickTop));
+    const safeBodyHeight = Math.min(bodyHeight, CHART_HEIGHT - safeBodyTop - CHART_PADDING/2);
+    const safeWickHeight = Math.min(wickHeight, CHART_HEIGHT - safeWickTop - CHART_PADDING/2);
     
     const candleColor = isGreen ? '#00ff88' : '#ff4444';
     
     // Detectar si es la vela más reciente (live)
-    const isLiveCandle = index === candles.length - 1;
+    const isLiveCandle = index === validCandles.length - 1;
     
     return (
       <View 
@@ -111,7 +155,7 @@ export const LiveCandlestickChart: React.FC = () => {
             styles.wick,
             {
               top: safeWickTop,
-              height: wickHeight,
+              height: safeWickHeight,
               backgroundColor: candleColor,
               opacity: isLiveCandle ? 0.9 : 1.0,
             },
@@ -123,7 +167,7 @@ export const LiveCandlestickChart: React.FC = () => {
             styles.candleBody,
             {
               top: safeBodyTop,
-              height: bodyHeight,
+              height: safeBodyHeight,
               backgroundColor: candleColor,
               opacity: isLiveCandle ? 0.9 : 1.0,
               borderWidth: isLiveCandle ? 1 : 0,
@@ -140,7 +184,7 @@ export const LiveCandlestickChart: React.FC = () => {
         )}
       </View>
     );
-  }, [maxPrice, priceRange, candles.length, isStreaming]);
+  }, [maxPrice, priceRange, validCandles.length, isStreaming]);
 
   // Manejar cambio de timeframe
   const handleTimeframeChange = useCallback((timeframe: string) => {
@@ -225,7 +269,7 @@ export const LiveCandlestickChart: React.FC = () => {
           Updates: {stats.updateCount} | Avg: {stats.averageResponseTime}ms | Errors: {stats.errorCount}
         </Text>
         <Text style={styles.statText}>
-          Candles: {candles.length} | Mode: {isUltraFastMode ? 'Ultra-Fast' : 'WebSocket'}
+          Candles: {validCandles.length}/{candles.length} válidas | Mode: {isUltraFastMode ? 'Ultra-Fast' : 'WebSocket'}
         </Text>
       </View>
 
@@ -260,22 +304,26 @@ export const LiveCandlestickChart: React.FC = () => {
             <ActivityIndicator size="large" color="#00ff88" />
             <Text style={styles.loadingText}>Cargando datos reales...</Text>
           </View>
-        ) : hasData ? (
+        ) : hasData && validCandles.length >= 5 ? ( // Requiere al menos 5 velas válidas
           <ScrollView
             horizontal
             showsHorizontalScrollIndicator={false}
             contentContainerStyle={{
-              width: Math.max(screenWidth, candles.length * (CANDLE_WIDTH + CANDLE_SPACING)),
+              width: Math.max(screenWidth, validCandles.length * (CANDLE_WIDTH + CANDLE_SPACING)),
               height: CHART_HEIGHT,
             }}
           >
             <View style={styles.chart}>
-              {candles.map((candle, index) => renderCandle(candle, index))}
+              {validCandles.map((candle, index) => renderCandle(candle, index)).filter(Boolean)}
             </View>
           </ScrollView>
         ) : (
           <View style={styles.loadingContainer}>
-            <Text style={styles.loadingText}>No hay datos disponibles</Text>
+            <Text style={styles.loadingText}>
+              {hasData && validCandles.length < 5 
+                ? `Cargando datos válidos (${validCandles.length}/5)...` 
+                : "No hay datos disponibles"}
+            </Text>
             <TouchableOpacity style={styles.retryButton} onPress={restartStreaming}>
               <Text style={styles.retryText}>Reintentar</Text>
             </TouchableOpacity>
@@ -284,7 +332,7 @@ export const LiveCandlestickChart: React.FC = () => {
       </View>
 
       {/* Escala de precios */}
-      {hasData && (
+      {hasData && validCandles.length >= 5 && (
         <View style={styles.priceScale}>
           <Text style={styles.priceLabel}>
             ${formatPrice(maxPrice, selectedPair)}
