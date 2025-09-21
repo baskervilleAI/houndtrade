@@ -7,7 +7,6 @@ import {
   TouchableOpacity,
 } from 'react-native';
 import { useMarket } from '../../context/AppContext';
-import { useMarketData } from '../../hooks/useMarketData';
 import { formatPrice, formatPercentage } from '../../utils/formatters';
 
 const POPULAR_PAIRS = ['BTCUSDT', 'ETHUSDT', 'ADAUSDT', 'BNBUSDT', 'SOLUSDT'];
@@ -15,13 +14,6 @@ const POPULAR_PAIRS = ['BTCUSDT', 'ETHUSDT', 'ADAUSDT', 'BNBUSDT', 'SOLUSDT'];
 export const MarketData: React.FC = () => {
   const { selectedPair, tickers, setSelectedPair } = useMarket();
   
-  // Use optimized market data hook
-  const { isInitialized, getStatus } = useMarketData({
-    autoStart: true,
-    symbols: POPULAR_PAIRS,
-    refreshInterval: 30000,
-  });
-
   // Handle pair selection
   const handlePairSelect = useCallback((symbol: string) => {
     if (symbol === selectedPair) return;
@@ -29,11 +21,20 @@ export const MarketData: React.FC = () => {
     setSelectedPair(symbol);
   }, [selectedPair, setSelectedPair]);
 
+  // Debug: Log ticker data
+  React.useEffect(() => {
+    console.log('🔍 MarketData Component - Current tickers:', Object.keys(tickers).length);
+    POPULAR_PAIRS.forEach(symbol => {
+      const ticker = tickers[symbol];
+      console.log(`📊 ${symbol}:`, ticker ? `$${ticker.price}` : 'NO DATA');
+    });
+  }, [tickers]);
+
   return (
     <View style={styles.container}>
       <View style={styles.headerContainer}>
         <Text style={styles.title}>Pares de Trading</Text>
-        {isInitialized && (
+        {Object.keys(tickers).length > 0 && (
           <View style={styles.liveIndicator}>
             <View style={styles.liveDot} />
             <Text style={styles.liveText}>LIVE</Text>

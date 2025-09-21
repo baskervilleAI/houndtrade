@@ -228,16 +228,21 @@ class BinanceService {
 
       const data: BinanceKlineData[] = await response.json();
       
-      const candles: CandleData[] = data.map(kline => ({
-        timestamp: new Date(kline.openTime).toISOString(),
-        open: parseFloat(kline.open),
-        high: parseFloat(kline.high),
-        low: parseFloat(kline.low),
-        close: parseFloat(kline.close),
-        volume: parseFloat(kline.volume),
-        trades: kline.numberOfTrades,
-        quoteVolume: parseFloat(kline.quoteAssetVolume),
-      }));
+      const candles: CandleData[] = data.map(kline => {
+        // Ensure timestamp is a valid number - Binance returns timestamps as numbers
+        const timestamp = typeof kline.openTime === 'number' ? kline.openTime : parseInt(String(kline.openTime));
+        
+        return {
+          timestamp: new Date(timestamp).toISOString(),
+          open: parseFloat(kline.open),
+          high: parseFloat(kline.high),
+          low: parseFloat(kline.low),
+          close: parseFloat(kline.close),
+          volume: parseFloat(kline.volume),
+          trades: kline.numberOfTrades,
+          quoteVolume: parseFloat(kline.quoteAssetVolume),
+        };
+      });
 
       // Update cache
       this.candleCache.set(cacheKey, {
@@ -281,16 +286,20 @@ class BinanceService {
 
       const data: BinanceKlineData[] = await response.json();
       
-      const candles: CandleData[] = data.map(kline => ({
-        timestamp: new Date(kline.openTime).toISOString(),
-        open: parseFloat(kline.open),
-        high: parseFloat(kline.high),
-        low: parseFloat(kline.low),
-        close: parseFloat(kline.close),
-        volume: parseFloat(kline.volume),
-        trades: kline.numberOfTrades,
-        quoteVolume: parseFloat(kline.quoteAssetVolume),
-      }));
+      const candles: CandleData[] = data.map(kline => {
+        const timestamp = typeof kline.openTime === 'number' ? kline.openTime : parseInt(String(kline.openTime));
+        
+        return {
+          timestamp: new Date(timestamp).toISOString(),
+          open: parseFloat(kline.open),
+          high: parseFloat(kline.high),
+          low: parseFloat(kline.low),
+          close: parseFloat(kline.close),
+          volume: parseFloat(kline.volume),
+          trades: kline.numberOfTrades,
+          quoteVolume: parseFloat(kline.quoteAssetVolume),
+        };
+      });
 
       console.log(`✅ Loaded ${candles.length} missing candles for ${symbol}`);
       return candles;
@@ -335,16 +344,20 @@ class BinanceService {
 
       const data: BinanceKlineData[] = await response.json();
       
-      const candles: CandleData[] = data.map(kline => ({
-        timestamp: new Date(kline.openTime).toISOString(),
-        open: parseFloat(kline.open),
-        high: parseFloat(kline.high),
-        low: parseFloat(kline.low),
-        close: parseFloat(kline.close),
-        volume: parseFloat(kline.volume),
-        trades: kline.numberOfTrades,
-        quoteVolume: parseFloat(kline.quoteAssetVolume),
-      }));
+      const candles: CandleData[] = data.map(kline => {
+        const timestamp = typeof kline.openTime === 'number' ? kline.openTime : parseInt(String(kline.openTime));
+        
+        return {
+          timestamp: new Date(timestamp).toISOString(),
+          open: parseFloat(kline.open),
+          high: parseFloat(kline.high),
+          low: parseFloat(kline.low),
+          close: parseFloat(kline.close),
+          volume: parseFloat(kline.volume),
+          trades: kline.numberOfTrades,
+          quoteVolume: parseFloat(kline.quoteAssetVolume),
+        };
+      });
 
       console.log(`✅ Successfully fetched ${candles.length} candles for ${symbol}:`, {
         firstCandle: candles[0],
@@ -457,8 +470,6 @@ class BinanceService {
     const streamName = `${symbol.toLowerCase()}@kline_${interval}`;
     const wsUrl = `${this.WS_BASE_URL}/${streamName}`;
 
-    console.log(`� FAST WebSocket subscription:`, { symbol, interval });
-
     // Store callback for fast updates
     if (!this.updateCallbacks.has(streamName)) {
       this.updateCallbacks.set(streamName, new Set());
@@ -486,8 +497,11 @@ class BinanceService {
           const kline = data.k;
           
           if (kline) {
+            // Ensure timestamp is properly handled
+            const timestamp = typeof kline.t === 'number' ? kline.t : parseInt(String(kline.t));
+            
             const candle: CandleData = {
-              timestamp: new Date(kline.t).toISOString(),
+              timestamp: new Date(timestamp).toISOString(),
               open: parseFloat(kline.o),
               high: parseFloat(kline.h),
               low: parseFloat(kline.l),
@@ -536,13 +550,17 @@ class BinanceService {
         console.log(`🔌 WebSocket closed for ${streamName}:`, { code: event.code });
         this.websockets.delete(streamName);
         
-        // Fast reconnect for critical streams
+        // Only reconnect if it wasn't a clean close and we still have active callbacks
         if (event.code !== 1000 && this.updateCallbacks.has(streamName) && this.updateCallbacks.get(streamName)!.size > 0) {
           const attempts = this.reconnectAttempts.get(streamName) || 0;
           if (attempts < this.MAX_RECONNECT_ATTEMPTS) {
             this.reconnectAttempts.set(streamName, attempts + 1);
-            console.log(`🔄 Fast reconnect ${streamName} (${attempts + 1}/${this.MAX_RECONNECT_ATTEMPTS})`);
-            setTimeout(connectWebSocket, this.RECONNECT_DELAY); // Fast reconnect
+            const delay = Math.min(1000 * Math.pow(2, attempts), 10000); // Exponential backoff, max 10s
+            console.log(`🔄 Reconnecting ${streamName} in ${delay}ms (${attempts + 1}/${this.MAX_RECONNECT_ATTEMPTS})`);
+            setTimeout(connectWebSocket, delay);
+          } else {
+            console.error(`❌ Max reconnection attempts reached for ${streamName}`);
+            onError?.(new Error(`Max reconnection attempts reached for ${streamName}`));
           }
         }
       };

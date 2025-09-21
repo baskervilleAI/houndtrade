@@ -203,11 +203,9 @@ export const ChartProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     const isDataFresh = lastUpdate && (Date.now() - lastUpdate) < 30000; // 30 seconds
 
     if (existingCandles && existingCandles.length > 0 && isDataFresh && !forceRefresh) {
-      console.log(`🔥 Using existing data for ${key}`);
       return;
     }
 
-    console.log(`⚡ Loading candles for ${key}`);
     dispatch({ type: 'SET_LOADING', payload: { key, loading: true } });
 
     const loadPromise = (async () => {

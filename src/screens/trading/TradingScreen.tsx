@@ -8,6 +8,7 @@ import {
   Dimensions,
 } from 'react-native';
 import { useAuth, useTrading, useMarket } from '../../context/AppContext';
+import { useMarketData } from '../../hooks/useMarketData';
 import { CandlestickChart } from '../../components/chart/CandlestickChart_ultrafast';
 import { OrderForm } from '../../components/trading/OrderForm';
 import { PositionsList } from '../../components/trading/PositionsList';
@@ -20,6 +21,16 @@ export const TradingScreen: React.FC = () => {
   const { user, logout } = useAuth();
   const { balance, equity, totalPnl, pnlPercentage } = useTrading();
   const { selectedPair, tickers } = useMarket();
+
+  // Initialize market data at the screen level
+  const { isInitialized, getStatus } = useMarketData({
+    autoStart: true,
+    symbols: ['BTCUSDT', 'ETHUSDT', 'ADAUSDT', 'BNBUSDT', 'SOLUSDT'],
+    refreshInterval: 30000,
+  });
+
+  console.log('🏠 TradingScreen - Market data initialized:', isInitialized);
+  console.log('🏠 TradingScreen - Available tickers:', Object.keys(tickers));
 
   const currentPrice = tickers[selectedPair]?.price || 0;
   const priceChange = tickers[selectedPair]?.changePercent24h || 0;

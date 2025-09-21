@@ -84,7 +84,6 @@ export const CandlestickChart: React.FC = () => {
   // Load initial data and setup real-time updates
   useEffect(() => {
     // The useChartData hook already handles this automatically
-    console.log(`📊 Chart component mounted for ${selectedPair} ${selectedTimeframe}`);
   }, [selectedPair, selectedTimeframe]);
 
   // Optimized candle rendering with memoization
@@ -206,18 +205,9 @@ export const CandlestickChart: React.FC = () => {
     };
   }, [candles, lastUpdate, isRealtime, isStreaming]);
 
-  // Log performance for debugging
+  // Performance monitoring
   useEffect(() => {
-    if (candles.length > 0) {
-      console.log(`📊 Chart performance:`, {
-        symbol: selectedPair,
-        timeframe: selectedTimeframe,
-        candles: performanceInfo.candleCount,
-        lastPrice: performanceInfo.lastCandle?.close,
-        isRealtime: performanceInfo.isRealtime,
-        isStreaming: performanceInfo.isStreaming,
-      });
-    }
+    // Chart performance is monitored by the hooks
   }, [performanceInfo, selectedPair, selectedTimeframe]);
 
   return (

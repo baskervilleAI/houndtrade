@@ -94,6 +94,7 @@ function appReducer(state: AppState, action: AppAction): AppState {
       };
     
     case 'UPDATE_TICKER':
+      console.log('📊 CONTEXT: Updating ticker:', action.payload.symbol, action.payload.price);
       return {
         ...state,
         tickers: {

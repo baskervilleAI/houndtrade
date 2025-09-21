@@ -55,39 +55,57 @@ export const useMarketData = (options: UseMarketDataOptions = {}) => {
   const initializeMarketData = useCallback(async () => {
     if (isInitialized.current) return;
     
+    console.log('🚀 INITIALIZING MARKET DATA - Starting...');
+    
     try {
-      // Initialize streaming service
+      // Initialize streaming service first
       await streamingService.initialize(symbols);
+      console.log('✅ Streaming service initialized');
       
       // Load initial data with timeout and fallback
+      console.log('📊 Loading initial ticker data for symbols:', symbols);
+      
       const dataPromises = symbols.map(async (symbol) => {
         try {
           const timeoutPromise = new Promise<never>((_, reject) => 
-            setTimeout(() => reject(new Error('Timeout')), 10000) // Increased timeout
+            setTimeout(() => reject(new Error('Timeout')), 10000)
           );
           
           const dataPromise = binanceService.getTicker24hr(symbol);
           const result = await Promise.race([dataPromise, timeoutPromise]);
           const ticker = Array.isArray(result) ? result[0] : result;
           
+          console.log(`✅ Real data loaded for ${symbol}:`, {
+            price: ticker.price,
+            change: ticker.changePercent24h
+          });
+          
+          // Immediately update the ticker in context
           updateTicker(ticker as TickerData);
           return ticker;
         } catch (error) {
           console.warn(`⚠️ Failed to load ${symbol}, using mock data:`, error);
           const mockTicker = generateMockTicker(symbol);
+          console.log(`🎭 Using mock data for ${symbol}:`, {
+            price: mockTicker.price,
+            change: mockTicker.changePercent24h
+          });
           updateTicker(mockTicker);
           return mockTicker;
         }
       });
 
       await Promise.all(dataPromises);
+      console.log('✅ ALL TICKER DATA LOADED AND UPDATED');
       isInitialized.current = true;
     } catch (error) {
       console.error('❌ Market data initialization failed:', error);
       
       // Fallback to all mock data
+      console.log('🎭 Using fallback mock data for all symbols');
       symbols.forEach(symbol => {
         const mockTicker = generateMockTicker(symbol);
+        console.log(`📊 Mock ticker for ${symbol}:`, mockTicker.price);
         updateTicker(mockTicker);
       });
       
