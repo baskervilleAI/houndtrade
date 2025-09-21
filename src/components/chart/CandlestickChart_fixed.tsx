@@ -9,7 +9,6 @@ import {
   Animated,
 } from 'react-native';
 import { useMarket } from '../../context/AppContext';
-import { formatPrice, formatPercentage } from '../../utils/formatters';
 
 const { width: screenWidth } = Dimensions.get('window');
 const CHART_HEIGHT = 300;
@@ -34,6 +33,17 @@ interface CandleData {
   close: number;
   volume: number;
 }
+
+// Utility function to format prices consistently
+const formatPrice = (price: number, symbol: string): string => {
+  if (symbol === 'BTCUSDT' || symbol === 'ETHUSDT') {
+    return price.toFixed(0);
+  } else if (symbol === 'BNBUSDT' || symbol === 'SOLUSDT') {
+    return price.toFixed(1);
+  } else {
+    return price.toFixed(4);
+  }
+};
 
 export const CandlestickChart: React.FC = () => {
   const [selectedTimeframe, setSelectedTimeframe] = useState<string>('1h');
@@ -224,7 +234,7 @@ export const CandlestickChart: React.FC = () => {
             styles.change,
             { color: priceChange >= 0 ? '#00ff88' : '#ff4444' }
           ]}>
-            {formatPercentage(priceChange)}
+            {priceChange >= 0 ? '+' : ''}{priceChange.toFixed(2)}%
           </Text>
         </View>
       </View>

@@ -1,52 +1,226 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useCallback, useRef } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   ScrollView,
   TouchableOpacity,
+  Animated,
 } from 'react-native';
 import { useMarket } from '../../context/AppContext';
+import { binanceService } from '../../services/binanceService';
+import { formatPrice, formatPercentage } from '../../utils/formatters';
 
 const POPULAR_PAIRS = ['BTCUSDT', 'ETHUSDT', 'ADAUSDT', 'BNBUSDT', 'SOLUSDT'];
+const INITIAL_FETCH_INTERVAL = 30000; // Fetch initial data every 30 seconds
+const ANIMATION_DURATION = 300;
 
 export const MarketData: React.FC = () => {
   const { selectedPair, tickers, setSelectedPair, updateTicker } = useMarket();
-
-  // Simulate real-time price updates
+  const animatedValues = useRef<Record<string, Animated.Value>>({});
+  const intervalRef = useRef<NodeJS.Timeout | null>(null);
+  const unsubscribeFunctions = useRef<Record<string, () => void>>({});
+  const isInitialized = useRef<boolean>(false);
+  const updateTickerRef = useRef(updateTicker);
+  
+  // Keep updateTicker reference current
   useEffect(() => {
-    const interval = setInterval(() => {
-      POPULAR_PAIRS.forEach(symbol => {
-        const basePrice = getBasePrice(symbol);
-        const change = (Math.random() - 0.5) * 0.02; // ±1% change
-        const newPrice = basePrice * (1 + change);
-        const change24h = (Math.random() - 0.5) * 0.1; // ±5% daily change
-        
-        updateTicker({
-          symbol,
-          price: newPrice,
-          changePercent24h: change24h * 100,
-        });
-      });
-    }, 2000); // Update every 2 seconds
-
-    return () => clearInterval(interval);
+    updateTickerRef.current = updateTicker;
   }, [updateTicker]);
 
-  const getBasePrice = (symbol: string): number => {
-    const basePrices: Record<string, number> = {
-      'BTCUSDT': 45000,
-      'ETHUSDT': 3000,
-      'ADAUSDT': 1.2,
-      'BNBUSDT': 300,
-      'SOLUSDT': 100,
-    };
-    return basePrices[symbol] || 100;
-  };
+  // Initialize animated values for each pair
+  useEffect(() => {
+    POPULAR_PAIRS.forEach(symbol => {
+      if (!animatedValues.current[symbol]) {
+        animatedValues.current[symbol] = new Animated.Value(1);
+      }
+    });
+  }, []);
 
-  const handlePairSelect = (symbol: string) => {
-    setSelectedPair(symbol);
-  };
+  // Initialize real market data from Binance
+  const initializeMarketData = useCallback(async () => {
+    if (isInitialized.current) return;
+    
+    console.log(`🚀 INITIALIZING REAL MARKET DATA FROM BINANCE`);
+    
+    try {
+      // Fetch initial ticker data for all pairs
+      const tickerPromises = POPULAR_PAIRS.map(async (symbol) => {
+        try {
+          const tickerResult = await binanceService.getTicker24hr(symbol);
+          const ticker = Array.isArray(tickerResult) ? tickerResult[0] : tickerResult;
+          
+          console.log(`✅ Fetched real ticker for ${symbol}:`, {
+            price: ticker.price,
+            change: ticker.changePercent24h,
+            volume: ticker.volume24h
+          });
+          
+          // Animate price update
+          if (animatedValues.current[symbol]) {
+            Animated.sequence([
+              Animated.timing(animatedValues.current[symbol], {
+                toValue: 1.1,
+                duration: ANIMATION_DURATION / 2,
+                useNativeDriver: true,
+              }),
+              Animated.timing(animatedValues.current[symbol], {
+                toValue: 1,
+                duration: ANIMATION_DURATION / 2,
+                useNativeDriver: true,
+              }),
+            ]).start();
+          }
+          
+          updateTickerRef.current(ticker as any);
+          return ticker;
+        } catch (error) {
+          console.error(`❌ Error fetching ticker for ${symbol}:`, error);
+          return null;
+        }
+      });
+
+      await Promise.all(tickerPromises);
+      isInitialized.current = true;
+      
+      console.log(`✅ MARKET DATA INITIALIZATION COMPLETE`);
+    } catch (error) {
+      console.error(`❌ Error initializing market data:`, error);
+    }
+  }, []); // Remove updateTicker dependency to prevent re-creation
+
+  // Setup real-time WebSocket subscriptions
+  const setupRealTimeUpdates = useCallback(() => {
+    console.log(`🔌 SETTING UP REAL-TIME BINANCE WEBSOCKET SUBSCRIPTIONS`);
+    
+    // Clean up existing subscriptions
+    Object.values(unsubscribeFunctions.current).forEach(unsubscribe => unsubscribe());
+    unsubscribeFunctions.current = {};
+
+    POPULAR_PAIRS.forEach(symbol => {
+      try {
+        const unsubscribe = binanceService.subscribeToTicker(
+          symbol,
+          (ticker) => {
+            console.log(`📈 REAL-TIME UPDATE for ${symbol}:`, {
+              price: ticker.price,
+              change: ticker.changePercent24h
+            });
+
+            // Animate price change
+            if (animatedValues.current[symbol]) {
+              Animated.sequence([
+                Animated.timing(animatedValues.current[symbol], {
+                  toValue: 1.05,
+                  duration: ANIMATION_DURATION / 2,
+                  useNativeDriver: true,
+                }),
+                Animated.timing(animatedValues.current[symbol], {
+                  toValue: 1,
+                  duration: ANIMATION_DURATION / 2,
+                  useNativeDriver: true,
+                }),
+              ]).start();
+            }
+
+            updateTickerRef.current(ticker as any);
+          },
+          (error) => {
+            console.error(`❌ WebSocket error for ${symbol}:`, error);
+          }
+        );
+
+        unsubscribeFunctions.current[symbol] = unsubscribe;
+        console.log(`✅ WebSocket subscription active for ${symbol}`);
+      } catch (error) {
+        console.error(`❌ Error setting up WebSocket for ${symbol}:`, error);
+      }
+    });
+  }, []); // Remove updateTicker dependency to prevent re-creation
+
+  // Setup real market data and WebSocket connections - ONLY RUN ONCE
+  useEffect(() => {
+    console.log(`💰 SETTING UP REAL BINANCE MARKET DATA`);
+    
+    // Initialize market data
+    initializeMarketData();
+    
+    // Setup real-time updates
+    setupRealTimeUpdates();
+
+    // Setup periodic refresh for fallback
+    intervalRef.current = setInterval(() => {
+      // Reset initialization flag to allow periodic refresh
+      isInitialized.current = false;
+      initializeMarketData();
+    }, INITIAL_FETCH_INTERVAL);
+
+    return () => {
+      console.log(`🛑 CLEANING UP BINANCE CONNECTIONS`);
+      
+      // Clear interval
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+        intervalRef.current = null;
+      }
+      
+      // Unsubscribe from all WebSocket connections
+      Object.values(unsubscribeFunctions.current).forEach(unsubscribe => unsubscribe());
+      unsubscribeFunctions.current = {};
+      
+      isInitialized.current = false;
+    };
+  }, []); // Empty dependency array - only run once on mount
+
+
+  // Smooth pair selection with animation
+  const handlePairSelect = useCallback((symbol: string) => {
+    if (symbol === selectedPair) return;
+
+    console.log(`🔄 SMOOTH CRYPTO CHANGE:`, {
+      from: selectedPair,
+      to: symbol,
+      timestamp: new Date().toISOString()
+    });
+
+    // Animate the selection change
+    const currentAnim = animatedValues.current[selectedPair];
+    const newAnim = animatedValues.current[symbol];
+
+    if (currentAnim && newAnim) {
+      // Fade out current selection
+      Animated.timing(currentAnim, {
+        toValue: 0.7,
+        duration: ANIMATION_DURATION / 2,
+        useNativeDriver: true,
+      }).start(() => {
+        // Change selection
+        setSelectedPair(symbol);
+        
+        // Fade in new selection
+        Animated.parallel([
+          Animated.timing(currentAnim, {
+            toValue: 1,
+            duration: ANIMATION_DURATION / 2,
+            useNativeDriver: true,
+          }),
+          Animated.timing(newAnim, {
+            toValue: 1.2,
+            duration: ANIMATION_DURATION / 2,
+            useNativeDriver: true,
+          }),
+        ]).start(() => {
+          Animated.timing(newAnim, {
+            toValue: 1,
+            duration: ANIMATION_DURATION / 2,
+            useNativeDriver: true,
+          }).start();
+        });
+      });
+    } else {
+      setSelectedPair(symbol);
+    }
+  }, [selectedPair, setSelectedPair]);
 
   return (
     <View style={styles.container}>
@@ -56,24 +230,31 @@ export const MarketData: React.FC = () => {
           const ticker = tickers[symbol];
           const isSelected = symbol === selectedPair;
           const priceChangeColor = ticker?.changePercent24h >= 0 ? '#00ff88' : '#ff4444';
+          const animatedValue = animatedValues.current[symbol] || new Animated.Value(1);
           
           return (
-            <TouchableOpacity
+            <Animated.View
               key={symbol}
-              style={[styles.pairItem, isSelected && styles.selectedPair]}
-              onPress={() => handlePairSelect(symbol)}
+              style={{
+                transform: [{ scale: animatedValue }],
+              }}
             >
-              <Text style={[styles.pairSymbol, isSelected && styles.selectedPairText]}>
-                {symbol.replace('USDT', '/USDT')}
-              </Text>
-              <Text style={[styles.pairPrice, isSelected && styles.selectedPairText]}>
-                ${ticker?.price?.toFixed(symbol === 'BTCUSDT' ? 0 : 2) || '0.00'}
-              </Text>
-              <Text style={[styles.pairChange, { color: priceChangeColor }]}>
-                {ticker?.changePercent24h >= 0 ? '+' : ''}
-                {ticker?.changePercent24h?.toFixed(2) || '0.00'}%
-              </Text>
-            </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.pairItem, isSelected && styles.selectedPair]}
+                onPress={() => handlePairSelect(symbol)}
+                activeOpacity={0.8}
+              >
+                <Text style={[styles.pairSymbol, isSelected && styles.selectedPairText]}>
+                  {symbol.replace('USDT', '/USDT')}
+                </Text>
+                <Text style={[styles.pairPrice, isSelected && styles.selectedPairText]}>
+                  ${formatPrice(ticker?.price || 0, symbol)}
+                </Text>
+                <Text style={[styles.pairChange, { color: priceChangeColor }]}>
+                  {formatPercentage(ticker?.changePercent24h || 0)}
+                </Text>
+              </TouchableOpacity>
+            </Animated.View>
           );
         })}
       </ScrollView>
@@ -107,10 +288,20 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     borderWidth: 1,
     borderColor: '#333333',
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+    elevation: 5,
   },
   selectedPair: {
     backgroundColor: '#00ff88',
     borderColor: '#00ff88',
+    shadowColor: '#00ff88',
+    shadowOpacity: 0.5,
   },
   pairSymbol: {
     fontSize: 12,

@@ -8,14 +8,12 @@ import {
   TouchableOpacity,
   Animated,
 } from 'react-native';
-import { useMarket } from '../../context/AppContext';
-import { formatPrice, formatPercentage } from '../../utils/formatters';
 
 const { width: screenWidth } = Dimensions.get('window');
 const CHART_HEIGHT = 300;
 const CANDLE_WIDTH = 8;
 const CANDLE_SPACING = 2;
-const HISTORICAL_CANDLES_COUNT = 50;
+const HISTORICAL_CANDLES_COUNT = 50; // Reducido para carga más rápida
 
 const TIMEFRAMES: { label: string; value: string }[] = [
   { label: '1m', value: '1m' },
@@ -37,133 +35,136 @@ interface CandleData {
 
 export const CandlestickChart: React.FC = () => {
   const [selectedTimeframe, setSelectedTimeframe] = useState<string>('1h');
-  const [candleData, setCandleData] = useState<Record<string, CandleData[]>>({});
+  const [selectedPair, setSelectedPair] = useState<string>('BTCUSDT');
+  const [candleData, setCandleData] = useState<Record<string, Record<string, CandleData[]>>>({});
   const [isLoading, setIsLoading] = useState(false);
   const fadeAnim = useRef(new Animated.Value(1)).current;
   const isDataInitialized = useRef<Record<string, boolean>>({});
-  const updateInterval = useRef<NodeJS.Timeout | null>(null);
-  
-  // Use market context
-  const { selectedPair, tickers } = useMarket();
 
-  // Calculate price range for chart scaling
-  const { minPrice, maxPrice, priceRange } = useMemo(() => {
-    const key = `${selectedPair}_${selectedTimeframe}`;
-    const candles = candleData[key] || [];
-    
+  // Mock current price data
+  const mockTickers: Record<string, { price: number; changePercent24h: number }> = {
+    'BTCUSDT': { price: 43250, changePercent24h: 2.45 },
+    'ETHUSDT': { price: 2680, changePercent24h: -1.23 },
+    'BNBUSDT': { price: 285.7, changePercent24h: 0.89 },
+    'SOLUSDT': { price: 98.5, changePercent24h: 4.12 },
+    'ADAUSDT': { price: 0.4156, changePercent24h: -0.67 },
+  };
+
+  // Memoized candles for current pair and timeframe
+  const candles = useMemo(() => {
+    return candleData[selectedPair]?.[selectedTimeframe] || [];
+  }, [candleData, selectedPair, selectedTimeframe]);
+
+  // Memoized price calculations
+  const priceData = useMemo(() => {
     if (candles.length === 0) return { minPrice: 0, maxPrice: 100, priceRange: 100 };
     
-    const prices = candles.flatMap((c: CandleData) => [c.high, c.low]);
-    const minPrice = Math.min(...prices) * 0.999;
-    const maxPrice = Math.max(...prices) * 1.001;
+    const minPrice = Math.min(...candles.map(c => c.low));
+    const maxPrice = Math.max(...candles.map(c => c.high));
     const priceRange = maxPrice - minPrice;
     
     return { minPrice, maxPrice, priceRange };
-  }, [candleData, selectedPair, selectedTimeframe]);
+  }, [candles]);
 
-  // Generate mock candle data using real ticker price as base
-  const generateMockCandles = useCallback((pair: string, timeframe: string): CandleData[] => {
-    const currentTicker = tickers[pair];
-    const basePrice = currentTicker?.price || 45000; // fallback price
-    const candles: CandleData[] = [];
-    let currentPrice = basePrice * 0.98;
+  const { minPrice, maxPrice, priceRange } = priceData;
+
+  // Get timeframe in milliseconds
+  const getTimeframeMs = (timeframe: string): number => {
+    const timeframes: Record<string, number> = {
+      '1m': 60 * 1000,
+      '5m': 5 * 60 * 1000,
+      '15m': 15 * 60 * 1000,
+      '30m': 30 * 60 * 1000,
+      '1h': 60 * 60 * 1000,
+      '2h': 2 * 60 * 60 * 1000,
+      '4h': 4 * 60 * 60 * 1000,
+      '6h': 6 * 60 * 60 * 1000,
+      '8h': 8 * 60 * 60 * 1000,
+      '12h': 12 * 60 * 60 * 1000,
+      '1d': 24 * 60 * 60 * 1000,
+      '3d': 3 * 24 * 60 * 60 * 1000,
+      '1w': 7 * 24 * 60 * 60 * 1000,
+      '1M': 30 * 24 * 60 * 60 * 1000,
+    };
+    return timeframes[timeframe] || 60 * 60 * 1000;
+  };
+
+  // Generate realistic mock candles
+  const generateMockCandles = useCallback((symbol: string, timeframe: string): CandleData[] => {
+    console.log(`🎭 GENERATING MOCK CANDLES for immediate visualization: ${symbol} ${timeframe}`);
     
-    for (let i = 0; i < HISTORICAL_CANDLES_COUNT; i++) {
-      const variation = (Math.random() - 0.5) * 0.02;
-      const open = currentPrice;
-      const changePercent = variation;
-      const high = open * (1 + Math.abs(changePercent) + Math.random() * 0.01);
-      const low = open * (1 - Math.abs(changePercent) - Math.random() * 0.01);
-      const close = open * (1 + changePercent);
+    const now = Date.now();
+    const intervalMs = getTimeframeMs(timeframe);
+    const basePrice = mockTickers[symbol]?.price || 50000;
+    const mockCandles: CandleData[] = [];
+    
+    let currentPrice = basePrice * 0.98; // Start slightly lower
+    
+    for (let i = HISTORICAL_CANDLES_COUNT - 1; i >= 0; i--) {
+      const timestamp = new Date(now - (i * intervalMs)).toISOString();
       
-      candles.push({
-        timestamp: new Date(Date.now() - (HISTORICAL_CANDLES_COUNT - i) * 60000).toISOString(),
+      // Create realistic price movement
+      const trend = (Math.random() - 0.5) * 0.02; // ±1% trend
+      const volatility = Math.random() * 0.01; // Up to 1% volatility
+      
+      const open = currentPrice;
+      const close = open * (1 + trend + (Math.random() - 0.5) * volatility);
+      const high = Math.max(open, close) * (1 + Math.random() * 0.005);
+      const low = Math.min(open, close) * (1 - Math.random() * 0.005);
+      const volume = Math.random() * 1000 + 100;
+      
+      mockCandles.push({
+        timestamp,
         open,
         high,
         low,
         close,
-        volume: Math.floor(Math.random() * 1000000) + 100000,
+        volume,
       });
       
-      currentPrice = close;
+      currentPrice = close; // Next candle starts where this one ended
     }
     
-    return candles;
-  }, [tickers]);
+    return mockCandles;
+  }, [mockTickers]);
 
-  // Get current candles
-  const candles = useMemo(() => {
-    const key = `${selectedPair}_${selectedTimeframe}`;
-    return candleData[key] || [];
-  }, [candleData, selectedPair, selectedTimeframe]);
-
-  // Real-time price updates using context tickers
-  const updateCandles = useCallback(() => {
-    const currentTicker = tickers[selectedPair];
-    if (!currentTicker) return;
-
-    setCandleData(prev => {
-      const key = `${selectedPair}_${selectedTimeframe}`;
-      const currentCandles = prev[key] || [];
-      
-      if (currentCandles.length === 0) return prev;
-      
-      const updatedCandles = [...currentCandles];
-      const lastCandle = updatedCandles[updatedCandles.length - 1];
-      
-      // Update last candle with real price data from ticker
-      const newClose = currentTicker.price;
-      const newHigh = Math.max(lastCandle.high, newClose);
-      const newLow = Math.min(lastCandle.low, newClose);
-      
-      updatedCandles[updatedCandles.length - 1] = {
-        ...lastCandle,
-        close: newClose,
-        high: newHigh,
-        low: newLow,
-      };
-      
-      return {
-        ...prev,
-        [key]: updatedCandles,
-      };
+  // Update candles function
+  const updateCandles = useCallback((symbol: string, timeframe: string, newCandles: CandleData[]) => {
+    console.log(`📊 UPDATING CANDLES:`, {
+      symbol,
+      timeframe,
+      candlesCount: newCandles.length,
+      lastCandlePrice: newCandles[newCandles.length - 1]?.close,
     });
-  }, [selectedPair, selectedTimeframe, tickers]);
 
-  // Initialize data and start real-time updates
+    setCandleData(prev => ({
+      ...prev,
+      [symbol]: {
+        ...prev[symbol],
+        [timeframe]: newCandles,
+      },
+    }));
+  }, []);
+
+  // Initialize data when pair or timeframe changes
   useEffect(() => {
     const key = `${selectedPair}_${selectedTimeframe}`;
     
-    if (!isDataInitialized.current[key]) {
+    // Show mock data immediately for instant visualization
+    if (!candleData[selectedPair]?.[selectedTimeframe] && !isDataInitialized.current[key]) {
+      console.log(`🚀 INITIALIZING IMMEDIATE MOCK DATA for ${key}`);
+      isDataInitialized.current[key] = true;
+      
       setIsLoading(true);
       
+      // Show mock data immediately
       setTimeout(() => {
         const mockCandles = generateMockCandles(selectedPair, selectedTimeframe);
-        setCandleData(prev => ({
-          ...prev,
-          [key]: mockCandles,
-        }));
-        
-        isDataInitialized.current[key] = true;
+        updateCandles(selectedPair, selectedTimeframe, mockCandles);
         setIsLoading(false);
-      }, 100);
+      }, 100); // Very short delay to show loading state
     }
-  }, [selectedPair, selectedTimeframe, generateMockCandles]);
-
-  // Start real-time updates
-  useEffect(() => {
-    if (updateInterval.current) {
-      clearInterval(updateInterval.current);
-    }
-    
-    updateInterval.current = setInterval(updateCandles, 2000);
-    
-    return () => {
-      if (updateInterval.current) {
-        clearInterval(updateInterval.current);
-      }
-    };
-  }, [updateCandles]);
+  }, [selectedPair, selectedTimeframe, candleData, generateMockCandles, updateCandles]);
 
   // Memoized candle rendering
   const renderCandle = useCallback((candle: CandleData, index: number) => {
@@ -201,13 +202,20 @@ export const CandlestickChart: React.FC = () => {
     );
   }, [maxPrice, priceRange]);
 
-  // Handle timeframe change
-  const handleTimeframeChange = useCallback((timeframe: string) => {
+  // Handle timeframe change with smooth transition
+  const handleTimeframeChange = (timeframe: string) => {
     if (timeframe === selectedTimeframe) return;
-    setSelectedTimeframe(timeframe);
-  }, [selectedTimeframe]);
+    
+    console.log(`🔄 CHANGING TIMEFRAME:`, {
+      from: selectedTimeframe,
+      to: timeframe,
+      pair: selectedPair
+    });
 
-  const currentTicker = tickers[selectedPair];
+    setSelectedTimeframe(timeframe);
+  };
+
+  const currentTicker = mockTickers[selectedPair];
   const currentPrice = currentTicker?.price || 0;
   const priceChange = currentTicker?.changePercent24h || 0;
 
@@ -218,13 +226,18 @@ export const CandlestickChart: React.FC = () => {
         <View style={styles.symbolInfo}>
           <Text style={styles.symbol}>{selectedPair.replace('USDT', '/USDT')}</Text>
           <Text style={styles.price}>
-            ${formatPrice(currentPrice, selectedPair)}
+            ${currentPrice.toFixed(
+              selectedPair === 'BTCUSDT' ? 0 :
+              selectedPair === 'ETHUSDT' ? 0 :
+              selectedPair === 'BNBUSDT' ? 1 :
+              selectedPair === 'SOLUSDT' ? 1 : 4
+            )}
           </Text>
           <Text style={[
             styles.change,
             { color: priceChange >= 0 ? '#00ff88' : '#ff4444' }
           ]}>
-            {formatPercentage(priceChange)}
+            {priceChange >= 0 ? '+' : ''}{priceChange.toFixed(2)}%
           </Text>
         </View>
       </View>
@@ -277,13 +290,28 @@ export const CandlestickChart: React.FC = () => {
       {/* Price Scale */}
       <View style={styles.priceScale}>
         <Text style={styles.priceLabel}>
-          ${formatPrice(maxPrice, selectedPair)}
+          ${maxPrice.toFixed(
+            selectedPair === 'BTCUSDT' ? 0 :
+            selectedPair === 'ETHUSDT' ? 0 :
+            selectedPair === 'BNBUSDT' ? 1 :
+            selectedPair === 'SOLUSDT' ? 1 : 4
+          )}
         </Text>
         <Text style={styles.priceLabel}>
-          ${formatPrice((maxPrice + minPrice) / 2, selectedPair)}
+          ${((maxPrice + minPrice) / 2).toFixed(
+            selectedPair === 'BTCUSDT' ? 0 :
+            selectedPair === 'ETHUSDT' ? 0 :
+            selectedPair === 'BNBUSDT' ? 1 :
+            selectedPair === 'SOLUSDT' ? 1 : 4
+          )}
         </Text>
         <Text style={styles.priceLabel}>
-          ${formatPrice(minPrice, selectedPair)}
+          ${minPrice.toFixed(
+            selectedPair === 'BTCUSDT' ? 0 :
+            selectedPair === 'ETHUSDT' ? 0 :
+            selectedPair === 'BNBUSDT' ? 1 :
+            selectedPair === 'SOLUSDT' ? 1 : 4
+          )}
         </Text>
       </View>
     </View>
@@ -383,7 +411,7 @@ const styles = StyleSheet.create({
   priceScale: {
     position: 'absolute',
     right: 8,
-    top: 60,
+    top: 80,
     height: CHART_HEIGHT,
     justifyContent: 'space-between',
     paddingVertical: 8,
@@ -395,5 +423,3 @@ const styles = StyleSheet.create({
     paddingHorizontal: 4,
   },
 });
-
-export default CandlestickChart;
