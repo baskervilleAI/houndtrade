@@ -11,7 +11,6 @@ import {
 import { useAuth, useTrading, useMarket } from '../../context/AppContext';
 import { useMarketData } from '../../hooks/useMarketData';
 import { formatPrice, formatPercentage, formatCurrency } from '../../utils/formatters';
-import CandlestickChart from '../../components/chart/CandlestickChart_improved';
 import LiveCandlestickChart from '../../components/chart/LiveCandlestickChart';
 import { OrderForm } from '../../components/trading/OrderForm';
 import { PositionsList } from '../../components/trading/PositionsList';

@@ -501,6 +501,10 @@ export const CandlestickChartFinal: React.FC = () => {
     const wickTop = (priceMetrics.maxPrice - candle.high) / priceMetrics.priceRange * CHART_HEIGHT;
     
     const candleColor = isGreen ? '#00ff88' : '#ff4444';
+    const isLastCandle = index === visibleCandles.length - 1;
+    
+    // Para la última vela, evitar renderizar si es muy pequeña (evita el puntito)
+    const shouldRenderBody = bodyHeight >= 0.5 || !isLastCandle;
     
     return (
       <View 
@@ -525,22 +529,24 @@ export const CandlestickChartFinal: React.FC = () => {
             },
           ]}
         />
-        {/* Body */}
-        <View
-          style={[
-            styles.candleBody,
-            {
-              top: Math.max(0, bodyTop),
-              height: Math.max(1, Math.min(CHART_HEIGHT, bodyHeight)),
-              backgroundColor: candleColor,
-              width: chartState.candleWidth,
-              opacity: bodyHeight < 1 ? 0.8 : 1,
-            },
-          ]}
-        />
+        {/* Body - Solo renderizar si tiene altura suficiente o no es la última vela */}
+        {shouldRenderBody && (
+          <View
+            style={[
+              styles.candleBody,
+              {
+                top: Math.max(0, bodyTop),
+                height: Math.max(1, Math.min(CHART_HEIGHT, bodyHeight)),
+                backgroundColor: candleColor,
+                width: chartState.candleWidth,
+                opacity: bodyHeight < 1 ? 0.8 : 1,
+              },
+            ]}
+          />
+        )}
       </View>
     );
-  }, 'renderCandle'), [priceMetrics, chartState.candleWidth, measurePerformance]);
+  }, 'renderCandle'), [priceMetrics, chartState.candleWidth, measurePerformance, visibleCandles.length]);
 
   // Handle timeframe change
   const handleTimeframeChange = useCallback(async (timeframe: typeof TIMEFRAMES[0]) => {
@@ -591,13 +597,31 @@ export const CandlestickChartFinal: React.FC = () => {
     }
 
     const totalWidth = visibleCandles.length * (chartState.candleWidth + CANDLE_SPACING);
+    
+    // Calcular la posición de la línea horizontal para el precio de cierre de la última vela
+    const lastCandle = visibleCandles[visibleCandles.length - 1];
+    const lastClosePriceY = lastCandle ? 
+      (priceMetrics.maxPrice - lastCandle.close) / priceMetrics.priceRange * CHART_HEIGHT : 0;
 
     return (
       <View style={[styles.chart, { width: Math.max(totalWidth, screenWidth - 64) }]}>
         {visibleCandles.map((candle, index) => renderCandle(candle, index))}
+        
+        {/* Línea horizontal punteada para el precio de cierre de la última vela */}
+        {lastCandle && (
+          <View 
+            style={[
+              styles.lastClosePriceLine,
+              {
+                top: Math.max(0, Math.min(CHART_HEIGHT - 1, lastClosePriceY)),
+                width: Math.max(totalWidth, screenWidth - 64),
+              }
+            ]}
+          />
+        )}
       </View>
     );
-  }, [visibleCandles, isStreaming, renderCandle, chartState.candleWidth]);
+  }, [visibleCandles, isStreaming, renderCandle, chartState.candleWidth, priceMetrics]);
 
   return (
     <View style={styles.container}>
@@ -949,6 +973,18 @@ const styles = StyleSheet.create({
     fontSize: 10,
     color: '#cccccc',
     textAlign: 'center',
+  },
+  lastClosePriceLine: {
+    position: 'absolute',
+    height: 1,
+    backgroundColor: '#888888',
+    opacity: 0.6,
+    borderStyle: 'dashed',
+    borderTopWidth: 1,
+    borderTopColor: '#888888',
+    borderBottomWidth: 0,
+    borderLeftWidth: 0,
+    borderRightWidth: 0,
   },
 });
 
