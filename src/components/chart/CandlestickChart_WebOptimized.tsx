@@ -101,6 +101,8 @@ export const CandlestickChartFinal: React.FC = () => {
     stopStream,
     restartStream,
     changeCycleSpeed,
+    clearCandles,
+    loadHistoricalData,
     hasData,
     isActive
   } = useUltraFastChart({
@@ -111,17 +113,71 @@ export const CandlestickChartFinal: React.FC = () => {
     autoStart: true,
   });
 
+  // Cargar datos manualmente si no hay datos después de un tiempo
+  useEffect(() => {
+    if (!hasData && !isStreaming) {
+      const timer = setTimeout(() => {
+        console.log(`⏰ No hay datos después de 3 segundos, cargando manualmente para ${selectedPair}`);
+        loadHistoricalData().catch(console.error);
+      }, 3000);
+
+      return () => clearTimeout(timer);
+    }
+  }, [hasData, isStreaming, selectedPair, loadHistoricalData]);
+
   // Enhanced candle processing con validación
   const processedCandles = useMemo(() => {
-    return candles
-      .filter(validateCandleData)
-      .map((candle, index, arr) => {
-        if (!validateCandleData(candle)) {
-          const referencePrice = index > 0 ? arr[index - 1].close : undefined;
-          return fixInvalidCandle(candle, referencePrice);
+    if (!candles || candles.length === 0) {
+      console.log('📊 No candles to process');
+      return [];
+    }
+
+    console.log(`🔍 Processing ${candles.length} raw candles for validation`);
+    
+    const validCandles: CandleData[] = [];
+    
+    candles.forEach((candle, index) => {
+      // First validate the candle data
+      if (!validateCandleData(candle)) {
+        console.warn(`⚠️ Invalid candle at index ${index}, attempting to fix:`, {
+          timestamp: candle?.timestamp,
+          open: candle?.open,
+          high: candle?.high,
+          low: candle?.low,
+          close: candle?.close,
+          volume: candle?.volume
+        });
+        
+        // Try to get reference price from previous valid candle
+        const referencePrice = validCandles.length > 0 
+          ? validCandles[validCandles.length - 1].close 
+          : undefined;
+        
+        const fixedCandle = fixInvalidCandle(candle, referencePrice);
+        
+        // Validate the fixed candle
+        if (!validateCandleData(fixedCandle)) {
+          console.error(`❌ Could not fix candle at index ${index}, skipping`);
+          return;
         }
-        return candle;
-      });
+        
+        console.log(`✅ Fixed candle at index ${index}:`, {
+          timestamp: fixedCandle.timestamp,
+          open: fixedCandle.open,
+          high: fixedCandle.high,
+          low: fixedCandle.low,
+          close: fixedCandle.close
+        });
+        
+        validCandles.push(fixedCandle);
+      } else {
+        validCandles.push(candle);
+      }
+    });
+
+    console.log(`✅ Processed ${validCandles.length} valid candles out of ${candles.length} total`);
+    
+    return validCandles;
   }, [candles]);
 
   // Track response times para métricas de performance
@@ -257,6 +313,13 @@ export const CandlestickChartFinal: React.FC = () => {
         
         <TouchableOpacity 
           style={styles.quickButton} 
+          onPress={() => chartWebViewRef?.postMessage?.(JSON.stringify({ type: 'AUTO_FIT' }))}
+        >
+          <Text style={styles.quickButtonText}>📏 Auto-Fit</Text>
+        </TouchableOpacity>
+        
+        <TouchableOpacity 
+          style={styles.quickButton} 
           onPress={() => chartWebViewRef?.postMessage?.(JSON.stringify({ type: 'GO_TO_LATEST' }))}
         >
           <Text style={styles.quickButtonText}>⏭️ Último</Text>
@@ -289,7 +352,7 @@ export const CandlestickChartFinal: React.FC = () => {
         
         <View style={styles.infoDisplay}>
           <Text style={styles.infoText}>
-            Chart.js Financial con controles nativos | Zoom: Rueda | Pan: Arrastrar | Volumen: {showVolume ? 'ON' : 'OFF'}
+            Chart.js Financial | Auto-fit aplicado | Datos: {processedCandles.length} velas
           </Text>
         </View>
       </View>
@@ -327,7 +390,7 @@ export const CandlestickChartFinal: React.FC = () => {
           candles={processedCandles}
           symbol={selectedPair}
           isStreaming={isStreaming}
-          lastCandle={lastCandle}
+          lastCandle={processedCandles.length > 0 ? processedCandles[processedCandles.length - 1] : undefined}
           onZoom={handleChartZoom}
           onPan={handleChartPan}
           onWebViewReady={setChartWebViewRef}

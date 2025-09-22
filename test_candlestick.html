@@ -1,0 +1,435 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Test Gráfico Velas Japonesas - Chart.js Financial</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            background: #0a0a0a;
+            color: #ffffff;
+            font-family: Arial, sans-serif;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+        }
+        .chart-container {
+            width: 100%;
+            height: 400px;
+            background: #1a1a1a;
+            border-radius: 8px;
+            padding: 10px;
+            margin: 20px 0;
+            border: 1px solid #333;
+        }
+        .controls {
+            text-align: center;
+            margin: 10px 0;
+        }
+        button {
+            background: #333;
+            border: none;
+            color: #fff;
+            padding: 8px 12px;
+            margin: 0 5px;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        button:hover {
+            background: #555;
+        }
+        .info {
+            background: #333;
+            padding: 10px;
+            border-radius: 4px;
+            margin: 10px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🧪 Test Chart.js Financial - Velas Japonesas</h1>
+        
+        <div class="info">
+            <h3>📊 Información del Test:</h3>
+            <ul>
+                <li>Chart.js v4.4.0</li>
+                <li>Chart.js Financial v0.2.1</li>
+                <li>8 velas estáticas de prueba</li>
+                <li>Datos BTCUSDT simulados</li>
+            </ul>
+        </div>
+
+        <div class="controls">
+            <button onclick="resetChart()">🔄 Reset</button>
+            <button onclick="autoFit()">📏 Auto-Fit</button>
+            <button onclick="addRandomCandle()">➕ Agregar Vela</button>
+            <button onclick="toggleTheme()">🎨 Tema</button>
+        </div>
+
+        <div class="chart-container">
+            <canvas id="candlestickChart"></canvas>
+        </div>
+
+        <div class="info" id="chartInfo">
+            <p>Cargando Chart.js...</p>
+        </div>
+    </div>
+
+    <!-- Cargar librerías -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-chart-financial@0.2.1/dist/chartjs-chart-financial.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+
+    <script>
+        // Datos de prueba
+        const testData = [
+            { x: new Date('2025-09-22T10:00:00Z').getTime(), o: 112000, h: 112500, l: 111800, c: 112300 },
+            { x: new Date('2025-09-22T11:00:00Z').getTime(), o: 112300, h: 112800, l: 112100, c: 112600 },
+            { x: new Date('2025-09-22T12:00:00Z').getTime(), o: 112600, h: 112900, l: 112400, c: 112200 },
+            { x: new Date('2025-09-22T13:00:00Z').getTime(), o: 112200, h: 112700, l: 111900, c: 112500 },
+            { x: new Date('2025-09-22T14:00:00Z').getTime(), o: 112500, h: 113000, l: 112300, c: 112800 },
+            { x: new Date('2025-09-22T15:00:00Z').getTime(), o: 112800, h: 113200, l: 112600, c: 112900 },
+            { x: new Date('2025-09-22T16:00:00Z').getTime(), o: 112900, h: 113100, l: 112500, c: 112700 },
+            { x: new Date('2025-09-22T17:00:00Z').getTime(), o: 112700, h: 113000, l: 112400, c: 112850 },
+        ];
+
+        let chart;
+        let isDarkTheme = true;
+
+        function initChart() {
+            console.log('🚀 Inicializando gráfico de prueba...');
+            
+            // Verificar librerías antes de proceder
+            if (typeof Chart === 'undefined') {
+                console.error('❌ Chart.js no está disponible');
+                document.getElementById('chartInfo').innerHTML = '❌ Chart.js no cargado';
+                return;
+            }
+            
+            if (typeof ChartFinancial === 'undefined') {
+                console.error('❌ Chart.js Financial no está disponible');
+                document.getElementById('chartInfo').innerHTML = '❌ Chart.js Financial no cargado';
+                return;
+            }
+            
+            try {
+                // Registrar componentes con verificación
+                console.log('📝 Registrando componentes Chart.js Financial...');
+                Chart.register(
+                    ChartFinancial.CandlestickController,
+                    ChartFinancial.CandlestickElement,
+                    ChartFinancial.OhlcController,
+                    ChartFinancial.OhlcElement
+                );
+                console.log('✅ Componentes registrados');
+
+                const canvas = document.getElementById('candlestickChart');
+                if (!canvas) {
+                    throw new Error('Canvas no encontrado');
+                }
+                
+                const ctx = canvas.getContext('2d');
+                if (!ctx) {
+                    throw new Error('No se pudo obtener contexto 2D');
+                }
+                
+                console.log('📊 Creando configuración del gráfico...');
+                const config = {
+                    type: 'candlestick',
+                    data: {
+                        datasets: [{
+                            label: 'BTC/USDT Test',
+                            data: [...testData],
+                            borderColor: {
+                                up: '#00ff88',
+                                down: '#ff4444',
+                                unchanged: '#999999',
+                            },
+                            backgroundColor: {
+                                up: 'rgba(0, 255, 136, 0.1)',
+                                down: 'rgba(255, 68, 68, 0.1)',
+                                unchanged: 'rgba(153, 153, 153, 0.1)',
+                            },
+                            borderWidth: 2,
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        interaction: {
+                            intersect: false,
+                            mode: 'index'
+                        },
+                        scales: {
+                            x: {
+                                type: 'time',
+                                time: {
+                                    unit: 'hour',
+                                    displayFormats: {
+                                        hour: 'HH:mm'
+                                    }
+                                },
+                                title: {
+                                    display: true,
+                                    text: 'Tiempo',
+                                    color: '#ffffff'
+                                },
+                                grid: {
+                                    color: 'rgba(255, 255, 255, 0.1)',
+                                },
+                                ticks: {
+                                    color: '#ffffff',
+                                    maxTicksLimit: 8
+                                }
+                            },
+                            y: {
+                                type: 'linear',
+                                position: 'right',
+                                beginAtZero: false,
+                                title: {
+                                    display: true,
+                                    text: 'Precio (USDT)',
+                                    color: '#ffffff'
+                                },
+                                grid: {
+                                    color: 'rgba(255, 255, 255, 0.1)',
+                                },
+                                ticks: {
+                                    color: '#ffffff',
+                                    callback: function(value) {
+                                        return '$' + value.toLocaleString();
+                                    }
+                                }
+                            }
+                        },
+                        plugins: {
+                            title: {
+                                display: true,
+                                text: '📊 Test Velas Japonesas - Chart.js Financial',
+                                color: '#ffffff',
+                                font: {
+                                    size: 16,
+                                    weight: 'bold'
+                                }
+                            },
+                            legend: {
+                                display: true,
+                                labels: {
+                                    color: '#ffffff'
+                                }
+                            },
+                            tooltip: {
+                                mode: 'index',
+                                intersect: false,
+                                backgroundColor: 'rgba(0, 0, 0, 0.9)',
+                                titleColor: '#ffffff',
+                                bodyColor: '#ffffff',
+                                borderColor: '#333333',
+                                borderWidth: 1,
+                                callbacks: {
+                                    title: function(context) {
+                                        return new Date(context[0].parsed.x).toLocaleString();
+                                    },
+                                    label: function(context) {
+                                        const data = context.raw;
+                                        return [
+                                            `Open: $${data.o.toLocaleString()}`,
+                                            `High: $${data.h.toLocaleString()}`,
+                                            `Low: $${data.l.toLocaleString()}`,
+                                            `Close: $${data.c.toLocaleString()}`
+                                        ];
+                                    }
+                                }
+                            }
+                        },
+                        animation: {
+                            duration: 1000
+                        }
+                    }
+                };
+
+                console.log('🎯 Creando instancia Chart...');
+                chart = new Chart(ctx, config);
+                
+                console.log('✅ Gráfico creado exitosamente');
+                updateInfo();
+                
+                // Auto-fit inicial
+                setTimeout(autoFit, 1000);
+                
+            } catch (error) {
+                console.error('❌ Error al crear gráfico:', error);
+                document.getElementById('chartInfo').innerHTML = `❌ Error: ${error.message}`;
+            }
+        }
+
+        function resetChart() {
+            if (chart) {
+                chart.data.datasets[0].data = [...testData];
+                chart.resetZoom();
+                chart.update();
+                updateInfo();
+            }
+        }
+
+        function autoFit() {
+            if (chart && chart.data.datasets[0].data.length > 0) {
+                const data = chart.data.datasets[0].data;
+                const times = data.map(d => d.x);
+                const prices = data.flatMap(d => [d.h, d.l]);
+                
+                const minTime = Math.min(...times);
+                const maxTime = Math.max(...times);
+                const minPrice = Math.min(...prices);
+                const maxPrice = Math.max(...prices);
+                
+                const timeRange = maxTime - minTime;
+                const priceRange = maxPrice - minPrice;
+                
+                chart.options.scales.x.min = minTime - (timeRange * 0.05);
+                chart.options.scales.x.max = maxTime + (timeRange * 0.05);
+                chart.options.scales.y.min = minPrice - (priceRange * 0.1);
+                chart.options.scales.y.max = maxPrice + (priceRange * 0.1);
+                
+                chart.update();
+                updateInfo();
+            }
+        }
+
+        function addRandomCandle() {
+            if (chart) {
+                const lastCandle = chart.data.datasets[0].data[chart.data.datasets[0].data.length - 1];
+                const nextTime = lastCandle.x + (60 * 60 * 1000); // +1 hora
+                
+                const basePrice = lastCandle.c;
+                const variation = (Math.random() - 0.5) * 0.02; // ±2%
+                const open = basePrice;
+                const close = basePrice * (1 + variation);
+                const high = Math.max(open, close) * (1 + Math.random() * 0.01);
+                const low = Math.min(open, close) * (1 - Math.random() * 0.01);
+                
+                const newCandle = {
+                    x: nextTime,
+                    o: open,
+                    h: high,
+                    l: low,
+                    c: close
+                };
+                
+                chart.data.datasets[0].data.push(newCandle);
+                chart.update();
+                updateInfo();
+            }
+        }
+
+        function toggleTheme() {
+            if (chart) {
+                isDarkTheme = !isDarkTheme;
+                
+                const colors = isDarkTheme ? {
+                    bg: '#1a1a1a',
+                    text: '#ffffff',
+                    grid: 'rgba(255, 255, 255, 0.1)'
+                } : {
+                    bg: '#ffffff',
+                    text: '#000000',
+                    grid: 'rgba(0, 0, 0, 0.1)'
+                };
+                
+                chart.options.plugins.title.color = colors.text;
+                chart.options.plugins.legend.labels.color = colors.text;
+                chart.options.scales.x.title.color = colors.text;
+                chart.options.scales.x.ticks.color = colors.text;
+                chart.options.scales.x.grid.color = colors.grid;
+                chart.options.scales.y.title.color = colors.text;
+                chart.options.scales.y.ticks.color = colors.text;
+                chart.options.scales.y.grid.color = colors.grid;
+                
+                document.querySelector('.chart-container').style.backgroundColor = colors.bg;
+                chart.update();
+            }
+        }
+
+        function updateInfo() {
+            if (chart) {
+                const data = chart.data.datasets[0].data;
+                const candleCount = data.length;
+                
+                let priceInfo = '';
+                if (candleCount > 0) {
+                    const prices = data.flatMap(d => [d.h, d.l]);
+                    const minPrice = Math.min(...prices);
+                    const maxPrice = Math.max(...prices);
+                    const lastPrice = data[data.length - 1].c;
+                    
+                    priceInfo = `
+                        <p><strong>📊 Estadísticas del Gráfico:</strong></p>
+                        <ul>
+                            <li>🕯️ Velas: ${candleCount}</li>
+                            <li>💰 Último precio: $${lastPrice.toLocaleString()}</li>
+                            <li>📈 Precio máximo: $${maxPrice.toLocaleString()}</li>
+                            <li>📉 Precio mínimo: $${minPrice.toLocaleString()}</li>
+                            <li>📊 Rango: $${(maxPrice - minPrice).toLocaleString()}</li>
+                            <li>🎯 Tema: ${isDarkTheme ? 'Oscuro' : 'Claro'}</li>
+                        </ul>
+                    `;
+                }
+                
+                document.getElementById('chartInfo').innerHTML = priceInfo;
+            }
+        }
+
+        // Debug de carga de librerías
+        function checkLibraries() {
+            console.log('🔍 Verificando librerías...');
+            console.log('Chart.js disponible:', typeof Chart !== 'undefined');
+            console.log('Chart.js Financial disponible:', typeof ChartFinancial !== 'undefined');
+            
+            if (typeof Chart === 'undefined') {
+                document.getElementById('chartInfo').innerHTML = '❌ Error: Chart.js no se cargó correctamente';
+                return false;
+            }
+            
+            if (typeof ChartFinancial === 'undefined') {
+                document.getElementById('chartInfo').innerHTML = '❌ Error: Chart.js Financial no se cargó correctamente';
+                return false;
+            }
+            
+            console.log('✅ Todas las librerías están cargadas');
+            return true;
+        }
+
+        // Inicializar con mejor manejo de errores
+        function safeInit() {
+            try {
+                if (checkLibraries()) {
+                    initChart();
+                } else {
+                    console.error('❌ No se pudieron cargar las librerías');
+                    setTimeout(safeInit, 1000); // Reintentar en 1 segundo
+                }
+            } catch (error) {
+                console.error('❌ Error en inicialización:', error);
+                document.getElementById('chartInfo').innerHTML = `❌ Error: ${error.message}`;
+            }
+        }
+
+        // Múltiples intentos de inicialización
+        window.addEventListener('load', function() {
+            console.log('🚀 Página cargada, iniciando...');
+            setTimeout(safeInit, 100);
+        });
+
+        // Fallback adicional
+        setTimeout(function() {
+            if (!chart) {
+                console.log('🔄 Intentando inicialización alternativa...');
+                safeInit();
+            }
+        }, 2000);
+    </script>
+</body>
+</html>

@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Test Velas Japonesas - Chart.js Local</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            background: #000;
+            color: #fff;
+            font-family: Arial, sans-serif;
+        }
+        .chart-container {
+            width: 600px;
+            height: 400px;
+            background: #111;
+            border: 2px solid #333;
+            margin: 20px 0;
+            position: relative;
+        }
+        #status {
+            background: #222;
+            padding: 10px;
+            border-radius: 5px;
+            margin: 10px 0;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+        .controls {
+            margin: 10px 0;
+        }
+        button {
+            background: #333;
+            color: #fff;
+            border: none;
+            padding: 8px 12px;
+            margin: 0 5px;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        button:hover {
+            background: #555;
+        }
+    </style>
+</head>
+<body>
+    <h1>🕯️ Test Velas Japonesas - Chart.js Local</h1>
+    
+    <div id="status">
+        <div id="log">⏳ Cargando Chart.js desde node_modules...</div>
+    </div>
+
+    <div class="controls">
+        <button onclick="testSimpleChart()">📊 Test Gráfico Simple</button>
+        <button onclick="testCandlestickChart()">🕯️ Test Velas Japonesas</button>
+        <button onclick="clearStatus()">🧹 Limpiar Log</button>
+    </div>
+
+    <div class="chart-container">
+        <canvas id="chart" width="600" height="400"></canvas>
+    </div>
+
+    <!-- Cargar desde node_modules -->
+    <script src="./node_modules/chart.js/dist/chart.min.js"></script>
+    <script src="./node_modules/chartjs-chart-financial/dist/chartjs-chart-financial.min.js"></script>
+    <script src="./node_modules/chartjs-adapter-date-fns/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+
+    <script>
+        const log = document.getElementById('log');
+        let currentChart = null;
+        
+        function updateLog(message) {
+            const timestamp = new Date().toLocaleTimeString();
+            log.innerHTML += '<br>[' + timestamp + '] ' + message;
+            console.log(message);
+            // Auto-scroll
+            log.scrollTop = log.scrollHeight;
+        }
+        
+        function clearStatus() {
+            log.innerHTML = '🧹 Log limpiado';
+        }
+        
+        // Datos de velas japonesas de prueba
+        const candleData = [
+            { x: new Date('2025-09-22T10:00:00Z').getTime(), o: 112000, h: 112500, l: 111800, c: 112300 },
+            { x: new Date('2025-09-22T11:00:00Z').getTime(), o: 112300, h: 112800, l: 112100, c: 112600 },
+            { x: new Date('2025-09-22T12:00:00Z').getTime(), o: 112600, h: 112900, l: 112400, c: 112200 },
+            { x: new Date('2025-09-22T13:00:00Z').getTime(), o: 112200, h: 112700, l: 111900, c: 112500 },
+            { x: new Date('2025-09-22T14:00:00Z').getTime(), o: 112500, h: 113000, l: 112300, c: 112800 },
+            { x: new Date('2025-09-22T15:00:00Z').getTime(), o: 112800, h: 113200, l: 112600, c: 112900 },
+            { x: new Date('2025-09-22T16:00:00Z').getTime(), o: 112900, h: 113100, l: 112500, c: 112700 },
+            { x: new Date('2025-09-22T17:00:00Z').getTime(), o: 112700, h: 113000, l: 112400, c: 112850 },
+        ];
+        
+        function destroyCurrentChart() {
+            if (currentChart) {
+                currentChart.destroy();
+                currentChart = null;
+                updateLog('🗑️ Gráfico anterior destruido');
+            }
+        }
+        
+        function testSimpleChart() {
+            updateLog('📊 Iniciando test de gráfico simple...');
+            
+            if (typeof Chart === 'undefined') {
+                updateLog('❌ Chart.js no está disponible');
+                return;
+            }
+            
+            try {
+                destroyCurrentChart();
+                
+                const ctx = document.getElementById('chart').getContext('2d');
+                
+                currentChart = new Chart(ctx, {
+                    type: 'line',
+                    data: {
+                        labels: ['10:00', '11:00', '12:00', '13:00', '14:00', '15:00', '16:00', '17:00'],
+                        datasets: [{
+                            label: 'Precio Simple',
+                            data: [112.3, 112.6, 112.2, 112.5, 112.8, 112.9, 112.7, 112.85],
+                            borderColor: '#00ff88',
+                            backgroundColor: 'rgba(0, 255, 136, 0.1)',
+                            borderWidth: 2,
+                            fill: true
+                        }]
+                    },
+                    options: {
+                        responsive: false,
+                        animation: {
+                            duration: 1000
+                        },
+                        scales: {
+                            y: {
+                                beginAtZero: false,
+                                ticks: {
+                                    color: '#fff',
+                                    callback: function(value) {
+                                        return '$' + value + 'k';
+                                    }
+                                },
+                                grid: {
+                                    color: 'rgba(255, 255, 255, 0.1)'
+                                }
+                            },
+                            x: {
+                                ticks: {
+                                    color: '#fff'
+                                },
+                                grid: {
+                                    color: 'rgba(255, 255, 255, 0.1)'
+                                }
+                            }
+                        },
+                        plugins: {
+                            title: {
+                                display: true,
+                                text: '📊 Gráfico de Línea Simple',
+                                color: '#fff',
+                                font: {
+                                    size: 16
+                                }
+                            },
+                            legend: {
+                                labels: {
+                                    color: '#fff'
+                                }
+                            }
+                        }
+                    }
+                });
+                
+                updateLog('✅ Gráfico simple creado exitosamente');
+                
+            } catch (error) {
+                updateLog('❌ Error creando gráfico simple: ' + error.message);
+                console.error('Error completo:', error);
+            }
+        }
+        
+        function testCandlestickChart() {
+            updateLog('🕯️ Iniciando test de velas japonesas...');
+            
+            // Verificar dependencias
+            if (typeof Chart === 'undefined') {
+                updateLog('❌ Chart.js no está disponible');
+                return;
+            }
+            
+            if (typeof ChartFinancial === 'undefined') {
+                updateLog('❌ Chart.js Financial no está disponible');
+                return;
+            }
+            
+            try {
+                destroyCurrentChart();
+                
+                updateLog('🔧 Registrando componentes Chart.js Financial...');
+                
+                // Registrar componentes
+                Chart.register(
+                    ChartFinancial.CandlestickController,
+                    ChartFinancial.CandlestickElement,
+                    ChartFinancial.OhlcController,
+                    ChartFinancial.OhlcElement
+                );
+                
+                updateLog('✅ Componentes registrados');
+                
+                const ctx = document.getElementById('chart').getContext('2d');
+                
+                updateLog('📊 Creando gráfico de velas japonesas...');
+                
+                currentChart = new Chart(ctx, {
+                    type: 'candlestick',
+                    data: {
+                        datasets: [{
+                            label: 'BTC/USDT Test',
+                            data: candleData,
+                            borderColor: {
+                                up: '#00ff88',
+                                down: '#ff4444',
+                                unchanged: '#999999',
+                            },
+                            backgroundColor: {
+                                up: 'rgba(0, 255, 136, 0.1)',
+                                down: 'rgba(255, 68, 68, 0.1)',
+                                unchanged: 'rgba(153, 153, 153, 0.1)',
+                            },
+                            borderWidth: 2,
+                        }]
+                    },
+                    options: {
+                        responsive: false,
+                        animation: {
+                            duration: 1000
+                        },
+                        scales: {
+                            x: {
+                                type: 'time',
+                                time: {
+                                    unit: 'hour',
+                                    displayFormats: {
+                                        hour: 'HH:mm'
+                                    }
+                                },
+                                ticks: {
+                                    color: '#fff'
+                                },
+                                grid: {
+                                    color: 'rgba(255, 255, 255, 0.1)'
+                                }
+                            },
+                            y: {
+                                type: 'linear',
+                                position: 'right',
+                                ticks: {
+                                    color: '#fff',
+                                    callback: function(value) {
+                                        return '$' + (value/1000).toFixed(1) + 'k';
+                                    }
+                                },
+                                grid: {
+                                    color: 'rgba(255, 255, 255, 0.1)'
+                                }
+                            }
+                        },
+                        plugins: {
+                            title: {
+                                display: true,
+                                text: '🕯️ Velas Japonesas Chart.js Financial',
+                                color: '#fff',
+                                font: {
+                                    size: 16
+                                }
+                            },
+                            legend: {
+                                labels: {
+                                    color: '#fff'
+                                }
+                            },
+                            tooltip: {
+                                mode: 'index',
+                                backgroundColor: 'rgba(0, 0, 0, 0.9)',
+                                titleColor: '#fff',
+                                bodyColor: '#fff',
+                                callbacks: {
+                                    title: function(context) {
+                                        return new Date(context[0].parsed.x).toLocaleString();
+                                    },
+                                    label: function(context) {
+                                        const data = context.raw;
+                                        return [
+                                            'Open: $' + (data.o/1000).toFixed(1) + 'k',
+                                            'High: $' + (data.h/1000).toFixed(1) + 'k',
+                                            'Low: $' + (data.l/1000).toFixed(1) + 'k',
+                                            'Close: $' + (data.c/1000).toFixed(1) + 'k'
+                                        ];
+                                    }
+                                }
+                            }
+                        }
+                    }
+                });
+                
+                updateLog('✅ ¡Gráfico de velas japonesas creado exitosamente!');
+                updateLog('📈 ' + candleData.length + ' velas renderizadas');
+                
+            } catch (error) {
+                updateLog('❌ Error creando velas japonesas: ' + error.message);
+                console.error('Error completo:', error);
+                console.error('Stack trace:', error.stack);
+            }
+        }
+        
+        // Verificación inicial
+        window.addEventListener('load', function() {
+            updateLog('🔍 Verificando dependencias cargadas...');
+            
+            if (typeof Chart !== 'undefined') {
+                updateLog('✅ Chart.js disponible - versión: ' + (Chart.version || 'desconocida'));
+            } else {
+                updateLog('❌ Chart.js NO disponible');
+            }
+            
+            if (typeof ChartFinancial !== 'undefined') {
+                updateLog('✅ Chart.js Financial disponible');
+                updateLog('🔧 Controladores disponibles: ' + Object.keys(ChartFinancial).join(', '));
+            } else {
+                updateLog('❌ Chart.js Financial NO disponible');
+            }
+            
+            // Probar gráfico simple automáticamente
+            setTimeout(() => {
+                updateLog('🚀 Ejecutando test automático...');
+                testSimpleChart();
+            }, 1000);
+        });
+    </script>
+</body>
+</html>

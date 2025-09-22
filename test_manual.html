@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Test Manual Chart.js</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            background: #000;
+            color: #fff;
+            font-family: Arial, sans-serif;
+        }
+        .chart-container {
+            width: 400px;
+            height: 300px;
+            background: #111;
+            border: 2px solid #333;
+            margin: 20px 0;
+            position: relative;
+        }
+        #status {
+            background: #222;
+            padding: 10px;
+            border-radius: 5px;
+            margin: 10px 0;
+        }
+    </style>
+</head>
+<body>
+    <h1>🧪 Test Manual Chart.js desde node_modules</h1>
+    
+    <div id="status">
+        <div id="log">⏳ Cargando...</div>
+    </div>
+
+    <div class="chart-container">
+        <canvas id="chart" width="400" height="300"></canvas>
+    </div>
+
+    <!-- Intentar cargar desde node_modules local -->
+    <script src="./node_modules/chart.js/dist/chart.min.js"></script>
+    <script src="./node_modules/chartjs-chart-financial/dist/chartjs-chart-financial.min.js"></script>
+    <script src="./node_modules/chartjs-adapter-date-fns/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+
+    <script>
+        const log = document.getElementById('log');
+        
+        function updateLog(message) {
+            log.innerHTML += '<br>' + message;
+            console.log(message);
+        }
+        
+        updateLog('📋 Verificando dependencias...');
+        
+        // Verificar si Chart.js está disponible
+        if (typeof Chart === 'undefined') {
+            updateLog('❌ Chart.js no encontrado');
+        } else {
+            updateLog('✅ Chart.js disponible: v' + Chart.version);
+        }
+        
+        // Verificar Chart.js Financial
+        if (typeof ChartFinancial === 'undefined') {
+            updateLog('❌ Chart.js Financial no encontrado');
+        } else {
+            updateLog('✅ Chart.js Financial disponible');
+        }
+        
+        // Intentar crear gráfico simple
+        if (typeof Chart !== 'undefined') {
+            try {
+                updateLog('📊 Creando gráfico simple...');
+                
+                const ctx = document.getElementById('chart').getContext('2d');
+                
+                const simpleChart = new Chart(ctx, {
+                    type: 'line',
+                    data: {
+                        labels: ['Jan', 'Feb', 'Mar', 'Apr', 'May'],
+                        datasets: [{
+                            label: 'Test Data',
+                            data: [12, 19, 3, 5, 2],
+                            borderColor: '#00ff88',
+                            backgroundColor: 'rgba(0, 255, 136, 0.1)'
+                        }]
+                    },
+                    options: {
+                        responsive: false,
+                        scales: {
+                            y: {
+                                beginAtZero: true,
+                                ticks: {
+                                    color: '#fff'
+                                }
+                            },
+                            x: {
+                                ticks: {
+                                    color: '#fff'
+                                }
+                            }
+                        },
+                        plugins: {
+                            legend: {
+                                labels: {
+                                    color: '#fff'
+                                }
+                            }
+                        }
+                    }
+                });
+                
+                updateLog('✅ Gráfico simple creado exitosamente!');
+                
+            } catch (error) {
+                updateLog('❌ Error creando gráfico: ' + error.message);
+            }
+        }
+    </script>
+</body>
+</html>

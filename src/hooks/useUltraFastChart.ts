@@ -209,13 +209,60 @@ export const useUltraFastChart = (options: UseUltraFastChartOptions) => {
   useEffect(() => {
     if (autoStart) {
       clearCandles();
-      startUltraFastStream();
+      
+      // Primero cargar datos históricos, luego iniciar streaming
+      loadHistoricalData().then(() => {
+        console.log(`📊 Datos históricos cargados para ${symbol} ${timeframe}, iniciando streaming...`);
+        startUltraFastStream();
+      }).catch((error) => {
+        console.error(`❌ Error cargando datos históricos para ${symbol}:`, error);
+        // Aún así iniciar el streaming para intentar obtener datos en vivo
+        startUltraFastStream();
+      });
     }
 
     return () => {
       stopStream();
     };
-  }, [symbol, timeframe, autoStart, startUltraFastStream, stopStream, clearCandles]);
+  }, [symbol, timeframe, autoStart]);
+
+  // Función para cargar datos históricos iniciales
+  const loadHistoricalData = useCallback(async (): Promise<void> => {
+    try {
+      console.log(`📈 Cargando datos históricos para ${symbol} ${timeframe}...`);
+      
+      // Importar binanceService aquí para evitar dependencias circulares
+      const { binanceService } = await import('../services/binanceService');
+      
+      const interval = binanceService.getIntervalFromTimeframe(timeframe);
+      const historicalCandles = await binanceService.getKlines(symbol, interval, 100);
+      
+      if (historicalCandles && historicalCandles.length > 0) {
+        console.log(`✅ Cargados ${historicalCandles.length} datos históricos para ${symbol}`);
+        
+        // Validar y procesar las velas históricas
+        const validHistoricalCandles = historicalCandles
+          .filter(validateCandleData)
+          .map((candle, index, arr) => {
+            if (!validateCandleData(candle)) {
+              const referencePrice = index > 0 ? arr[index - 1].close : undefined;
+              return fixInvalidCandle(candle, referencePrice);
+            }
+            return candle;
+          });
+        
+        setCandles(validHistoricalCandles);
+        candlesRef.current = validHistoricalCandles;
+        
+        console.log(`📊 ${validHistoricalCandles.length} velas históricas válidas cargadas para ${symbol}`);
+      } else {
+        console.warn(`⚠️ No se pudieron cargar datos históricos para ${symbol}`);
+      }
+    } catch (error) {
+      console.error(`❌ Error cargando datos históricos para ${symbol}:`, error);
+      throw error;
+    }
+  }, [symbol, timeframe]);
 
   // Cleanup al desmontar
   useEffect(() => {
@@ -252,6 +299,7 @@ export const useUltraFastChart = (options: UseUltraFastChartOptions) => {
     restartStream,
     changeCycleSpeed,
     clearCandles,
+    loadHistoricalData,
     
     // Estado
     hasData: candles.length > 0,

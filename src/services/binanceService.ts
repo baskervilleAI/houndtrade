@@ -283,24 +283,32 @@ class BinanceService {
           : Date.now();
         
         // Safe parseFloat with fallback values to prevent NaN
-        const parseFloatSafe = (value: any, fallback: number = 0): number => {
-          if (value === null || value === undefined || value === '') return fallback;
+        const parseFloatSafe = (value: any, fallbackPrice?: number): number => {
+          if (value === null || value === undefined || value === '') {
+            return fallbackPrice || this.lastValidPrice || 50000;
+          }
           const parsed = parseFloat(value);
-          return isNaN(parsed) ? fallback : parsed;
+          if (isNaN(parsed) || parsed <= 0) {
+            return fallbackPrice || this.lastValidPrice || 50000;
+          }
+          return parsed;
         };
 
         const open_val = parseFloatSafe(open);
-        const high_val = parseFloatSafe(high);
-        const low_val = parseFloatSafe(low);
-        const close_val = parseFloatSafe(close);
-        const volume_val = parseFloatSafe(volume);
-        const quoteVolume_val = parseFloatSafe(quoteAssetVolume);
+        const high_val = parseFloatSafe(high, open_val);
+        const low_val = parseFloatSafe(low, open_val);
+        const close_val = parseFloatSafe(close, open_val);
+        const volume_val = parseFloatSafe(volume, 0);
+        const quoteVolume_val = parseFloatSafe(quoteAssetVolume, 0);
+        
+        // Ensure OHLC relationships are valid
+        const correctedHigh = Math.max(open_val, high_val, low_val, close_val);
+        const correctedLow = Math.min(open_val, high_val, low_val, close_val);
         
         // Validate that we have valid OHLC data
-        if (open_val === 0 && high_val === 0 && low_val === 0 && close_val === 0) {
-          console.warn(`⚠️ Invalid candle data for ${symbol}:`, kline);
-          // Use previous valid values or current market price as fallback
-          const fallbackPrice = this.lastValidPrice || 50000; // Default BTC price
+        if (open_val === 0 && close_val === 0) {
+          console.warn(`⚠️ Invalid candle data for ${symbol}, using fallback:`, kline);
+          const fallbackPrice = this.lastValidPrice || 50000;
           return {
             timestamp: new Date(timestamp).toISOString(),
             open: fallbackPrice,
@@ -319,12 +327,12 @@ class BinanceService {
         return {
           timestamp: new Date(timestamp).toISOString(),
           open: open_val,
-          high: high_val,
-          low: low_val,
+          high: correctedHigh,
+          low: correctedLow,
           close: close_val,
-          volume: volume_val,
+          volume: Math.max(0, volume_val),
           trades: numberOfTrades || 0,
-          quoteVolume: quoteVolume_val,
+          quoteVolume: Math.max(0, quoteVolume_val),
         };
       });
 

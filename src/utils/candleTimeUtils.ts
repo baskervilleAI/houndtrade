@@ -202,34 +202,100 @@ export function getCandleDebugInfo(candle: CandleData, interval: string): {
  * Valida que una vela tenga datos OHLCV válidos
  */
 export function validateCandleData(candle: CandleData): boolean {
-  return (
-    candle &&
-    typeof candle.open === 'number' && !isNaN(candle.open) && candle.open > 0 &&
-    typeof candle.high === 'number' && !isNaN(candle.high) && candle.high > 0 &&
-    typeof candle.low === 'number' && !isNaN(candle.low) && candle.low > 0 &&
-    typeof candle.close === 'number' && !isNaN(candle.close) && candle.close > 0 &&
-    typeof candle.volume === 'number' && !isNaN(candle.volume) && candle.volume >= 0 &&
-    candle.high >= candle.low &&
-    candle.high >= candle.open &&
-    candle.high >= candle.close &&
-    candle.low <= candle.open &&
-    candle.low <= candle.close
-  );
+  if (!candle || typeof candle !== 'object') {
+    return false;
+  }
+
+  // Check timestamp
+  if (!candle.timestamp) {
+    return false;
+  }
+
+  // Check that all OHLC values are valid numbers
+  const ohlc = [candle.open, candle.high, candle.low, candle.close];
+  for (const value of ohlc) {
+    if (typeof value !== 'number' || isNaN(value) || value <= 0) {
+      return false;
+    }
+  }
+
+  // Check volume (can be 0 but not negative or NaN)
+  if (typeof candle.volume !== 'number' || isNaN(candle.volume) || candle.volume < 0) {
+    return false;
+  }
+
+  // Validate OHLC relationships
+  const { open, high, low, close } = candle;
+  
+  // High should be the highest value
+  if (high < Math.max(open, close) || high < low) {
+    return false;
+  }
+  
+  // Low should be the lowest value
+  if (low > Math.min(open, close) || low > high) {
+    return false;
+  }
+
+  return true;
 }
 
 /**
  * Corrige una vela con datos inválidos usando datos de referencia
  */
 export function fixInvalidCandle(candle: CandleData, referencePrice?: number): CandleData {
-  const safePrice = referencePrice || candle.close || candle.open || 50000; // Fallback price
+  const timestamp = candle.timestamp || new Date().toISOString();
+  
+  // Determine a safe reference price
+  let safePrice = referencePrice;
+  if (!safePrice || isNaN(safePrice) || safePrice <= 0) {
+    // Try to use existing values from the candle
+    const prices = [candle.open, candle.high, candle.low, candle.close].filter(p => 
+      typeof p === 'number' && !isNaN(p) && p > 0
+    );
+    
+    if (prices.length > 0) {
+      safePrice = prices.reduce((sum, p) => sum + p, 0) / prices.length;
+    } else {
+      safePrice = 50000; // Ultimate fallback
+    }
+  }
+  
+  // Fix individual OHLC values
+  const open = (typeof candle.open === 'number' && !isNaN(candle.open) && candle.open > 0) 
+    ? candle.open : safePrice;
+  const close = (typeof candle.close === 'number' && !isNaN(candle.close) && candle.close > 0) 
+    ? candle.close : safePrice;
+    
+  // For high and low, use the extremes of open/close as minimum bounds
+  const tempHigh = (typeof candle.high === 'number' && !isNaN(candle.high) && candle.high > 0) 
+    ? candle.high : Math.max(open, close);
+  const tempLow = (typeof candle.low === 'number' && !isNaN(candle.low) && candle.low > 0) 
+    ? candle.low : Math.min(open, close);
+    
+  // Ensure proper OHLC relationships
+  const high = Math.max(open, close, tempHigh);
+  const low = Math.min(open, close, tempLow);
+  
+  // Fix volume
+  const volume = (typeof candle.volume === 'number' && !isNaN(candle.volume) && candle.volume >= 0) 
+    ? candle.volume : 0;
+    
+  // Fix other optional properties
+  const trades = (typeof candle.trades === 'number' && !isNaN(candle.trades) && candle.trades >= 0) 
+    ? candle.trades : 0;
+  const quoteVolume = (typeof candle.quoteVolume === 'number' && !isNaN(candle.quoteVolume) && candle.quoteVolume >= 0) 
+    ? candle.quoteVolume : 0;
   
   return {
-    ...candle,
-    open: isNaN(candle.open) || candle.open <= 0 ? safePrice : candle.open,
-    high: isNaN(candle.high) || candle.high <= 0 ? safePrice : candle.high,
-    low: isNaN(candle.low) || candle.low <= 0 ? safePrice : candle.low,
-    close: isNaN(candle.close) || candle.close <= 0 ? safePrice : candle.close,
-    volume: isNaN(candle.volume) || candle.volume < 0 ? 0 : candle.volume,
+    timestamp,
+    open,
+    high,
+    low,
+    close,
+    volume,
+    trades,
+    quoteVolume,
   };
 }
 

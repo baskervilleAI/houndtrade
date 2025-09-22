@@ -203,6 +203,7 @@ export const ChartProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     const isDataFresh = lastUpdate && (Date.now() - lastUpdate) < 30000; // 30 seconds
 
     if (existingCandles && existingCandles.length > 0 && isDataFresh && !forceRefresh) {
+      console.log(`♻️ Using cached data for ${key} (${existingCandles.length} candles)`);
       return;
     }
 
@@ -213,6 +214,8 @@ export const ChartProvider: React.FC<{ children: ReactNode }> = ({ children }) =
         let candles: CandleData[];
 
         try {
+          console.log(`📊 Loading candles for ${key}...`);
+          
           if (existingCandles && existingCandles.length > 0 && !forceRefresh) {
             // Load only missing candles for efficiency
             const lastCandle = existingCandles[existingCandles.length - 1];
@@ -230,26 +233,34 @@ export const ChartProvider: React.FC<{ children: ReactNode }> = ({ children }) =
               candles = existingCandles;
             }
           } else {
-            // Load fresh data efficiently
-            candles = await binanceService.getLatestKlines(
+            // Load fresh historical data
+            candles = await binanceService.getKlines(
               symbol,
               binanceService.getIntervalFromTimeframe(timeframe),
-              100 // Reduced for speed
+              200 // Más datos históricos para mejor visualización
             );
             console.log(`🆕 Loaded ${candles.length} fresh candles for ${key}`);
           }
         } catch (apiError) {
           console.warn(`⚠️ Binance API failed for ${key}, using mock data:`, apiError);
           // Fallback to mock data
-          candles = generateMockCandles(symbol, 100);
+          candles = generateMockCandles(symbol, 200);
           console.log(`🎭 Generated ${candles.length} mock candles for ${key}`);
         }
 
-        dispatch({ type: 'SET_CANDLES', payload: { key, candles } });
+        // Validate candles before setting
+        const validCandles = candles.filter(candle => {
+          return candle && 
+                 typeof candle.open === 'number' && !isNaN(candle.open) && candle.open > 0 &&
+                 typeof candle.close === 'number' && !isNaN(candle.close) && candle.close > 0;
+        });
+
+        console.log(`✅ Setting ${validCandles.length} valid candles for ${key}`);
+        dispatch({ type: 'SET_CANDLES', payload: { key, candles: validCandles } });
       } catch (error) {
         console.error(`❌ Error loading candles for ${key}:`, error);
         // Final fallback - generate mock data
-        const mockCandles = generateMockCandles(symbol, 100);
+        const mockCandles = generateMockCandles(symbol, 200);
         dispatch({ type: 'SET_CANDLES', payload: { key, candles: mockCandles } });
         console.log(`🎭 Fallback: Generated ${mockCandles.length} mock candles for ${key}`);
       } finally {
