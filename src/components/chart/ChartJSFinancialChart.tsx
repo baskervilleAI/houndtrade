@@ -1,7 +1,8 @@
 import React, { useRef, useEffect, useCallback, useMemo } from 'react';
-import { View, StyleSheet, Dimensions } from 'react-native';
+import { View, StyleSheet, Dimensions, Platform } from 'react-native';
 import { WebView, WebViewMessageEvent } from 'react-native-webview';
 import { CandleData } from '../../services/binanceService';
+import ChartJSWebDirect from './ChartJSWebDirect';
 
 const { width: screenWidth } = Dimensions.get('window');
 
@@ -671,21 +672,36 @@ export const ChartJSFinancialChart: React.FC<ChartJSFinancialChartProps> = ({
 
   return (
     <View style={[styles.container, { height }]}>
-      <WebView
-        ref={webViewRef}
-        source={{ html: chartHTML }}
-        style={styles.webView}
-        javaScriptEnabled={true}
-        domStorageEnabled={true}
-        startInLoadingState={false}
-        onMessage={handleMessage}
-        scrollEnabled={false}
-        bounces={false}
-        showsHorizontalScrollIndicator={false}
-        showsVerticalScrollIndicator={false}
-        overScrollMode="never"
-        androidLayerType="hardware"
-      />
+      {Platform.OS === 'web' ? (
+        <ChartJSWebDirect
+          candles={candles}
+          symbol={symbol}
+          isStreaming={isStreaming}
+          lastCandle={lastCandle}
+          onZoom={onZoom}
+          onPan={onPan}
+          onWebViewReady={onWebViewReady}
+          height={height}
+          showVolume={showVolume}
+          enableControls={enableControls}
+        />
+      ) : (
+        <WebView
+          ref={webViewRef}
+          source={{ html: chartHTML }}
+          style={styles.webView}
+          javaScriptEnabled={true}
+          domStorageEnabled={true}
+          startInLoadingState={false}
+          onMessage={handleMessage}
+          scrollEnabled={false}
+          bounces={false}
+          showsHorizontalScrollIndicator={false}
+          showsVerticalScrollIndicator={false}
+          overScrollMode="never"
+          androidLayerType="hardware"
+        />
+      )}
     </View>
   );
 };

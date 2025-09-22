@@ -1,5 +1,7 @@
 // Binance API returns arrays, not objects
 // [openTime, open, high, low, close, volume, closeTime, quoteAssetVolume, numberOfTrades, takerBuyBaseAssetVolume, takerBuyQuoteAssetVolume, ignore]
+import { Platform } from 'react-native';
+
 type BinanceKlineData = [
   number, // openTime
   string, // open
@@ -67,7 +69,7 @@ export interface TickerData {
 }
 
 class BinanceService {
-  private readonly BASE_URL = 'https://api.binance.com/api/v3';
+  private readonly BASE_URL = 'https://api.binance.com/api/v3';  // Direct API for all platforms
   private readonly WS_BASE_URL = 'wss://stream.binance.com:9443/ws';
   private websockets: Map<string, WebSocket> = new Map();
   private reconnectAttempts: Map<string, number> = new Map();
@@ -92,6 +94,25 @@ class BinanceService {
   
   // Fallback for invalid data to prevent NaN values
   private lastValidPrice: number = 50000; // Default to reasonable BTC price
+
+  /**
+   * Get platform-specific fetch options to avoid CORS issues
+   */
+  private getFetchOptions(): RequestInit {
+    return Platform.OS === 'web' ? {
+      method: 'GET',
+      mode: 'cors',
+      headers: {
+        'Accept': 'application/json'
+      }
+    } : {
+      method: 'GET',
+      headers: {
+        'Accept': 'application/json',
+        'Cache-Control': 'no-cache'
+      }
+    };
+  }
 
   /**
    * Start polling as fallback when WebSocket fails
@@ -244,13 +265,7 @@ class BinanceService {
         }
       }
 
-      const response = await fetch(`${this.BASE_URL}/klines?${params}`, {
-        // Optimized headers for minimal overhead
-        headers: {
-          'Accept': 'application/json',
-          'Cache-Control': 'no-cache'
-        }
-      });
+      const response = await fetch(`${this.BASE_URL}/klines?${params}`, this.getFetchOptions());
       
       if (!response.ok) {
         throw new Error(`API error: ${response.status}`);
@@ -359,7 +374,7 @@ class BinanceService {
         console.log(`⚡ Buscando klines faltantes para ${symbol}`);
       }
 
-      const response = await fetch(`${this.BASE_URL}/klines?${params}`);
+      const response = await fetch(`${this.BASE_URL}/klines?${params}`, this.getFetchOptions());
       
       if (!response.ok) {
         throw new Error(`Binance API error: ${response.status} ${response.statusText}`);
@@ -440,7 +455,7 @@ class BinanceService {
         endTime: endTime ? new Date(endTime).toISOString() : undefined,
       });
 
-      const response = await fetch(`${this.BASE_URL}/klines?${params}`);
+      const response = await fetch(`${this.BASE_URL}/klines?${params}`, this.getFetchOptions());
       
       if (!response.ok) {
         throw new Error(`Binance API error: ${response.status} ${response.statusText}`);
@@ -508,7 +523,7 @@ class BinanceService {
         ? `${this.BASE_URL}/ticker/24hr?symbol=${symbol.toUpperCase()}`
         : `${this.BASE_URL}/ticker/24hr`;
 
-      const response = await fetch(url);
+      const response = await fetch(url, this.getFetchOptions());
       
       if (!response.ok) {
         throw new Error(`Binance API error: ${response.status} ${response.statusText}`);
@@ -568,7 +583,7 @@ class BinanceService {
    */
   async getPrice(symbol: string): Promise<number> {
     try {
-      const response = await fetch(`${this.BASE_URL}/ticker/price?symbol=${symbol.toUpperCase()}`);
+      const response = await fetch(`${this.BASE_URL}/ticker/price?symbol=${symbol.toUpperCase()}`, this.getFetchOptions());
       
       if (!response.ok) {
         throw new Error(`Binance API error: ${response.status} ${response.statusText}`);
