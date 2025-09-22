@@ -34,13 +34,16 @@ export const ChartJSFinancialChart: React.FC<ChartJSFinancialChartProps> = ({
 
   // Notificar cuando el WebView esté listo
   useEffect(() => {
+    console.log('🚀 ChartJSFinancialChart: Component mounted');
     if (webViewRef.current && onWebViewReady) {
       onWebViewReady(webViewRef.current);
+      console.log('📊 ChartJSFinancialChart: WebView ready');
     }
   }, [onWebViewReady]);
 
   // Preparar datos para Chart.js
   const chartData = useMemo(() => {
+    console.log(`📈 ChartJSFinancialChart: Processing ${candles.length} candles for ${symbol}`);
     const candleData = candles.map(candle => ({
       x: candle.timestamp,
       o: candle.open,

@@ -62,6 +62,8 @@ const formatPrice = (price: number, symbol: string): string => {
 };
 
 export const CandlestickChartFinal: React.FC = () => {
+  console.log('🎯 CandlestickChartFinal: Component rendering with Chart.js Financial');
+  
   // State management
   const [selectedTimeframe, setSelectedTimeframe] = useState<{ label: string; value: string; cycleDelay: number }>(
     TIMEFRAMES[0]

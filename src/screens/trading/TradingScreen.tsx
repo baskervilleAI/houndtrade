@@ -11,7 +11,7 @@ import {
 import { useAuth, useTrading, useMarket } from '../../context/AppContext';
 import { useMarketData } from '../../hooks/useMarketData';
 import { formatPrice, formatPercentage, formatCurrency } from '../../utils/formatters';
-import LiveCandlestickChart from '../../components/chart/LiveCandlestickChart';
+import CandlestickChartFinal from '../../components/chart/CandlestickChart_WebOptimized';
 import { OrderForm } from '../../components/trading/OrderForm';
 import { PositionsList } from '../../components/trading/PositionsList';
 import { MarketData } from '../../components/trading/MarketData';
@@ -126,7 +126,7 @@ export const TradingScreen: React.FC = () => {
               // Tablet layout: side by side
               <View style={styles.tabletLayout}>
                 <View style={styles.tabletChartSection}>
-                  <LiveCandlestickChart />
+                  <CandlestickChartFinal />
                 </View>
                 <View style={styles.tabletOrderSection}>
                   <OrderForm />
@@ -136,7 +136,7 @@ export const TradingScreen: React.FC = () => {
               // Mobile layout: stacked
               <View style={styles.mobileLayout}>
                 <View style={styles.mobileChartSection}>
-                  <LiveCandlestickChart />
+                  <CandlestickChartFinal />
                 </View>
                 <View style={styles.mobileOrderSection}>
                   <OrderForm />
