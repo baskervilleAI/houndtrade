@@ -1,6 +1,7 @@
 // Binance API returns arrays, not objects
 // [openTime, open, high, low, close, volume, closeTime, quoteAssetVolume, numberOfTrades, takerBuyBaseAssetVolume, takerBuyQuoteAssetVolume, ignore]
 import { Platform } from 'react-native';
+import { debugLogger } from '../utils/debugLogger';
 
 type BinanceKlineData = [
   number, // openTime
@@ -125,7 +126,7 @@ class BinanceService {
     const pollKey = `${symbol}_poll`;
     
     if (process.env.NODE_ENV === 'development') {
-      console.log(`🔄 Iniciando polling para ${symbol}`);
+      debugLogger.log('STREAMING', `Iniciando polling para ${symbol}`);
     }
     
     // Store callback
@@ -159,12 +160,12 @@ class BinanceService {
             try {
               callback(tickerData as TickerData);
             } catch (error) {
-              console.error(`❌ Error in polling callback for ${symbol}:`, error);
+              debugLogger.error(`Error in polling callback for ${symbol}:`, error);
             }
           });
         }
       } catch (error) {
-        console.error(`❌ Polling error for ${symbol}:`, error);
+        debugLogger.error(`Polling error for ${symbol}:`, error);
         onError?.(error as Error);
       }
     };
@@ -197,7 +198,7 @@ class BinanceService {
       this.pollingCallbacks.delete(pollKey);
       // Solo log del polling stop en debug
       if (process.env.NODE_ENV === 'development') {
-        console.log(`🛑 Polling detenido: ${pollKey}`);
+        debugLogger.log('STREAMING', `Polling detenido: ${pollKey}`);
       }
     }
   }
@@ -379,7 +380,10 @@ class BinanceService {
 
       // Solo log en debug
       if (process.env.NODE_ENV === 'development') {
-        console.log(`⚡ Buscando klines faltantes para ${symbol}`);
+        // Solo log importante de datos faltantes, no spam
+        if (process.env.NODE_ENV === 'development') {
+          debugLogger.log('STREAMING', `Buscando klines faltantes para ${symbol}`);
+        }
       }
 
       const response = await fetch(`${this.BASE_URL}/klines?${params}`, this.getFetchOptions());
@@ -427,7 +431,8 @@ class BinanceService {
 
       // Solo log en debug
       if (process.env.NODE_ENV === 'development') {
-        console.log(`✅ ${candles.length} velas cargadas para ${symbol}`);
+        // Solo log importante de carga de datos
+        debugLogger.log('STREAMING', `${candles.length} velas cargadas para ${symbol}`);
       }
       return candles;
     } catch (error) {
@@ -456,12 +461,15 @@ class BinanceService {
       if (startTime) params.append('startTime', startTime.toString());
       if (endTime) params.append('endTime', endTime.toString());
 
-      console.log(`📊 Fetching Binance klines for ${symbol} ${interval}:`, {
-        url: `${this.BASE_URL}/klines?${params}`,
-        limit,
-        startTime: startTime ? new Date(startTime).toISOString() : undefined,
-        endTime: endTime ? new Date(endTime).toISOString() : undefined,
-      });
+      // Log detallado solo en development
+      if (process.env.NODE_ENV === 'development') {
+        debugLogger.log('STREAMING', `Fetching Binance klines for ${symbol} ${interval}:`, {
+          url: `${this.BASE_URL}/klines?${params}`,
+          limit,
+          startTime: startTime ? new Date(startTime).toISOString() : undefined,
+          endTime: endTime ? new Date(endTime).toISOString() : undefined,
+        });
+      }
 
       const response = await fetch(`${this.BASE_URL}/klines?${params}`, this.getFetchOptions());
       
@@ -506,18 +514,21 @@ class BinanceService {
         };
       });
 
-      console.log(`✅ Successfully fetched ${candles.length} candles for ${symbol}:`, {
-        firstCandle: candles[0],
-        lastCandle: candles[candles.length - 1],
-        priceRange: {
-          min: Math.min(...candles.map(c => c.low)),
-          max: Math.max(...candles.map(c => c.high)),
-        }
-      });
+      // Log del resultado solo en desarrollo
+      if (process.env.NODE_ENV === 'development') {
+        debugLogger.log('STREAMING', `Successfully fetched ${candles.length} candles for ${symbol}:`, {
+          firstCandle: candles[0],
+          lastCandle: candles[candles.length - 1],
+          priceRange: {
+            min: Math.min(...candles.map(c => c.low)),
+            max: Math.max(...candles.map(c => c.high)),
+          }
+        });
+      }
 
       return candles;
     } catch (error) {
-      console.error(`❌ Error fetching klines for ${symbol}:`, error);
+      debugLogger.error(`Error fetching klines for ${symbol}:`, error);
       throw error;
     }
   }
@@ -626,7 +637,7 @@ class BinanceService {
     const connectWebSocket = () => {
       // Reuse existing connection if available
       if (this.websockets.has(streamName)) {
-        console.log(`♻️ Reusing existing WebSocket for ${streamName}`);
+        debugLogger.log('STREAMING', `Reusing existing WebSocket for ${streamName}`);
         return;
       }
 
@@ -634,7 +645,7 @@ class BinanceService {
       this.websockets.set(streamName, ws);
 
       ws.onopen = () => {
-        console.log(`⚡ FAST WebSocket connected for ${streamName}`);
+        debugLogger.log('STREAMING', `FAST WebSocket connected for ${streamName}`);
         this.reconnectAttempts.set(streamName, 0);
       };
 
@@ -684,14 +695,14 @@ class BinanceService {
                 try {
                   callback(candle);
                 } catch (error) {
-                  console.error(`❌ Error in callback for ${streamName}:`, error);
+                  debugLogger.error(`Error in callback for ${streamName}:`, error);
                 }
               });
             }
 
-            // Log only for new closed candles to reduce noise
-            if (kline.x) {
-              console.log(`📊 NEW CANDLE ${symbol}:`, {
+            // Log only for new closed candles y solo en desarrollo
+            if (kline.x && process.env.NODE_ENV === 'development') {
+              debugLogger.log('STREAMING', `NEW CANDLE ${symbol}:`, {
                 price: candle.close,
                 volume: candle.volume,
                 time: new Date(candle.timestamp).toLocaleTimeString()
@@ -699,18 +710,18 @@ class BinanceService {
             }
           }
         } catch (error) {
-          console.error(`❌ Error parsing WebSocket message for ${streamName}:`, error);
+          debugLogger.error(`Error parsing WebSocket message for ${streamName}:`, error);
           onError?.(error as Error);
         }
       };
 
       ws.onerror = (error) => {
-        console.error(`❌ WebSocket error for ${streamName}:`, error);
+        debugLogger.error(`WebSocket error for ${streamName}:`, error);
         onError?.(new Error(`WebSocket error for ${streamName}`));
       };
 
       ws.onclose = (event) => {
-        console.log(`🔌 WebSocket closed for ${streamName}:`, { code: event.code });
+        debugLogger.log('STREAMING', `WebSocket closed for ${streamName}:`, { code: event.code });
         this.websockets.delete(streamName);
         
         // Only reconnect if it wasn't a clean close and we still have active callbacks
@@ -719,7 +730,7 @@ class BinanceService {
           if (attempts < this.MAX_RECONNECT_ATTEMPTS) {
             this.reconnectAttempts.set(streamName, attempts + 1);
             const delay = Math.min(1000 * Math.pow(2, attempts), 10000); // Exponential backoff, max 10s
-            console.log(`🔄 Reconnecting ${streamName} in ${delay}ms (${attempts + 1}/${this.MAX_RECONNECT_ATTEMPTS})`);
+            debugLogger.log('STREAMING', `Reconnecting ${streamName} in ${delay}ms (${attempts + 1}/${this.MAX_RECONNECT_ATTEMPTS})`);
             setTimeout(connectWebSocket, delay);
           } else {
             console.error(`❌ Max reconnection attempts reached for ${streamName}`);
@@ -849,7 +860,7 @@ class BinanceService {
         setTimeout(() => {
           if (!wsConnected && ws.readyState !== WebSocket.OPEN) {
             if (process.env.NODE_ENV === 'development') {
-              console.log(`⏰ WS timeout ${symbol}, usando polling`);
+              debugLogger.log('STREAMING', `WS timeout ${symbol}, usando polling`);
             }
             ws.close();
             switchToPolling();
@@ -857,7 +868,7 @@ class BinanceService {
         }, 3000); // Reduced from 5000 to 3000 for faster fallback
 
       } catch (error) {
-        console.error(`❌ Error creating WebSocket for ${streamName}:`, error);
+        debugLogger.error(`Error creating WebSocket for ${streamName}:`, error);
         switchToPolling();
       }
     };
@@ -866,7 +877,7 @@ class BinanceService {
       if (pollingUnsubscribe) return; // Already polling
       
       if (process.env.NODE_ENV === 'development') {
-        console.log(`🔄 Fallback a polling: ${symbol}`);
+        debugLogger.log('STREAMING', `Fallback a polling: ${symbol}`);
       }
       isUsingWebSocket = false;
       pollingUnsubscribe = this.startPollingFallback(symbol, onUpdate, onError);
@@ -906,10 +917,15 @@ class BinanceService {
     if (symbol && interval) {
       const cacheKey = `${symbol}_${interval}`;
       this.candleCache.delete(cacheKey);
-      console.log(`🗑️ Cleared cache for ${symbol} ${interval}`);
+      // Solo log en desarrollo
+      if (process.env.NODE_ENV === 'development') {
+        debugLogger.log('STREAMING', `Cleared cache for ${symbol} ${interval}`);
+      }
     } else {
       this.candleCache.clear();
-      console.log(`🗑️ Cleared all cache`);
+      if (process.env.NODE_ENV === 'development') {
+        debugLogger.log('STREAMING', `Cleared all cache`);
+      }
     }
   }
 
@@ -950,7 +966,10 @@ class BinanceService {
    * Cleanup all WebSocket connections, polling, and cache
    */
   disconnect(): void {
-    console.log(`🔌 Disconnecting all connections (${this.websockets.size} WebSockets, ${this.pollingIntervals.size} polling)`);
+    // Solo log importante de desconexión
+    if (process.env.NODE_ENV === 'development') {
+      debugLogger.log('STREAMING', `Disconnecting all connections (${this.websockets.size} WebSockets, ${this.pollingIntervals.size} polling)`);
+    }
     
     // Close all WebSockets
     this.websockets.forEach((ws, streamName) => {
@@ -971,7 +990,9 @@ class BinanceService {
     this.pollingIntervals.clear();
     this.pollingCallbacks.clear();
     
-    console.log(`✅ All connections and cache cleared`);
+    if (process.env.NODE_ENV === 'development') {
+      debugLogger.log('STREAMING', `All connections and cache cleared`);
+    }
   }
 }
 

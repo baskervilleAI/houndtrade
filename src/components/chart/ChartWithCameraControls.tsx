@@ -6,6 +6,7 @@ import { useChartJSIntegration } from '../../hooks/useChartJSIntegration';
 import { useChartGestures } from '../../hooks/useChartGestures';
 import { useChartData } from '../../hooks/useChartData';
 import { CandleData } from '../../services/binanceService';
+import { logCameraState, logCameraAction, logChart } from '../../utils/debugLogger';
 
 interface ChartWithCameraControlsProps {
   symbol: string;
@@ -42,7 +43,8 @@ export const ChartWithCameraControls: React.FC<ChartWithCameraControlsProps> = (
     chartWidth: 400,
     chartHeight: height,
     onCameraChange: (camera) => {
-      console.log('📷 Camera state changed:', camera);
+      // Log del estado completo de la cámara para debugging
+      logCameraState(camera);
       
       // Actualizar el estado de la cámara para mostrar al usuario
       if (camera.isLocked) {
@@ -67,7 +69,7 @@ export const ChartWithCameraControls: React.FC<ChartWithCameraControlsProps> = (
   } = useChartJSIntegration({
     candleCount: candles.length,
     onCameraChange: cameraControls.camera ? (camera) => {
-      console.log('📊 Chart.js camera update:', camera);
+      logChart('Chart.js camera update', camera);
     } : undefined,
   });
 
@@ -78,21 +80,21 @@ export const ChartWithCameraControls: React.FC<ChartWithCameraControlsProps> = (
     chartHeight: height,
     enabled: true,
     onInteractionStart: () => {
-      console.log('👆 User started interacting with chart');
+      logCameraAction('User started interacting with chart');
       onChartAction('START_USER_INTERACTION');
     },
     onInteractionEnd: () => {
-      console.log('✋ User finished interacting with chart');
+      logCameraAction('User finished interacting with chart');
       onChartAction('END_USER_INTERACTION');
     },
     onTap: (x, y) => {
-      console.log('👆 Chart tapped at:', { x, y });
+      logCameraAction('Chart tapped', { x, y });
     },
     onDoubleTap: (x, y) => {
-      console.log('👆👆 Chart double-tapped at:', { x, y });
+      logCameraAction('Chart double-tapped', { x, y });
     },
     onLongPress: (x, y) => {
-      console.log('👆🔒 Chart long-pressed at:', { x, y });
+      logCameraAction('Chart long-pressed', { x, y });
     },
   });
 
@@ -104,7 +106,7 @@ export const ChartWithCameraControls: React.FC<ChartWithCameraControlsProps> = (
   // Manejar nuevos datos - ajustar cámara después de cada actualización
   useEffect(() => {
     if (lastUpdate && isChartReady) {
-      console.log('📊 New data received, adjusting camera...');
+      logChart('New data received, adjusting camera...');
       onChartAction('ADJUST_CAMERA_AFTER_UPDATE');
     }
   }, [lastUpdate, isChartReady, onChartAction]);
@@ -113,7 +115,7 @@ export const ChartWithCameraControls: React.FC<ChartWithCameraControlsProps> = (
   useEffect(() => {
     if (isChartReady) {
       onChartAction('SET_MAX_CANDLES', { count: 900 });
-      console.log('📊 Chart.js configured for maximum 900 candles');
+      logChart('Chart.js configured for maximum 900 candles');
     }
   }, [isChartReady, onChartAction]);
 
@@ -130,27 +132,27 @@ export const ChartWithCameraControls: React.FC<ChartWithCameraControlsProps> = (
         zoomLevel: chartZoomLevel
       });
       
-      console.log('📊 Propagating temporary position to Chart.js:', { chartCenterX, chartZoomLevel });
+      logChart('Propagating temporary position to Chart.js', { chartCenterX, chartZoomLevel });
     }
   }, [cameraControls.camera.temporaryPosition, cameraControls.camera.isUserInteracting, isChartReady, onChartAction, candles.length]);
 
   // Handlers para los controles de cámara
   const handleResetCamera = useCallback(() => {
-    console.log('📷 User reset camera');
+    logCameraAction('User reset camera');
     cameraControls.resetCameraToLatest();
     onChartAction('RESET_CAMERA');
     Alert.alert('Camera Reset', 'Camera position reset to show latest candles');
   }, [cameraControls, onChartAction]);
 
   const handleLockCamera = useCallback(() => {
-    console.log('📷 User lock camera');
+    logCameraAction('User lock camera');
     cameraControls.lockCameraPosition();
     onChartAction('LOCK_CAMERA');
     Alert.alert('Camera Locked', 'Camera position locked. New candles will not affect view.');
   }, [cameraControls, onChartAction]);
 
   const handleUnlockCamera = useCallback(() => {
-    console.log('📷 User unlock camera');
+    logCameraAction('User unlock camera');
     cameraControls.unlockCamera();
     cameraControls.enableAutoFollow();
     onChartAction('RESET_CAMERA');
@@ -169,7 +171,7 @@ export const ChartWithCameraControls: React.FC<ChartWithCameraControlsProps> = (
 
   const handleZoomControls = useCallback((action: string) => {
     onChartAction(action);
-    console.log(`📊 Zoom action: ${action}`);
+    logCameraAction(`Zoom action: ${action}`);
   }, [onChartAction]);
 
   // Filtrar a máximo 900 velas para mostrar al usuario el conteo correcto
@@ -260,11 +262,11 @@ export const ChartWithCameraControls: React.FC<ChartWithCameraControlsProps> = (
           enableControls={true}
           onWebViewReady={setChartRef}
           onZoom={(zoomLevel) => {
-            console.log('📊 Chart zoom changed:', zoomLevel);
+            logChart('Chart zoom changed', zoomLevel);
             cameraControls.setChartJsZoomState(null, null, zoomLevel);
           }}
           onPan={(panX, panY) => {
-            console.log('📊 Chart pan changed:', { panX, panY });
+            logChart('Chart pan changed', { panX, panY });
             cameraControls.setChartJsZoomState(panX, panY);
           }}
         />

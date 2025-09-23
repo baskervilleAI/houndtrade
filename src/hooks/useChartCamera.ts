@@ -1,5 +1,6 @@
 import { useState, useCallback, useMemo, useRef, useEffect } from 'react';
 import { Dimensions } from 'react-native';
+import { logCameraAction, logCameraState } from '../utils/debugLogger';
 
 const { width: screenWidth } = Dimensions.get('window');
 
@@ -214,7 +215,7 @@ export const useChartCamera = ({
     if (onNewDataReceived && autoFollow && !isLocked && !manuallyAdjusted) {
       // Automatically follow new data by staying at the end
       setOffsetX(1);
-      console.log('📈 Auto-following new data - staying at end');
+      logCameraAction('Auto-following new data - staying at end');
     }
   }, [onNewDataReceived, autoFollow, isLocked, manuallyAdjusted]);
   
@@ -393,40 +394,36 @@ export const useChartCamera = ({
   // Camera lock controls
   const lockCamera = useCallback(() => {
     setIsLocked(true);
-    console.log('📷 Camera locked - streaming updates will not affect view');
+    logCameraAction('Camera locked - streaming updates will not affect view');
   }, []);
-  
+
   const unlockCamera = useCallback(() => {
     setIsLocked(false);
-    console.log('📷 Camera unlocked - will follow live data');
+    logCameraAction('Camera unlocked - will follow live data');
   }, []);
-  
+
   const toggleLock = useCallback(() => {
     setIsLocked(prev => {
       const newLocked = !prev;
-      console.log(`📷 Camera ${newLocked ? 'locked' : 'unlocked'}`);
+      logCameraAction(`Camera ${newLocked ? 'locked' : 'unlocked'}`);
       return newLocked;
     });
-  }, []);
-  
-  const isLockedFn = useCallback(() => isLocked, [isLocked]);
+  }, []);  const isLockedFn = useCallback(() => isLocked, [isLocked]);
   
   // Auto-follow controls
   const enableAutoFollow = useCallback(() => {
     setAutoFollow(true);
     setOffsetX(1); // Go to end when enabling auto-follow
     setManuallyAdjusted(false);
-    console.log('📈 Auto-follow enabled - will track new data');
+    logCameraAction('Auto-follow enabled - will track new data');
     notifyChange();
   }, [notifyChange]);
-  
+
   const disableAutoFollow = useCallback(() => {
     setAutoFollow(false);
     setManuallyAdjusted(true);
-    console.log('📈 Auto-follow disabled - staying at current position');
-  }, []);
-  
-  const isAutoFollowing = useCallback(() => autoFollow && !manuallyAdjusted, [autoFollow, manuallyAdjusted]);
+    logCameraAction('Auto-follow disabled - staying at current position');
+  }, []);  const isAutoFollowing = useCallback(() => autoFollow && !manuallyAdjusted, [autoFollow, manuallyAdjusted]);
   
   // Chart.js specific camera controls
   const setChartJsZoomState = useCallback((min: number | null, max: number | null, centerX?: number | null) => {
@@ -438,34 +435,32 @@ export const useChartCamera = ({
     if (min !== null || max !== null) {
       setManuallyAdjusted(true);
     }
-    console.log('📷 Chart.js zoom state updated:', { min, max, centerX });
+    logCameraAction('Chart.js zoom state updated', { min, max, centerX });
     notifyChange();
   }, [notifyChange]);
-  
+
   const resetCameraToLatest = useCallback(() => {
     setFollowLatest(true);
     setManuallyAdjusted(false);
     setAutoFollow(true);
     setOffsetX(1);
     setChartJsZoom({ min: null, max: null, centerX: null });
-    console.log('📷 Camera reset to follow latest candles');
+    logCameraAction('Camera reset to follow latest candles');
     notifyChange();
   }, [notifyChange]);
-  
+
   const lockCameraPosition = useCallback(() => {
     setIsLocked(true);
     setFollowLatest(false);
     setAutoFollow(false);
-    console.log('📷 Camera position locked');
+    logCameraAction('Camera position locked');
   }, []);
-  
+
   const setMaxVisibleCandlesCount = useCallback((count: number) => {
     setMaxVisibleCandles(Math.max(100, Math.min(2000, count)));
-    console.log(`📷 Max visible candles set to: ${count}`);
+    logCameraAction(`Max visible candles set to: ${count}`);
     notifyChange();
-  }, [notifyChange]);
-  
-  // User interaction controls
+  }, [notifyChange]);  // User interaction controls
   const startUserInteraction = useCallback(() => {
     setIsUserInteracting(true);
     // Guardar la posición actual como posición base antes de empezar la interacción
@@ -474,9 +469,9 @@ export const useChartCamera = ({
       offsetX,
       offsetY,
     });
-    console.log('👆 User interaction started - camera following user gestures');
+    logCameraAction('User interaction started - camera following user gestures');
   }, [zoomLevel, offsetX, offsetY]);
-  
+
   const endUserInteraction = useCallback(() => {
     setIsUserInteracting(false);
     // Cuando termina la interacción, fijar la posición temporal como la nueva posición permanente
@@ -486,7 +481,7 @@ export const useChartCamera = ({
       setOffsetY(temporaryPosition.offsetY);
       setManuallyAdjusted(true);
       setAutoFollow(false); // Deshabilitar auto-follow cuando el usuario fija una posición
-      console.log('✋ User interaction ended - camera locked at final position:', temporaryPosition);
+      logCameraAction('User interaction ended - camera locked at final position', temporaryPosition);
     }
     setTempPosition(null);
     notifyChange();

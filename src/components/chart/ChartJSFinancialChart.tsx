@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, Dimensions, Platform } from 'react-native';
 import { WebView, WebViewMessageEvent } from 'react-native-webview';
 import { CandleData } from '../../services/binanceService';
 import ChartJSWebDirect from './ChartJSWebDirect';
+import { logChart, logCameraAction, debugLogger } from '../../utils/debugLogger';
 
 const { width: screenWidth } = Dimensions.get('window');
 
@@ -35,19 +36,22 @@ export const ChartJSFinancialChart: React.FC<ChartJSFinancialChartProps> = ({
 
   // Notificar cuando el WebView esté listo
   useEffect(() => {
-    console.log('🚀 ChartJSFinancialChart: Component mounted');
+    logChart('ChartJSFinancialChart: Component mounted');
     if (webViewRef.current && onWebViewReady) {
       onWebViewReady(webViewRef.current);
-      console.log('📊 ChartJSFinancialChart: WebView ready');
+      logChart('ChartJSFinancialChart: WebView ready');
     }
   }, [onWebViewReady]);
 
   // Preparar datos para Chart.js Financial
   const chartData = useMemo(() => {
-    console.log(`📈 ChartJSFinancialChart: Processing ${candles.length} candles for ${symbol}`);
+    // Solo log en desarrollo
+    if (process.env.NODE_ENV === 'development') {
+      logChart(`Processing ${candles.length} candles for ${symbol}`);
+    }
     
     if (!candles || candles.length === 0) {
-      console.warn('⚠️ No candles data available for chart');
+      debugLogger.warn('No candles data available for chart');
       return {
         candleData: [],
         volumeData: [],
@@ -752,32 +756,48 @@ export const ChartJSFinancialChart: React.FC<ChartJSFinancialChartProps> = ({
             }
 
             function adjustCameraAfterUpdate() {
-                console.log('📷 Ajustando cámara después de actualización de vela');
+                logCameraAction('Ajustando cámara después de actualización de vela');
                 
-                // Si la cámara está bloqueada, no hacer nada
-                if (cameraState.isLocked) {
-                    console.log('📷 Cámara bloqueada - manteniendo posición');
+                // Si la cámara está bloqueada, preservar completamente la posición
+                if (cameraState.isLocked || cameraState.userCenterX !== null) {
+                    logCameraAction('Cámara fijada - preservando posición del usuario', {
+                        isLocked: cameraState.isLocked,
+                        userCenterX: cameraState.userCenterX,
+                        userZoomLevel: cameraState.userZoomLevel
+                    });
+                    
+                    // Preservar la posición exacta del usuario sin cambios
+                    if (mainChart && cameraState.userCenterX !== null) {
+                        const currentRange = cameraState.userZoomLevel ? 
+                            (currentData.candleData.length > 0 ? 
+                                (currentData.candleData[currentData.candleData.length - 1].x - currentData.candleData[0].x) / cameraState.userZoomLevel : 
+                                100) : 
+                            (mainChart.scales.x.max - mainChart.scales.x.min);
+                        
+                        const newMin = cameraState.userCenterX - currentRange / 2;
+                        const newMax = cameraState.userCenterX + currentRange / 2;
+                        
+                        mainChart.options.scales.x.min = newMin;
+                        mainChart.options.scales.x.max = newMax;
+                        mainChart.update('none');
+                        
+                        if (volumeChart) {
+                            volumeChart.options.scales.x.min = newMin;
+                            volumeChart.options.scales.x.max = newMax;
+                            volumeChart.update('none');
+                        }
+                        
+                        logCameraAction('Posición de usuario preservada', { newMin, newMax, currentRange });
+                    }
                     return;
                 }
                 
-                // Si debe seguir las últimas velas
+                // Solo si debe seguir las últimas velas y no está fijada por el usuario
                 if (cameraState.followLatest) {
+                    logCameraAction('Siguiendo últimas velas automáticamente');
                     setCameraToLatest();
-                } else if (cameraState.userCenterX) {
-                    // Mantener la posición del usuario pero actualizar los datos
-                    const currentRange = mainChart.scales.x.max - mainChart.scales.x.min;
-                    const newMin = cameraState.userCenterX - currentRange / 2;
-                    const newMax = cameraState.userCenterX + currentRange / 2;
-                    
-                    mainChart.options.scales.x.min = newMin;
-                    mainChart.options.scales.x.max = newMax;
-                    mainChart.update('none');
-                    
-                    if (volumeChart) {
-                        volumeChart.options.scales.x.min = newMin;
-                        volumeChart.options.scales.x.max = newMax;
-                        volumeChart.update('none');
-                    }
+                } else {
+                    logCameraAction('Manteniendo posición actual (no siguiendo últimas velas)');
                 }
             }
                 if (mainChart) {
@@ -828,6 +848,17 @@ export const ChartJSFinancialChart: React.FC<ChartJSFinancialChartProps> = ({
                     type: 'ZOOM_IN', 
                     newRange: mainChart?.options.scales.x.max - mainChart?.options.scales.x.min 
                 });
+                
+                // Guardar la posición del usuario después del zoom
+                if (mainChart) {
+                    cameraState.userCenterX = (mainChart.options.scales.x.min + mainChart.options.scales.x.max) / 2;
+                    cameraState.followLatest = false; // Dejar de seguir las últimas velas
+                    cameraState.isLocked = true; // Fijar la cámara en esta posición
+                    console.log('📷 Posición del usuario guardada después de Zoom In:', {
+                        userCenterX: cameraState.userCenterX,
+                        range: mainChart.options.scales.x.max - mainChart.options.scales.x.min
+                    });
+                }
             }
 
             function zoomOut() {
@@ -869,6 +900,17 @@ export const ChartJSFinancialChart: React.FC<ChartJSFinancialChartProps> = ({
                     type: 'ZOOM_OUT', 
                     newRange: mainChart?.options.scales.x.max - mainChart?.options.scales.x.min 
                 });
+                
+                // Guardar la posición del usuario después del zoom
+                if (mainChart) {
+                    cameraState.userCenterX = (mainChart.options.scales.x.min + mainChart.options.scales.x.max) / 2;
+                    cameraState.followLatest = false; // Dejar de seguir las últimas velas
+                    cameraState.isLocked = true; // Fijar la cámara en esta posición
+                    console.log('📷 Posición del usuario guardada después de Zoom Out:', {
+                        userCenterX: cameraState.userCenterX,
+                        range: mainChart.options.scales.x.max - mainChart.options.scales.x.min
+                    });
+                }
             }
 
             function goToLatest() {
@@ -965,6 +1007,14 @@ export const ChartJSFinancialChart: React.FC<ChartJSFinancialChartProps> = ({
                     
                     console.log('⬅️ Pan Left completado');
                     sendMessageToRN({ type: 'PAN_LEFT', newCenter: (adjustedMin + adjustedMax) / 2 });
+                    
+                    // Guardar la posición del usuario después del pan
+                    cameraState.userCenterX = (adjustedMin + adjustedMax) / 2;
+                    cameraState.followLatest = false; // Dejar de seguir las últimas velas
+                    cameraState.isLocked = true; // Fijar la cámara en esta posición
+                    console.log('📷 Posición del usuario guardada después de Pan Left:', {
+                        userCenterX: cameraState.userCenterX
+                    });
                 }
             }
 
@@ -995,6 +1045,14 @@ export const ChartJSFinancialChart: React.FC<ChartJSFinancialChartProps> = ({
                     
                     console.log('➡️ Pan Right completado');
                     sendMessageToRN({ type: 'PAN_RIGHT', newCenter: (adjustedMin + adjustedMax) / 2 });
+                    
+                    // Guardar la posición del usuario después del pan
+                    cameraState.userCenterX = (adjustedMin + adjustedMax) / 2;
+                    cameraState.followLatest = false; // Dejar de seguir las últimas velas
+                    cameraState.isLocked = true; // Fijar la cámara en esta posición
+                    console.log('📷 Posición del usuario guardada después de Pan Right:', {
+                        userCenterX: cameraState.userCenterX
+                    });
                 }
             }
                         

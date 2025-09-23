@@ -1,5 +1,6 @@
 import { useCallback, useRef, useState } from 'react';
 import { useChartCamera, CameraControls } from './useChartCamera';
+import { logChart, debugLogger } from '../utils/debugLogger';
 
 interface ChartJSIntegrationHook {
   cameraControls: CameraControls;
@@ -36,14 +37,50 @@ export const useChartJSIntegration = ({
   const setChartRef = useCallback((ref: any) => {
     chartRef.current = ref;
     setIsChartReady(!!ref);
-    console.log('📊 Chart.js ref establecido:', !!ref);
-  }, []);
+    logChart('Chart.js ref establecido', !!ref);
+    
+    // Log del estado inicial de la cámara del Chart.js
+    if (ref) {
+      debugLogger.log('CHART', '🎯 Chart.js CAMERA ESTADO INICIAL:', {
+        hasChartJsRef: !!ref,
+        cameraState: cameraControls.camera,
+        chartJsZoom: cameraControls.camera.chartJsZoom,
+        isLocked: cameraControls.camera.isLocked,
+        followLatest: cameraControls.camera.followLatest,
+        visibleRange: {
+          start: cameraControls.camera.startIndex,
+          end: cameraControls.camera.endIndex,
+          count: cameraControls.camera.endIndex - cameraControls.camera.startIndex
+        }
+      });
+    }
+  }, [cameraControls]);
 
   const onChartAction = useCallback((action: string, params?: any) => {
-    console.log('🎬 Chart action:', action, params);
+    logChart(`Chart action: ${action}`, params);
+    
+    // Log detallado del estado de la cámara del Chart.js en acciones importantes
+    if (['ZOOM_IN', 'ZOOM_OUT', 'RESET_ZOOM', 'RESET_CAMERA', 'LOCK_CAMERA', 'SET_ZOOM'].includes(action)) {
+      debugLogger.log('CHART', '� Chart.js CAMERA ESTADO ACTUAL:', {
+        action,
+        hasChartJsRef: !!chartRef.current,
+        cameraState: {
+          zoom: cameraControls.camera.zoomLevel?.toFixed(2),
+          offsetX: cameraControls.camera.offsetX?.toFixed(3),
+          offsetY: cameraControls.camera.offsetY?.toFixed(3),
+          isLocked: cameraControls.camera.isLocked,
+          isUserInteracting: cameraControls.camera.isUserInteracting,
+          followLatest: cameraControls.camera.followLatest,
+          chartJsZoom: cameraControls.camera.chartJsZoom,
+          visibleCandles: cameraControls.camera.endIndex - cameraControls.camera.startIndex,
+          totalCandles: cameraControls.camera.endIndex,
+        },
+        params
+      });
+    }
     
     if (!chartRef.current) {
-      console.warn('⚠️ Chart ref no disponible, usando controles nativos');
+      logChart('Chart ref no disponible, usando controles nativos');
       // Fallback a controles nativos
       switch (action) {
         case 'ZOOM_IN':
