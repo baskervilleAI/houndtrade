@@ -83,6 +83,17 @@ export const useChartJSIntegration = ({
             cameraControls.setMaxVisibleCandlesCount(params.count);
           }
           break;
+        case 'START_USER_INTERACTION':
+          cameraControls.startUserInteraction();
+          break;
+        case 'END_USER_INTERACTION':
+          cameraControls.endUserInteraction();
+          break;
+        case 'SET_TEMPORARY_POSITION':
+          if (params?.zoomLevel !== undefined && params?.offsetX !== undefined && params?.offsetY !== undefined) {
+            cameraControls.setTemporaryPosition(params.zoomLevel, params.offsetX, params.offsetY);
+          }
+          break;
       }
       return;
     }

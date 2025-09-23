@@ -30,6 +30,14 @@ export interface CameraState {
   followLatest: boolean;
   // Maximum candles to display (default 900)
   maxVisibleCandles: number;
+  // User interaction state
+  isUserInteracting: boolean;
+  // Temporary camera position during interaction (separate from fixed position)
+  temporaryPosition: {
+    zoomLevel: number;
+    offsetX: number;
+    offsetY: number;
+  } | null;
 }
 
 export interface CameraControls {
@@ -70,6 +78,11 @@ export interface CameraControls {
   enableAutoFollow: () => void;  // Automatically follow new data
   disableAutoFollow: () => void; // Stay at current position
   isAutoFollowing: () => boolean;
+  
+  // User interaction controls
+  startUserInteraction: () => void;   // Se llama cuando el usuario empieza a interactuar
+  endUserInteraction: () => void;     // Se llama cuando el usuario termina de interactuar
+  setTemporaryPosition: (zoomLevel: number, offsetX: number, offsetY: number) => void; // Posición temporal durante interacción
   
   // Chart.js specific camera controls
   setChartJsZoomState: (min: number | null, max: number | null, centerX?: number | null) => void;
@@ -112,6 +125,14 @@ export const useChartCamera = ({
   const [isLocked, setIsLocked] = useState(false); // Camera lock state
   const [autoFollow, setAutoFollow] = useState(true); // Auto-follow new data
   const [manuallyAdjusted, setManuallyAdjusted] = useState(false);
+  
+  // Nuevos estados para manejar interacción del usuario
+  const [isUserInteracting, setIsUserInteracting] = useState(false);
+  const [temporaryPosition, setTempPosition] = useState<{
+    zoomLevel: number;
+    offsetX: number;
+    offsetY: number;
+  } | null>(null);
   
   // Chart.js specific camera state
   const [chartJsZoom, setChartJsZoom] = useState<{ min: number | null; max: number | null; centerX: number | null }>({
@@ -158,9 +179,9 @@ export const useChartCamera = ({
   
   // Camera state object
   const camera: CameraState = useMemo(() => ({
-    zoomLevel,
-    offsetX,
-    offsetY,
+    zoomLevel: temporaryPosition?.zoomLevel ?? zoomLevel,
+    offsetX: temporaryPosition?.offsetX ?? offsetX,
+    offsetY: temporaryPosition?.offsetY ?? offsetY,
     minPrice: priceRange.min,
     maxPrice: priceRange.max,
     startIndex,
@@ -170,7 +191,23 @@ export const useChartCamera = ({
     chartJsZoom,
     followLatest,
     maxVisibleCandles,
-  }), [zoomLevel, offsetX, offsetY, priceRange, startIndex, endIndex, isLocked, manuallyAdjusted, chartJsZoom, followLatest, maxVisibleCandles]);
+    isUserInteracting,
+    temporaryPosition,
+  }), [
+    zoomLevel, 
+    offsetX, 
+    offsetY, 
+    priceRange, 
+    startIndex, 
+    endIndex, 
+    isLocked, 
+    manuallyAdjusted, 
+    chartJsZoom, 
+    followLatest, 
+    maxVisibleCandles,
+    isUserInteracting,
+    temporaryPosition
+  ]);
   
   // Auto-follow effect: when new data is received and camera is not locked/manually adjusted
   useEffect(() => {
@@ -200,10 +237,27 @@ export const useChartCamera = ({
   }, [notifyChange]);
   
   const setZoom = useCallback((level: number) => {
-    setZoomLevel(Math.max(0.1, Math.min(20, level)));
-    setManuallyAdjusted(true);
-    notifyChange();
-  }, [notifyChange]);
+    const constrainedLevel = Math.max(0.1, Math.min(20, level));
+    
+    if (isUserInteracting) {
+      // Durante la interacción, actualizar solo la posición temporal
+      setTempPosition(prev => prev ? {
+        ...prev,
+        zoomLevel: constrainedLevel
+      } : {
+        zoomLevel: constrainedLevel,
+        offsetX,
+        offsetY
+      });
+      // Notificar cambio inmediatamente para retroalimentación visual
+      notifyChange();
+    } else {
+      // Cuando no hay interacción, actualizar la posición permanente
+      setZoomLevel(constrainedLevel);
+      setManuallyAdjusted(true);
+      notifyChange();
+    }
+  }, [isUserInteracting, offsetX, offsetY, notifyChange]);
   
   const resetZoom = useCallback(() => {
     setZoomLevel(defaultZoom);
@@ -237,11 +291,30 @@ export const useChartCamera = ({
   }, [notifyChange]);
   
   const setPan = useCallback((x: number, y: number) => {
-    setOffsetX(Math.max(0, Math.min(1, x)));
-    setOffsetY(Math.max(-1, Math.min(1, y)));
-    setManuallyAdjusted(true);
-    notifyChange();
-  }, [notifyChange]);
+    const constrainedX = Math.max(0, Math.min(1, x));
+    const constrainedY = Math.max(-1, Math.min(1, y));
+    
+    if (isUserInteracting) {
+      // Durante la interacción, actualizar solo la posición temporal
+      setTempPosition(prev => prev ? {
+        ...prev,
+        offsetX: constrainedX,
+        offsetY: constrainedY
+      } : {
+        zoomLevel,
+        offsetX: constrainedX,
+        offsetY: constrainedY
+      });
+      // Notificar cambio inmediatamente para retroalimentación visual
+      notifyChange();
+    } else {
+      // Cuando no hay interacción, actualizar la posición permanente
+      setOffsetX(constrainedX);
+      setOffsetY(constrainedY);
+      setManuallyAdjusted(true);
+      notifyChange();
+    }
+  }, [isUserInteracting, zoomLevel, notifyChange]);
   
   // Navigation controls
   const goToStart = useCallback(() => {
@@ -392,6 +465,59 @@ export const useChartCamera = ({
     notifyChange();
   }, [notifyChange]);
   
+  // User interaction controls
+  const startUserInteraction = useCallback(() => {
+    setIsUserInteracting(true);
+    // Guardar la posición actual como posición base antes de empezar la interacción
+    setTempPosition({
+      zoomLevel,
+      offsetX,
+      offsetY,
+    });
+    console.log('👆 User interaction started - camera following user gestures');
+  }, [zoomLevel, offsetX, offsetY]);
+  
+  const endUserInteraction = useCallback(() => {
+    setIsUserInteracting(false);
+    // Cuando termina la interacción, fijar la posición temporal como la nueva posición permanente
+    if (temporaryPosition) {
+      setZoomLevel(temporaryPosition.zoomLevel);
+      setOffsetX(temporaryPosition.offsetX);
+      setOffsetY(temporaryPosition.offsetY);
+      setManuallyAdjusted(true);
+      setAutoFollow(false); // Deshabilitar auto-follow cuando el usuario fija una posición
+      console.log('✋ User interaction ended - camera locked at final position:', temporaryPosition);
+    }
+    setTempPosition(null);
+    notifyChange();
+  }, [temporaryPosition, notifyChange]);
+  
+  const setTemporaryPosition = useCallback((newZoomLevel: number, newOffsetX: number, newOffsetY: number) => {
+    if (isUserInteracting) {
+      setTempPosition({
+        zoomLevel: newZoomLevel,
+        offsetX: newOffsetX,
+        offsetY: newOffsetY,
+      });
+      // Durante la interacción, notificar inmediatamente los cambios para actualizaciones en tiempo real
+      notifyChange();
+      
+      // También notificar para que se pueda propagar al Chart.js
+      onCameraChange?.({
+        ...camera,
+        zoomLevel: newZoomLevel,
+        offsetX: newOffsetX,
+        offsetY: newOffsetY,
+        isUserInteracting: true,
+        temporaryPosition: {
+          zoomLevel: newZoomLevel,
+          offsetX: newOffsetX,
+          offsetY: newOffsetY,
+        }
+      });
+    }
+  }, [isUserInteracting, notifyChange, camera, onCameraChange]);
+  
   return {
     camera,
     zoomIn,
@@ -417,6 +543,9 @@ export const useChartCamera = ({
     enableAutoFollow,
     disableAutoFollow,
     isAutoFollowing,
+    startUserInteraction,
+    endUserInteraction,
+    setTemporaryPosition,
     setChartJsZoomState,
     resetCameraToLatest,
     lockCameraPosition,

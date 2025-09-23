@@ -588,7 +588,9 @@ export const ChartJSFinancialChart: React.FC<ChartJSFinancialChartProps> = ({
                 followLatest: true,
                 userZoomLevel: 1.0,
                 userCenterX: null,
-                lastManualAdjustment: null
+                lastManualAdjustment: null,
+                isUserInteracting: false,  // Nuevo: indica si el usuario está interactuando
+                temporaryPosition: null    // Nuevo: posición temporal durante interacción
             };
 
             function resetCamera() {
@@ -626,6 +628,87 @@ export const ChartJSFinancialChart: React.FC<ChartJSFinancialChartProps> = ({
                     isLocked: true,
                     centerX: cameraState.userCenterX,
                     zoomLevel: cameraState.userZoomLevel
+                });
+            }
+
+            function startUserInteraction() {
+                console.log('👆 User interaction started in Chart.js');
+                cameraState.isUserInteracting = true;
+                cameraState.followLatest = false; // Parar auto-follow durante interacción
+                
+                // Guardar la posición actual como base
+                if (mainChart) {
+                    const xScale = mainChart.scales.x;
+                    cameraState.temporaryPosition = {
+                        centerX: (xScale.min + xScale.max) / 2,
+                        zoomLevel: cameraState.userZoomLevel,
+                        min: xScale.min,
+                        max: xScale.max
+                    };
+                }
+                
+                sendMessageToRN({ 
+                    type: 'USER_INTERACTION_STARTED',
+                    isInteracting: true
+                });
+            }
+
+            function endUserInteraction() {
+                console.log('✋ User interaction ended in Chart.js - fixing position');
+                cameraState.isUserInteracting = false;
+                
+                // Fijar la posición temporal como permanente
+                if (cameraState.temporaryPosition) {
+                    cameraState.userCenterX = cameraState.temporaryPosition.centerX;
+                    cameraState.userZoomLevel = cameraState.temporaryPosition.zoomLevel;
+                    cameraState.isLocked = true; // Bloquear en la posición final
+                    cameraState.followLatest = false;
+                }
+                
+                cameraState.temporaryPosition = null;
+                
+                sendMessageToRN({ 
+                    type: 'USER_INTERACTION_ENDED',
+                    isInteracting: false,
+                    isLocked: true,
+                    centerX: cameraState.userCenterX,
+                    zoomLevel: cameraState.userZoomLevel
+                });
+            }
+
+            function setTemporaryPosition(centerX, zoomLevel) {
+                if (!cameraState.isUserInteracting) return;
+                
+                console.log('📷 Setting temporary position during interaction:', { centerX, zoomLevel });
+                
+                cameraState.temporaryPosition = {
+                    centerX,
+                    zoomLevel,
+                    timestamp: Date.now()
+                };
+                
+                // Aplicar la posición temporal inmediatamente para retroalimentación visual
+                if (mainChart && currentData.candleData.length > 0) {
+                    const totalRange = currentData.candleData[currentData.candleData.length - 1].x - currentData.candleData[0].x;
+                    const visibleRange = totalRange / zoomLevel;
+                    const newMin = centerX - visibleRange / 2;
+                    const newMax = centerX + visibleRange / 2;
+                    
+                    mainChart.options.scales.x.min = newMin;
+                    mainChart.options.scales.x.max = newMax;
+                    mainChart.update('none'); // Update sin animación para fluidez
+                    
+                    if (volumeChart) {
+                        volumeChart.options.scales.x.min = newMin;
+                        volumeChart.options.scales.x.max = newMax;
+                        volumeChart.update('none');
+                    }
+                }
+                
+                sendMessageToRN({ 
+                    type: 'TEMPORARY_POSITION_SET',
+                    centerX,
+                    zoomLevel
                 });
             }
 
@@ -1187,6 +1270,17 @@ export const ChartJSFinancialChart: React.FC<ChartJSFinancialChartProps> = ({
                             break;
                         case 'PAN_RIGHT':
                             panRight();
+                            break;
+                        case 'START_USER_INTERACTION':
+                            startUserInteraction();
+                            break;
+                        case 'END_USER_INTERACTION':
+                            endUserInteraction();
+                            break;
+                        case 'SET_TEMPORARY_POSITION':
+                            if (data.centerX !== undefined && data.zoomLevel !== undefined) {
+                                setTemporaryPosition(data.centerX, data.zoomLevel);
+                            }
                             break;
                         case 'TOGGLE_VOLUME':
                             toggleVolume();

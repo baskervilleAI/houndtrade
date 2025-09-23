@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, TouchableOpacity, Alert } from 'react-native';
 import { ChartJSFinancialChart } from './ChartJSFinancialChart';
 import { useChartCamera } from '../../hooks/useChartCamera';
 import { useChartJSIntegration } from '../../hooks/useChartJSIntegration';
+import { useChartGestures } from '../../hooks/useChartGestures';
 import { useChartData } from '../../hooks/useChartData';
 import { CandleData } from '../../services/binanceService';
 
@@ -70,6 +71,31 @@ export const ChartWithCameraControls: React.FC<ChartWithCameraControlsProps> = (
     } : undefined,
   });
 
+  // Hook de gestos para manejar interacciones del usuario
+  const gestureControls = useChartGestures({
+    cameraControls,
+    chartWidth: 400,
+    chartHeight: height,
+    enabled: true,
+    onInteractionStart: () => {
+      console.log('👆 User started interacting with chart');
+      onChartAction('START_USER_INTERACTION');
+    },
+    onInteractionEnd: () => {
+      console.log('✋ User finished interacting with chart');
+      onChartAction('END_USER_INTERACTION');
+    },
+    onTap: (x, y) => {
+      console.log('👆 Chart tapped at:', { x, y });
+    },
+    onDoubleTap: (x, y) => {
+      console.log('👆👆 Chart double-tapped at:', { x, y });
+    },
+    onLongPress: (x, y) => {
+      console.log('👆🔒 Chart long-pressed at:', { x, y });
+    },
+  });
+
   // Sincronizar estado de streaming
   useEffect(() => {
     setIsStreaming(dataStreaming);
@@ -90,6 +116,23 @@ export const ChartWithCameraControls: React.FC<ChartWithCameraControlsProps> = (
       console.log('📊 Chart.js configured for maximum 900 candles');
     }
   }, [isChartReady, onChartAction]);
+
+  // Efecto para propagar cambios de posición temporal al Chart.js
+  useEffect(() => {
+    if (isChartReady && cameraControls.camera.isUserInteracting && cameraControls.camera.temporaryPosition) {
+      const tempPos = cameraControls.camera.temporaryPosition;
+      // Convertir la posición de la cámara nativa al formato que Chart.js entiende
+      const chartCenterX = tempPos.offsetX * candles.length; // Aproximación básica
+      const chartZoomLevel = tempPos.zoomLevel;
+      
+      onChartAction('SET_TEMPORARY_POSITION', {
+        centerX: chartCenterX,
+        zoomLevel: chartZoomLevel
+      });
+      
+      console.log('📊 Propagating temporary position to Chart.js:', { chartCenterX, chartZoomLevel });
+    }
+  }, [cameraControls.camera.temporaryPosition, cameraControls.camera.isUserInteracting, isChartReady, onChartAction, candles.length]);
 
   // Handlers para los controles de cámara
   const handleResetCamera = useCallback(() => {
@@ -205,25 +248,27 @@ export const ChartWithCameraControls: React.FC<ChartWithCameraControlsProps> = (
         </View>
       </View>
 
-      {/* Chart */}
-      <ChartJSFinancialChart
-        candles={displayCandles}
-        symbol={symbol}
-        isStreaming={isStreaming}
-        lastCandle={displayCandles[displayCandles.length - 1]}
-        height={height}
-        showVolume={true}
-        enableControls={true}
-        onWebViewReady={setChartRef}
-        onZoom={(zoomLevel) => {
-          console.log('📊 Chart zoom changed:', zoomLevel);
-          cameraControls.setChartJsZoomState(null, null, zoomLevel);
-        }}
-        onPan={(panX, panY) => {
-          console.log('📊 Chart pan changed:', { panX, panY });
-          cameraControls.setChartJsZoomState(panX, panY);
-        }}
-      />
+      {/* Chart con gesture handlers */}
+      <View style={styles.chartContainer} {...gestureControls.panHandlers}>
+        <ChartJSFinancialChart
+          candles={displayCandles}
+          symbol={symbol}
+          isStreaming={isStreaming}
+          lastCandle={displayCandles[displayCandles.length - 1]}
+          height={height}
+          showVolume={true}
+          enableControls={true}
+          onWebViewReady={setChartRef}
+          onZoom={(zoomLevel) => {
+            console.log('📊 Chart zoom changed:', zoomLevel);
+            cameraControls.setChartJsZoomState(null, null, zoomLevel);
+          }}
+          onPan={(panX, panY) => {
+            console.log('📊 Chart pan changed:', { panX, panY });
+            cameraControls.setChartJsZoomState(panX, panY);
+          }}
+        />
+      </View>
 
       {/* Status footer */}
       <View style={styles.footer}>
@@ -246,6 +291,9 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#1a1a1a',
+  },
+  chartContainer: {
+    flex: 1,
   },
   header: {
     padding: 16,

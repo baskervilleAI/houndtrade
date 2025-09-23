@@ -11,6 +11,8 @@ interface UseChartGesturesProps {
   onTap?: (x: number, y: number) => void;
   onDoubleTap?: (x: number, y: number) => void;
   onLongPress?: (x: number, y: number) => void;
+  onInteractionStart?: () => void;  // Se llama cuando el usuario comienza a interactuar
+  onInteractionEnd?: () => void;    // Se llama cuando el usuario termina de interactuar
   chartWidth: number;
   chartHeight: number;
   enabled?: boolean;
@@ -28,6 +30,7 @@ interface TouchState {
   initialOffsetY: number;
   isMultiTouch: boolean;
   lastTapTime: number;
+  isInteracting: boolean;  // Nuevo: indica si el usuario está interactuando activamente
 }
 
 export const useChartGestures = ({
@@ -35,6 +38,8 @@ export const useChartGestures = ({
   onTap,
   onDoubleTap,
   onLongPress,
+  onInteractionStart,
+  onInteractionEnd,
   chartWidth,
   chartHeight,
   enabled = true,
@@ -51,7 +56,19 @@ export const useChartGestures = ({
     initialOffsetY: 0,
     isMultiTouch: false,
     lastTapTime: 0,
+    isInteracting: false,
   });
+
+  // Conectar con las funciones de cámara para manejar el estado de interacción
+  const handleInteractionStart = useCallback(() => {
+    cameraControls.startUserInteraction();
+    onInteractionStart?.();
+  }, [cameraControls, onInteractionStart]);
+
+  const handleInteractionEnd = useCallback(() => {
+    cameraControls.endUserInteraction();
+    onInteractionEnd?.();
+  }, [cameraControls, onInteractionEnd]);
 
   // Calculate distance between two touches
   const getDistance = useCallback((touches: any[]) => {
@@ -98,6 +115,13 @@ export const useChartGestures = ({
       const { touches } = evt.nativeEvent;
       const currentTime = Date.now();
       
+      // Marcar el inicio de la interacción
+      if (!touchState.current.isInteracting) {
+        touchState.current.isInteracting = true;
+        handleInteractionStart();
+        console.log('👆 User started interacting with chart');
+      }
+      
       touchState.current = {
         ...touchState.current,
         startTime: currentTime,
@@ -109,6 +133,7 @@ export const useChartGestures = ({
         initialZoom: cameraControls.camera.zoomLevel,
         initialOffsetX: cameraControls.camera.offsetX,
         initialOffsetY: cameraControls.camera.offsetY,
+        isInteracting: true,
       };
 
       if (touches.length > 1) {
@@ -133,17 +158,21 @@ export const useChartGestures = ({
           
           // Apply zoom constraints
           const constrainedZoom = Math.max(0.1, Math.min(20, newZoom));
-          cameraControls.setZoom(constrainedZoom);
           
           // Optional: adjust pan to zoom towards the center point
           const chartPoint = screenToChart(centerPoint.x, centerPoint.y);
+          let newOffsetX = touchState.current.initialOffsetX;
+          let newOffsetY = touchState.current.initialOffsetY;
+          
           if (chartPoint.x >= 0 && chartPoint.x <= 1) {
             const panAdjustment = (chartPoint.x - 0.5) * 0.1; // Small adjustment
-            const newOffsetX = Math.max(0, Math.min(1, 
+            newOffsetX = Math.max(0, Math.min(1, 
               touchState.current.initialOffsetX + panAdjustment
             ));
-            cameraControls.setPan(newOffsetX, cameraControls.camera.offsetY);
           }
+          
+          // Usar setTemporaryPosition para actualizaciones en tiempo real durante la interacción
+          cameraControls.setTemporaryPosition(constrainedZoom, newOffsetX, newOffsetY);
         }
       } else {
         // Single touch: handle panning
@@ -162,7 +191,12 @@ export const useChartGestures = ({
           touchState.current.initialOffsetY + panDeltaY
         ));
         
-        cameraControls.setPan(newOffsetX, newOffsetY);
+        // Usar setTemporaryPosition para actualizaciones en tiempo real durante la interacción
+        cameraControls.setTemporaryPosition(
+          touchState.current.initialZoom, 
+          newOffsetX, 
+          newOffsetY
+        );
       }
       
       touchState.current.lastX = gestureState.moveX;
@@ -173,6 +207,13 @@ export const useChartGestures = ({
       const currentTime = Date.now();
       const duration = currentTime - touchState.current.startTime;
       const distance = Math.sqrt(gestureState.dx * gestureState.dx + gestureState.dy * gestureState.dy);
+      
+      // Marcar el fin de la interacción
+      if (touchState.current.isInteracting) {
+        touchState.current.isInteracting = false;
+        handleInteractionEnd();
+        console.log('✋ User finished interacting with chart - locking position');
+      }
       
       // Determine gesture type based on duration and distance
       if (distance < 10 && duration < 300) {
@@ -252,5 +293,6 @@ export const useChartGestures = ({
     simulatePinchZoom,
     simulatePan,
     isGestureActive: touchState.current.isMultiTouch,
+    isUserInteracting: () => touchState.current.isInteracting,  // Nueva función para verificar estado de interacción
   };
 };
