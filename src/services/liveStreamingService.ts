@@ -74,6 +74,8 @@ class LiveStreamingService extends SimpleEventEmitter {
   private pollingInterval: NodeJS.Timeout | null = null;
   private isConnecting = false;
   private usePollingFallback = false;
+  private debounceUpdates = new Map<string, NodeJS.Timeout>();
+  private pendingUpdates = new Map<string, StreamUpdate>();
 
   constructor() {
     super();
@@ -245,11 +247,10 @@ class LiveStreamingService extends SimpleEventEmitter {
                 isFinal: !isLastCandle || this.isCandleLikelyFinalized(candle, config.interval)
               };
               
-              // Actualizar buffer y emitir evento
-              this.updateCandleBuffer(streamUpdate);
-              this.emit('candleUpdate', streamUpdate);
-              
-              console.log(`📊 [Polling] ${config.symbol} ${config.interval}: $${candle.c.toFixed(4)} (${isLastCandle ? 'current' : 'historical'})`);
+            // Actualizar buffer y emitir evento
+            this.updateCandleBuffer(streamUpdate);
+            // Eliminamos la emisión directa - ahora usa debounce
+            // this.emit('candleUpdate', streamUpdate);              console.log(`📊 [Polling] ${config.symbol} ${config.interval}: $${candle.c.toFixed(4)} (${isLastCandle ? 'current' : 'historical'})`);
             });
           }
         } catch (error) {
@@ -311,7 +312,8 @@ class LiveStreamingService extends SimpleEventEmitter {
         console.log(`[LiveStreamingService] Kline update: ${streamUpdate.symbol} ${streamUpdate.interval} final:${streamUpdate.isFinal} price:${streamUpdate.candle.c}`);
 
         this.updateCandleBuffer(streamUpdate);
-        this.emit('candleUpdate', streamUpdate);
+        // Eliminamos la emisión directa aquí - ahora usa debounce
+        // this.emit('candleUpdate', streamUpdate);
       }
     } catch (error) {
       console.error('❌ Error procesando mensaje WebSocket:', error);
@@ -367,6 +369,9 @@ class LiveStreamingService extends SimpleEventEmitter {
     // Ordenar por timestamp para asegurar orden correcto
     buffer.sort((a, b) => a.x - b.x);
     
+    // NUEVA LÓGICA: Debounce las emisiones para evitar spam
+    this.debounceCandleUpdate(update);
+    
     // Emitir evento de buffer actualizado para que otros componentes puedan reaccionar
     this.emit('bufferUpdated', {
       symbol: update.symbol,
@@ -375,6 +380,36 @@ class LiveStreamingService extends SimpleEventEmitter {
       lastUpdate: update.candle,
       isFinal: update.isFinal
     });
+  }
+
+  // Nueva función para debounce de actualizaciones
+  private debounceCandleUpdate(update: StreamUpdate): void {
+    const updateKey = `${update.symbol}_${update.interval}`;
+    
+    // Guardar la actualización más reciente
+    this.pendingUpdates.set(updateKey, update);
+    
+    // Limpiar timeout existente si hay uno
+    const existingTimeout = this.debounceUpdates.get(updateKey);
+    if (existingTimeout) {
+      clearTimeout(existingTimeout);
+    }
+    
+    // Configurar nuevo timeout
+    const timeout = setTimeout(() => {
+      const pendingUpdate = this.pendingUpdates.get(updateKey);
+      if (pendingUpdate) {
+        // Emitir solo la última actualización después del debounce
+        this.emit('candleUpdate', pendingUpdate);
+        console.log(`📊 [LiveStreamingService] Debounced candle update emitted: ${pendingUpdate.symbol} ${pendingUpdate.interval} price:${pendingUpdate.candle.c}`);
+        
+        // Limpiar
+        this.pendingUpdates.delete(updateKey);
+        this.debounceUpdates.delete(updateKey);
+      }
+    }, 150); // 150ms debounce - suficiente para agrupar actualizaciones rápidas
+    
+    this.debounceUpdates.set(updateKey, timeout);
   }
 
   private getIntervalInMs(interval: string): number {
@@ -531,6 +566,12 @@ class LiveStreamingService extends SimpleEventEmitter {
     }
     this.stopPing();
     this.stopPollingFallback();
+    
+    // Limpiar debounce timers
+    this.debounceUpdates.forEach(timeout => clearTimeout(timeout));
+    this.debounceUpdates.clear();
+    this.pendingUpdates.clear();
+    
     this.activeStreams.clear();
     this.isConnected = false;
     this.isConnecting = false;

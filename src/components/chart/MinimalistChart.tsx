@@ -35,6 +35,18 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
   const [activeIndicators, setActiveIndicators] = useState<Set<string>>(new Set());
   const [lastUpdateTime, setLastUpdateTime] = useState<number>(0);
   const updateThrottleMs = 100; // Throttle updates to max 10fps for better performance
+  
+  // Estados para controlar interacciones de usuario y evitar race conditions
+  const [isUserInteracting, setIsUserInteracting] = useState(false);
+  const userInteractionTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const zoomTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const panTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const lastZoomTime = useRef<number>(0);
+  const lastPanTime = useRef<number>(0);
+  
+  // NUEVO: Debounce agresivo para evitar múltiples eventos de zoom/pan consecutivos
+  const zoomDebounceRef = useRef<NodeJS.Timeout | null>(null);
+  const panDebounceRef = useRef<NodeJS.Timeout | null>(null);
 
   const { selectedPair } = useMarket();
   const currentSymbol = symbol || selectedPair;
@@ -50,6 +62,111 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
     // autoResetTimeMs eliminado - la cámara mantiene posición del usuario permanentemente
     onStateChange: onCameraStateChange,
   });
+
+  // Helper functions para manejo de interacciones
+  const startUserInteraction = useCallback(() => {
+    setIsUserInteracting(true);
+    simpleCamera.onUserStartInteraction();
+    
+    // Limpiar timeout existente
+    if (userInteractionTimeoutRef.current) {
+      clearTimeout(userInteractionTimeoutRef.current);
+    }
+  }, [simpleCamera]);
+
+  const endUserInteraction = useCallback(() => {
+    // Delay para capturar estado final
+    userInteractionTimeoutRef.current = setTimeout(() => {
+      setIsUserInteracting(false);
+      simpleCamera.onUserEndInteraction();
+    }, 300); // 300ms delay para capturar estado final
+  }, [simpleCamera]);
+
+  // ============================================
+  // DEBOUNCE AGRESIVO PARA EVENTOS DE ZOOM/PAN
+  // ============================================
+  
+  const debouncedZoomHandler = useCallback((chart: any, xScale: any) => {
+    // Cancelar debounce anterior
+    if (zoomDebounceRef.current) {
+      clearTimeout(zoomDebounceRef.current);
+    }
+    
+    // Solo el último evento en 200ms será procesado
+    zoomDebounceRef.current = setTimeout(() => {
+      console.log('🔍 [ZOOM] Usuario inicia ZOOM - Datos del evento:', {
+        min: xScale.min,
+        max: xScale.max,
+        center: (xScale.min + xScale.max) / 2,
+        timestamp: new Date().toLocaleTimeString()
+      });
+      
+      // Notificar inicio de interacción inmediatamente
+      startUserInteraction();
+      
+      // Limpiar timeout anterior si existe
+      if (zoomTimeoutRef.current) {
+        clearTimeout(zoomTimeoutRef.current);
+      }
+      
+      // Timeout para capturar estado final
+      zoomTimeoutRef.current = setTimeout(() => {
+        const finalScale = chart.scales.x;
+        if (finalScale) {
+          console.log('🔍 [ZOOM] Guardando estado final del zoom:', {
+            finalMin: finalScale.min,
+            finalMax: finalScale.max,
+            finalCenter: (finalScale.min + finalScale.max) / 2
+          });
+          
+          simpleCamera.onUserZoom(finalScale.min, finalScale.max, (finalScale.min + finalScale.max) / 2);
+        }
+        endUserInteraction();
+      }, 150);
+    }, 200); // 200ms de debounce
+  }, [startUserInteraction, endUserInteraction, simpleCamera]);
+
+  const debouncedPanHandler = useCallback((chart: any, xScale: any) => {
+    // Cancelar debounce anterior
+    if (panDebounceRef.current) {
+      clearTimeout(panDebounceRef.current);
+    }
+    
+    // Solo el último evento en 200ms será procesado
+    panDebounceRef.current = setTimeout(() => {
+      console.log('🔄 [PAN] Usuario inicia PAN - Datos del evento:', {
+        min: xScale.min,
+        max: xScale.max,
+        center: (xScale.min + xScale.max) / 2,
+        timestamp: new Date().toLocaleTimeString()
+      });
+      
+      // Notificar inicio de interacción inmediatamente
+      startUserInteraction();
+      
+      // Limpiar timeout anterior si existe
+      if (panTimeoutRef.current) {
+        clearTimeout(panTimeoutRef.current);
+      }
+      
+      // Timeout para capturar estado final
+      panTimeoutRef.current = setTimeout(() => {
+        const finalScale = chart.scales.x;
+        if (finalScale) {
+          console.log('🔄 [PAN] Guardando estado final del pan:', {
+            finalMin: finalScale.min,
+            finalMax: finalScale.max,
+            finalCenter: (finalScale.min + finalScale.max) / 2
+          });
+          
+          simpleCamera.onUserPan(finalScale.min, finalScale.max, (finalScale.min + finalScale.max) / 2);
+        }
+        endUserInteraction();
+      }, 150);
+    }, 200); // 200ms de debounce
+  }, [startUserInteraction, endUserInteraction, simpleCamera]);
+
+  // ============================================
 
   // Calcular indicadores técnicos
   const technicalIndicators = useTechnicalIndicators(candleData);
@@ -370,78 +487,28 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
                 },
                 mode: 'x',
                 onZoom: function(context: any) {
-                  // Callback cuando el usuario hace zoom - con nueva cámara simple
+                  // Usar el handler debounced para evitar múltiples eventos
                   const chart = context.chart;
                   const xScale = chart.scales.x;
                   
                   if (!xScale || !chart.data.datasets[0]?.data) return;
                   
-                  const now = Date.now();
-                  if (now - lastUpdateTime < 200) return; // Throttle zoom events
-                  setLastUpdateTime(now);
-                  
-                  console.log('� [ZOOM] Usuario inicia ZOOM - Datos del evento:', {
-                    min: xScale.min,
-                    max: xScale.max,
-                    center: (xScale.min + xScale.max) / 2,
-                    timestamp: new Date().toLocaleTimeString()
-                  });
-                  
-                  // Notificar inicio de interacción
-                  simpleCamera.onUserStartInteraction();
-                  
-                  // Timeout para evitar loops y capturar estado final
-                  setTimeout(() => {
-                    const finalScale = chart.scales.x;
-                    if (finalScale) {
-                      console.log('🔍 [ZOOM] Guardando estado final del zoom:', {
-                        finalMin: finalScale.min,
-                        finalMax: finalScale.max,
-                        finalCenter: (finalScale.min + finalScale.max) / 2
-                      });
-                      simpleCamera.onUserZoom(finalScale.min, finalScale.max, (finalScale.min + finalScale.max) / 2);
-                    }
-                    simpleCamera.onUserEndInteraction();
-                  }, 100);
+                  // Aplicar el debounce agresivo
+                  debouncedZoomHandler(chart, xScale);
                 }
               },
               pan: {
                 enabled: true,
                 mode: 'x',
                 onPan: function(context: any) {
-                  // Callback cuando el usuario hace pan - con nueva cámara simple
+                  // Usar el handler debounced para evitar múltiples eventos
                   const chart = context.chart;
                   const xScale = chart.scales.x;
                   
                   if (!xScale || !chart.data.datasets[0]?.data) return;
                   
-                  const now = Date.now();
-                  if (now - lastUpdateTime < 200) return; // Throttle pan events
-                  setLastUpdateTime(now);
-                  
-                  console.log('� [PAN] Usuario inicia PAN - Datos del evento:', {
-                    min: xScale.min,
-                    max: xScale.max,
-                    center: (xScale.min + xScale.max) / 2,
-                    timestamp: new Date().toLocaleTimeString()
-                  });
-                  
-                  // Notificar inicio de interacción
-                  simpleCamera.onUserStartInteraction();
-                  
-                  // Timeout para evitar loops y capturar estado final
-                  setTimeout(() => {
-                    const finalScale = chart.scales.x;
-                    if (finalScale) {
-                      console.log('👆 [PAN] Guardando estado final del pan:', {
-                        finalMin: finalScale.min,
-                        finalMax: finalScale.max,
-                        finalCenter: (finalScale.min + finalScale.max) / 2
-                      });
-                      simpleCamera.onUserPan(finalScale.min, finalScale.max, (finalScale.min + finalScale.max) / 2);
-                    }
-                    simpleCamera.onUserEndInteraction();
-                  }, 100);
+                  // Aplicar el debounce agresivo
+                  debouncedPanHandler(chart, xScale);
                 }
               }
             }
@@ -717,59 +784,9 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
     }
   }, [candleData, initializeChart]);
 
-  // HOOK CRÍTICO: Preservar viewport del usuario durante cualquier cambio en candleData
-  useEffect(() => {
-    console.log('🔄 [candleData Hook] Ejecutándose por cambio en candleData:', {
-      candleCount: candleData.length,
-      isLocked: simpleCamera.isLocked(),
-      userState: simpleCamera.state.chartJsState
-    });
-    
-    const currentCameraState = simpleCamera.getCurrentState();
-    const isUserLocked = currentCameraState.isLocked && 
-                        currentCameraState.chartJsState.min !== null && 
-                        currentCameraState.chartJsState.max !== null;
-    
-    if (!chartRef.current || !isUserLocked) {
-      console.log('⏭️ [candleData Hook] Saltando - sin chart o usuario no ha interactuado');
-      return;
-    }
-    
-    const chart = chartRef.current;
-    const userState = currentCameraState.chartJsState;
-    
-    // Si el usuario tiene un viewport configurado, asegurarse de que se mantenga
-    if (userState.min !== null && userState.max !== null) {
-      const currentMin = chart.scales.x?.min;
-      const currentMax = chart.scales.x?.max;
-      
-      console.log('🔍 [candleData Hook] Comparando viewports:', {
-        userMin: userState.min,
-        userMax: userState.max,
-        currentMin,
-        currentMax,
-        needsUpdate: Math.abs(currentMin - userState.min) > 100 || Math.abs(currentMax - userState.max) > 100
-      });
-      
-      // Solo actualizar si hay diferencia significativa para evitar loops
-      const minDiff = Math.abs(currentMin - userState.min);
-      const maxDiff = Math.abs(currentMax - userState.max);
-      const tolerance = 100; // Tolerancia en ms
-      
-      if (minDiff > tolerance || maxDiff > tolerance) {
-        console.log('🔒 [MinimalistChart] Forzando viewport del usuario durante cambio de candleData');
-        console.log('   Diferencias:', { minDiff, maxDiff, tolerance });
-        chart.scales.x.min = userState.min;
-        chart.scales.x.max = userState.max;
-        chart.update('none');
-        console.log('✅ [candleData Hook] Viewport forzado aplicado:', { min: userState.min, max: userState.max });
-      } else {
-        console.log('✅ [candleData Hook] Viewport ya está correcto');
-      }
-    } else {
-      console.log('ℹ️ [candleData Hook] Usuario no tiene viewport configurado');
-    }
-  }, [candleData.length, simpleCamera.state.chartJsState.min, simpleCamera.state.chartJsState.max]);
+  // ❌ HOOK ELIMINADO: Este hook causaba loops de viewport forzado redundante
+  // Ya no necesitamos forzar el viewport aquí porque updateChart ya lo maneja correctamente
+  // El hook se ejecutaba en cada cambio de candleData creando interferencias
 
   useEffect(() => {
     const handleCandleUpdate = (update: StreamUpdate) => {
