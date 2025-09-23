@@ -158,10 +158,17 @@ export const useSimpleCamera = ({
     const currentState = stateRef.current;
     
     // Usar el nuevo modo de cámara para determinar interacción activa
-    return currentState.mode === 'USER_INTERACTING' || 
-           (currentState.mode === 'USER_LOCKED' && 
-            currentState.lastUserAction !== null && 
-            (Date.now() - currentState.lastUserAction) < 30000); // 30 segundos
+    if (currentState.mode === 'USER_INTERACTING') {
+      return true;
+    }
+    
+    // También considerar interacción activa si la última acción fue muy reciente (menos de 5 segundos)
+    if (currentState.lastUserAction !== null) {
+      const timeSinceLastAction = Date.now() - currentState.lastUserAction;
+      return timeSinceLastAction < 5000; // 5 segundos para considerarse interacción activa
+    }
+    
+    return false;
   }, []);
 
   // ============================================

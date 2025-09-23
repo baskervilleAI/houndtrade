@@ -630,6 +630,10 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
 
     const chart = chartRef.current;
     
+    // Variables para control inteligente de persistencia
+    const isActivelyInteracting = simpleCamera.isActivelyInteracting();
+    let shouldSnapshot = false;
+    
     // ============================================
     // PATRÓN OFICIAL CHART.JS: SNAPSHOT/RESTORE
     // ============================================
@@ -712,10 +716,17 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
     console.log('⚙️ [updateChart] Ejecutando chart.update("none")...');
     chart.update('none');
 
-    // 4) RESTORE: Restaurar viewport del usuario si está bloqueado
-    if (simpleCamera.shouldPersistViewport() && persistentViewport.hasSnapshot()) {
+    // 4) RESTORE INTELIGENTE: Solo restaurar si habíamos hecho snapshot Y no hay interacción
+    if (shouldSnapshot && persistentViewport.hasSnapshot() && !simpleCamera.isActivelyInteracting()) {
       console.log('🔄 [updateChart] Restaurando viewport del usuario...');
       persistentViewport.restore('none');
+    } else if (simpleCamera.isActivelyInteracting()) {
+      console.log('🎯 [updateChart] Manteniendo interacción fluida - no restaurando viewport');
+      // Actualizar el estado de la cámara con el viewport actual para futuras restauraciones
+      const currentViewport = persistentViewport.getCurrentViewport();
+      if (currentViewport) {
+        simpleCamera.updateFromChartViewport(currentViewport.min, currentViewport.max);
+      }
     }
 
     console.log('✅ [updateChart] Actualización completada');

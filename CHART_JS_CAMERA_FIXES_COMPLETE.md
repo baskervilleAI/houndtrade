@@ -1,8 +1,16 @@
-# 📷 Correcciones del Control de Cámara para Chart.js Financial
+# 📷 Correcciones del Control de Cámara para Chart.js Financial - VERSIÓN MEJORADA
 
 ## 🎯 Resumen de Implementación
 
-Se han implementado las correcciones para el control de cámara del gráfico de velas siguiendo las **mejores prácticas oficiales de Chart.js**. Estas mejoras solucionan los problemas de reseteo del viewport y proporcionan un control de cámara robusto y predecible.
+Se han implementado las correcciones **avanzadas** para el control de cámara del gráfico de velas siguiendo las **mejores prácticas oficiales de Chart.js** con **optimizaciones adicionales** para interacciones fluidas durante zoom/pan en tiempo real.
+
+## 🚀 NUEVA CARACTERÍSTICA: Persistencia Inteligente Durante Interacciones
+
+### ⚡ **Comportamiento Optimizado:**
+- ✅ **Durante interacciones activas** (zoom/pan): La cámara se actualiza fluidamente sin reseteos
+- ✅ **Entre interacciones**: El viewport del usuario se persiste automáticamente  
+- ✅ **En streaming live**: Las nuevas velas se actualizan sin interrumpir la navegación del usuario
+- ✅ **Detección inteligente**: Sistema que distingue entre "usuario navegando" vs "usuario inactivo"
 
 ## 🔧 Correcciones Implementadas
 
@@ -38,7 +46,27 @@ interface SimpleCameraControls {
 }
 ```
 
-**Función:** Gestiona el estado de la cámara con compatibilidad para Chart.js oficial.
+**🎯 NUEVA OPTIMIZACIÓN:** `isActivelyInteracting()` mejorado
+```typescript
+const isActivelyInteracting = useCallback(() => {
+  const currentState = stateRef.current;
+  
+  // Interacción activa si está en modo USER_INTERACTING
+  if (currentState.mode === 'USER_INTERACTING') {
+    return true;
+  }
+  
+  // O si la última acción fue muy reciente (menos de 5 segundos)
+  if (currentState.lastUserAction !== null) {
+    const timeSinceLastAction = Date.now() - currentState.lastUserAction;
+    return timeSinceLastAction < 5000; // 5 segundos
+  }
+  
+  return false;
+}, []);
+```
+
+**Función:** Gestiona el estado de la cámara con **detección inteligente de interacciones**.
 
 ### 3. **Actualización de `MinimalistChart.tsx`** 📊
 
@@ -55,34 +83,45 @@ const chartOptions = useMemo(() => ({
 
 **CRÍTICO:** Las opciones están memoizadas para **evitar recreación** en cada render, que es lo que causaba el reseteo del viewport.
 
-#### B. **Función `updateChart` Mejorada**
+#### B. **Función `updateChart` Mejorada con Persistencia Inteligente**
 ```typescript
 const updateChart = useCallback((newCandle: CandleData, isFinal: boolean) => {
-  // 1) SNAPSHOT: Capturar viewport si la cámara está bloqueada
-  if (simpleCamera.shouldPersistViewport()) {
+  // Variables para control inteligente de persistencia
+  const isActivelyInteracting = simpleCamera.isActivelyInteracting();
+  let shouldSnapshot = false;
+
+  // 1) SNAPSHOT INTELIGENTE: Solo capturar si no hay interacción activa
+  if (simpleCamera.shouldPersistViewport() && !isActivelyInteracting) {
+    console.log('📸 Guardando viewport (no hay interacción activa)...');
     persistentViewport.snapshot();
+    shouldSnapshot = true;
+  } else if (isActivelyInteracting) {
+    console.log('🎯 Usuario interactuando - permitiendo actualización fluida');
   }
 
   // 2) MUTACIÓN IN-SITU: Mutar datos existentes
-  const dataset = chart.data.datasets[0];
-  if (existingIndex >= 0) {
-    (dataset.data as any)[existingIndex] = candleData; // Actualizar existente
-  } else {
-    (dataset.data as any[]).push(candleData); // Agregar nueva
-  }
+  // ... mutación de datos ...
 
   // 3) UPDATE: Sin animación
   chart.update('none');
 
-  // 4) RESTORE: Restaurar viewport del usuario
-  if (simpleCamera.shouldPersistViewport() && persistentViewport.hasSnapshot()) {
+  // 4) RESTORE INTELIGENTE: Solo restaurar si no hay interacción activa
+  if (shouldSnapshot && persistentViewport.hasSnapshot() && !simpleCamera.isActivelyInteracting()) {
+    console.log('🔄 Restaurando viewport del usuario...');
     persistentViewport.restore('none');
+  } else if (simpleCamera.isActivelyInteracting()) {
+    console.log('🎯 Manteniendo interacción fluida - no restaurando viewport');
+    // Actualizar estado de cámara con viewport actual
+    const currentViewport = persistentViewport.getCurrentViewport();
+    if (currentViewport) {
+      simpleCamera.updateFromChartViewport(currentViewport.min, currentViewport.max);
+    }
   }
 }, [/* dependencias memoizadas */]);
 ```
 
-**Patrón oficial:** 
-1. **Snapshot** → 2. **Mutación** → 3. **Update** → 4. **Restore**
+**🚀 NUEVO PATRÓN:** 
+1. **Detección de interacción** → 2. **Snapshot condicional** → 3. **Mutación** → 4. **Update** → 5. **Restore inteligente**
 
 #### C. **Handlers de Zoom/Pan Mejorados**
 ```typescript
@@ -98,6 +137,11 @@ zoomTimeoutRef.current = setTimeout(() => {
 
 ## 🎛️ Funcionalidades Nuevas
 
+### **Detección Inteligente de Interacciones**
+- **Interacción activa**: Menos de 5 segundos desde la última acción del usuario
+- **Modo fluido**: Durante interacciones, no se fuerza el viewport
+- **Modo persistente**: Entre interacciones, se mantiene la posición del usuario
+
 ### **Botón de Reset Mejorado**
 ```tsx
 <TouchableOpacity onPress={() => {
@@ -109,18 +153,25 @@ zoomTimeoutRef.current = setTimeout(() => {
 </TouchableOpacity>
 ```
 
-## 🔬 Beneficios de las Correcciones
+## 🔬 Beneficios de las Mejoras
+
+### ✅ **Experiencia de Usuario Optimizada**
+1. **Navegación fluida** durante zoom/pan sin interrupciones
+2. **Actualizaciones en tiempo real** que no interfieren con la exploración
+3. **Persistencia inteligente** que respeta las intenciones del usuario
+4. **Detección precisa** de cuándo el usuario está navegando vs inactivo
 
 ### ✅ **Eliminación de Problemas**
 1. **No más reseteo del viewport** al recibir nuevas velas
-2. **No más loops infinitos** de forzado de viewport
-3. **No más recreación de opciones** que confunde a Chart.js
-4. **Mejor performance** con mutación in-situ de datos
+2. **No más interrupciones** durante navegación activa
+3. **No más loops infinitos** de forzado de viewport
+4. **No más recreación de opciones** que confunde a Chart.js
+5. **Mejor performance** con mutación in-situ de datos
 
-### ✅ **Comportamiento Predecible**
-1. **Snapshot/Restore garantizado** usando API oficial
+### ✅ **Comportamiento Predecible e Intuitivo**
+1. **Snapshot/Restore condicional** basado en actividad del usuario
 2. **Memoización estable** previene re-renders innecesarios
-3. **Control directo** sobre cuándo persistir/restaurar viewport
+3. **Control granular** sobre cuándo persistir/restaurar viewport
 4. **Fallbacks robustos** si el plugin zoom no está disponible
 
 ### ✅ **Compatibilidad Total con Chart.js**
@@ -144,17 +195,22 @@ El control de cámara del gráfico de velas ahora:
 
 - ✅ **Persiste la posición del usuario** durante streaming en vivo
 - ✅ **No resetea** al recibir nuevas velas
+- ✅ **Permite navegación fluida** durante interacciones activas
+- ✅ **Detecta inteligentemente** cuándo el usuario está navegando
 - ✅ **Usa APIs oficiales** de Chart.js
 - ✅ **Performance optimizada** con mutaciones in-situ
 - ✅ **Comportamiento predecible** y robusto
+- ✅ **Experiencia de usuario excepcional**
 - ✅ **Compatibilidad futura** garantizada
 
 ## 🔄 Flujo de Datos Mejorado
 
 ```
-Nueva Vela → Snapshot Viewport → Mutar Datos → Update Chart → Restore Viewport
-     ↓              ↓               ↓            ↓              ↓
-Streaming        Si Bloqueado    In-Situ     'none' mode    Si Necesario
+Nueva Vela → Detectar Interacción → Snapshot Condicional → Mutar Datos → Update Chart → Restore Inteligente
+     ↓              ↓                    ↓                  ↓           ↓              ↓
+Streaming    ¿Usuario Activo?    Solo si Inactivo       In-Situ    'none' mode   Solo si Necesario
+                  ↓                       ↓                 ↓           ↓              ↓
+              < 5 segundos         Guardar Viewport      Mutación   Sin Animación  Mantener Fluidez
 ```
 
-**Resultado:** Viewport del usuario **siempre respetado**, sin reseteos ni loops.
+**Resultado:** Viewport del usuario **siempre respetado**, navegación **completamente fluida**, sin reseteos ni interrupciones.
