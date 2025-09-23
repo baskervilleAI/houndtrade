@@ -41,7 +41,7 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
 
   // Callback estable para cambios de estado de cámara
   const onCameraStateChange = useCallback((cameraState: any) => {
-    console.log('📷 [MinimalistChart] Simple camera state changed:', cameraState);
+    // console.log('📷 [MinimalistChart] Simple camera state changed:', cameraState);
   }, []);
 
   // Sistema de cámara simple y predecible
@@ -461,6 +461,7 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
     // Obtener estado actual de la cámara al momento de la ejecución
     const currentCameraState = simpleCamera.getCurrentState();
     const shouldForceViewport = simpleCamera.shouldForceViewport();
+    const shouldAutoAdjust = simpleCamera.shouldAutoAdjust();
     const forcedViewport = simpleCamera.getForcedViewport();
     
     console.log('🚀 [updateChart] INICIO - Nueva vela recibida:', { 
@@ -468,9 +469,12 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
       price: newCandle.c,
       isFinal,
       shouldForceViewport,
+      shouldAutoAdjust,
       forcedViewport,
-      cameraStateIsLocked: currentCameraState.isLocked,
-      hasUserViewport: currentCameraState.chartJsState.min !== null && currentCameraState.chartJsState.max !== null
+      cameraState: {
+        isLocked: currentCameraState.isLocked,
+        hasUserViewport: currentCameraState.chartJsState.min !== null && currentCameraState.chartJsState.max !== null
+      }
     });
     
     if (!chartRef.current) {
@@ -490,30 +494,28 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
     const dataset = chart.data.datasets[0];
 
     if (dataset && dataset.data) {
-      // CRÍTICO: Si debemos forzar el viewport, aplicarlo ANTES y DESPUÉS de cualquier manipulación
+      // DECISIÓN: ¿Forzar viewport del usuario o permitir auto-ajuste?
       if (shouldForceViewport && forcedViewport) {
-        console.log('🔒 [updateChart] FORZANDO viewport del usuario ANTES de manipulación:', forcedViewport);
+        console.log('🔒 [updateChart] FORZANDO viewport del usuario:', forcedViewport);
         
-        // INTERCEPTAR: Bloquear Chart.js de cambiar el viewport modificando las opciones
+        // Aplicar viewport del usuario ANTES de manipular datos
         chart.options.scales!.x!.min = forcedViewport.min;
         chart.options.scales!.x!.max = forcedViewport.max;
-        
-        // BLOQUEAR autoscale y otros comportamientos automáticos
-        if (chart.options.scales?.x) {
-          chart.options.scales.x.type = 'linear';
-          chart.options.scales.x.beginAtZero = false;
-          chart.options.scales.x.suggestedMin = forcedViewport.min;
-          chart.options.scales.x.suggestedMax = forcedViewport.max;
-        }
-        
-        // Forzar en las escalas actuales también
-        
-        console.log('✅ [updateChart] Viewport bloqueado en opciones Y escalas');
         chart.scales.x.min = forcedViewport.min;
         chart.scales.x.max = forcedViewport.max;
+      } else if (shouldAutoAdjust) {
+        console.log('🔄 [updateChart] MODO AUTO-AJUSTE - permitiendo que la cámara se mueva automáticamente');
+        
+        // Limpiar restricciones para permitir auto-ajuste
+        if (chart.options.scales?.x) {
+          delete chart.options.scales.x.min;
+          delete chart.options.scales.x.max;
+          delete chart.options.scales.x.suggestedMin;
+          delete chart.options.scales.x.suggestedMax;
+        }
       }
       
-      // Buscar vela existente usando ventana de tiempo en lugar de timestamp exacto
+      // Buscar vela existente usando ventana de tiempo
       let existingIndex = -1;
       const updateTimestamp = newCandle.x;
       
@@ -590,87 +592,49 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
         updateTechnicalIndicators(chart);
       }
 
-      // CRÍTICO: FORZAR VIEWPORT ANTES DEL CHART.UPDATE
+      // Log estado antes del update
       console.log('🔍 [updateChart] ANTES del chart.update:', {
         shouldForceViewport,
+        shouldAutoAdjust,
         forcedViewport,
         currentMin: chart.scales.x?.min,
         currentMax: chart.scales.x?.max
       });
       
-      // BLOQUEO TOTAL: Deshabilitar zoom automático y pan durante update
-      let originalZoomEnabled = false;
-      let originalPanEnabled = false;
-      if (shouldForceViewport && forcedViewport && chart.options.plugins?.zoom) {
-        originalZoomEnabled = chart.options.plugins.zoom.zoom?.enabled || false;
-        originalPanEnabled = chart.options.plugins.zoom.pan?.enabled || false;
-        chart.options.plugins.zoom.zoom = { ...chart.options.plugins.zoom.zoom, enabled: false };
-        chart.options.plugins.zoom.pan = { ...chart.options.plugins.zoom.pan, enabled: false };
-        console.log('🚫 [updateChart] Zoom/Pan DESHABILITADO temporalmente');
-      }
-      
-      // Chart.js update
+      // Chart.js update principal
       console.log('⚙️ [updateChart] Ejecutando chart.update("none")...');
       chart.update('none');
-      console.log('✅ [updateChart] chart.update() completado');
       
-      // RESTAURAR zoom/pan settings
-      if (shouldForceViewport && forcedViewport && chart.options.plugins?.zoom) {
-        chart.options.plugins.zoom.zoom = { ...chart.options.plugins.zoom.zoom, enabled: originalZoomEnabled };
-        chart.options.plugins.zoom.pan = { ...chart.options.plugins.zoom.pan, enabled: originalPanEnabled };
-        console.log('✅ [updateChart] Zoom/Pan RESTAURADO');
-      }
-      
-      // CRÍTICO: FORZAR VIEWPORT DESPUÉS DEL CHART.UPDATE (SIEMPRE) + SEGUNDO UPDATE
+      // POST-UPDATE: Aplicar políticas de viewport según el estado de la cámara
       if (shouldForceViewport && forcedViewport) {
+        // Verificar si Chart.js respetó nuestro viewport
         const currentMin = chart.scales.x.min;
         const currentMax = chart.scales.x.max;
-        
-        // Verificar si Chart.js cambió el viewport
         const tolerance = 100; // Tolerancia en ms
         const minChanged = Math.abs(currentMin - forcedViewport.min) > tolerance;
         const maxChanged = Math.abs(currentMax - forcedViewport.max) > tolerance;
         
         if (minChanged || maxChanged) {
-          console.log('⚠️ [MinimalistChart] Chart.js cambió viewport sin permiso - RESTAURANDO INMEDIATAMENTE');
-          console.log('   Viewport forzado:', forcedViewport);
+          console.log('⚠️ [updateChart] Chart.js modificó viewport - restaurando preferencias del usuario');
+          console.log('   Viewport esperado:', forcedViewport);
           console.log('   Viewport actual:', { currentMin, currentMax });
-          console.log('   Diferencias:', { 
-            minDiff: Math.abs(currentMin - forcedViewport.min), 
-            maxDiff: Math.abs(currentMax - forcedViewport.max) 
-          });
+          
+          // Restaurar viewport del usuario inmediatamente
+          chart.scales.x.min = forcedViewport.min;
+          chart.scales.x.max = forcedViewport.max;
+          chart.update('none');
         }
         
-        // FORZAR VIEWPORT Y HACER SEGUNDO UPDATE INMEDIATAMENTE
-        chart.scales.x.min = forcedViewport.min;
-        chart.scales.x.max = forcedViewport.max;
-        
-        // Deshabilitar zoom/pan para segundo update también
-        if (chart.options.plugins?.zoom) {
-          chart.options.plugins.zoom.zoom = { ...chart.options.plugins.zoom.zoom, enabled: false };
-          chart.options.plugins.zoom.pan = { ...chart.options.plugins.zoom.pan, enabled: false };
-        }
-        
-        console.log('🔄 [updateChart] Ejecutando SEGUNDO chart.update() para confirmar viewport...');
-        chart.update('none');
-        
-        // Restaurar después del segundo update
-        if (chart.options.plugins?.zoom) {
-          chart.options.plugins.zoom.zoom = { ...chart.options.plugins.zoom.zoom, enabled: originalZoomEnabled };
-          chart.options.plugins.zoom.pan = { ...chart.options.plugins.zoom.pan, enabled: originalPanEnabled };
-        }
-        
-        console.log('🔒 [updateChart] Viewport DEFINITIVAMENTE FORZADO después de segundo update:', {
-          finalMin: chart.scales.x.min,
-          finalMax: chart.scales.x.max
-        });
-      } else {
-        console.log('ℹ️ [updateChart] Usuario no ha interactuado - permitiendo comportamiento automático');
+        console.log('✅ [updateChart] Viewport del usuario mantenido correctamente');
+      } else if (shouldAutoAdjust) {
+        console.log('🔄 [updateChart] Permitiendo auto-ajuste de cámara');
+        // En modo auto-ajuste, Chart.js puede mover la cámara libremente
+        // No necesitamos hacer nada más aquí
       }
       
       console.log('🏁 [updateChart] FIN - Proceso completado');
     }
-  }, [activeIndicators.size, currentInterval]); // Removed simpleCamera dependency as we use getCurrentState()
+  }, [activeIndicators.size, currentInterval]);
 
   const changeTimeInterval = useCallback(async (newInterval: TimeInterval) => {
     setCurrentInterval(newInterval);
@@ -824,18 +788,24 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
         console.log('🎯 [handleCandleUpdate] Llamando updateChart...');
         updateChart(update.candle, update.isFinal);
         
-        // NO desbloquear la cámara después de nuevas velas
-        // La cámara debe quedarse EXACTAMENTE donde el usuario la dejó
+        // Mostrar estado actual de la cámara para debug
         const currentCameraState = simpleCamera.getCurrentState();
-        if (currentCameraState.isLocked) {
+        const shouldAutoAdjust = simpleCamera.shouldAutoAdjust();
+        
+        if (shouldAutoAdjust) {
+          console.log(`[MinimalistChart] Nueva vela - MODO AUTO-AJUSTE activo`);
+        } else if (currentCameraState.isLocked) {
           console.log(`[MinimalistChart] Nueva vela - cámara BLOQUEADA por usuario, manteniendo posición fija`);
-          console.log(`[MinimalistChart] Estado de cámara actual:`, {
+          console.log(`[MinimalistChart] Estado de cámara:`, {
             isLocked: currentCameraState.isLocked,
-            lastUserAction: currentCameraState.lastUserAction,
-            chartJsState: currentCameraState.chartJsState
+            lastUserAction: currentCameraState.lastUserAction ? new Date(currentCameraState.lastUserAction).toLocaleTimeString() : null,
+            viewport: {
+              min: currentCameraState.chartJsState.min,
+              max: currentCameraState.chartJsState.max
+            }
           });
         } else {
-          console.log(`[MinimalistChart] Nueva vela - modo automático (solo al inicio)`);
+          console.log(`[MinimalistChart] Nueva vela - estado de cámara indefinido`);
         }
         
         console.log('📊 [handleCandleUpdate] Actualizando candleData state...');
@@ -962,12 +932,13 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
     }
   }, [candleData, startStreaming, isStreaming]);
 
-  // Configuración inicial del viewport SOLO al cargar por primera vez (reload)
+  // Configuración inicial del viewport SOLO al cargar por primera vez
   useEffect(() => {
     console.log('🎬 [Viewport Inicial] Hook ejecutándose:', {
       hasChart: !!chartRef.current,
       candleCount: candleData.length,
       initialViewportSet: initialViewportSet.current,
+      shouldAutoAdjust: simpleCamera.shouldAutoAdjust(),
       isLocked: simpleCamera.isLocked()
     });
     
@@ -989,82 +960,36 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
         chart.scales.x.max = userState.max;
         chart.update('none');
         initialViewportSet.current = true;
-        console.log('✅ [Viewport Inicial] Configuración del usuario aplicada:', userState);
+        console.log('✅ [Viewport Inicial] Configuración del usuario aplicada');
         return;
       }
     }
     
-    // Solo si NO hay configuración del usuario, aplicar vista inicial de últimas 100 velas
-    console.log('🏠 [Viewport Inicial] Aplicando vista automática inicial...');
-    const viewport = simpleCamera.getRecommendedViewport(candleData.length, candleData);
-    console.log('📊 [Viewport Inicial] Viewport recomendado:', viewport);
-    
-    if (chart.scales.x && viewport.min && viewport.max) {
-      // PRIMERA configuración inicial - esto debe quedar fijo hasta que el usuario interactúe
-      console.log('⚙️ [Viewport Inicial] Configurando scales...');
-      chart.scales.x.min = viewport.min;
-      chart.scales.x.max = viewport.max;
-      chart.update('none');
-      initialViewportSet.current = true;
-      console.log(`✅ [Viewport Inicial] Vista inicial aplicada:`, { min: viewport.min, max: viewport.max });
-    } else {
-      console.log('❌ [Viewport Inicial] No se pudo aplicar viewport - datos faltantes');
+    // En modo auto-ajuste: configurar vista inicial de últimas 100 velas
+    if (simpleCamera.shouldAutoAdjust()) {
+      console.log('🏠 [Viewport Inicial] Aplicando vista automática inicial...');
+      const viewport = simpleCamera.getRecommendedViewport(candleData.length, candleData);
+      console.log('📊 [Viewport Inicial] Viewport recomendado:', viewport);
+      
+      if (chart.scales.x && viewport.min && viewport.max) {
+        console.log('⚙️ [Viewport Inicial] Configurando vista inicial...');
+        chart.scales.x.min = viewport.min;
+        chart.scales.x.max = viewport.max;
+        chart.update('none');
+        initialViewportSet.current = true;
+        console.log('✅ [Viewport Inicial] Vista inicial aplicada');
+      } else {
+        console.log('❌ [Viewport Inicial] No se pudo aplicar viewport - datos faltantes');
+      }
     }
   }, [candleData.length === 0 ? 0 : 1]); // Solo se ejecuta UNA VEZ cuando candleData pasa de vacío a tener datos
 
-  // Ref para rastrear la última configuración aplicada y evitar repeticiones
-  const lastAppliedConfigRef = useRef<{min: number | null, max: number | null}>({min: null, max: null});
-
-  // DESHABILITADO: Gestionar configuración de cámara automática
-  // Chart.js mantiene automáticamente el viewport del usuario sin nuestra intervención
-  /*
+  // Auto-iniciar streaming
   useEffect(() => {
-    if (!chartRef.current || candleData.length === 0) return;
-    
-    const chart = chartRef.current;
-    
-    // SOLO aplicar si el usuario ha interactuado y tenemos configuración guardada
-    if (simpleCamera.isLocked()) {
-      const userState = simpleCamera.state.chartJsState;
-      if (chart.scales.x && userState.min !== null && userState.max !== null) {
-        const currentMin = chart.scales.x.min || 0;
-        const currentMax = chart.scales.x.max || 0;
-        
-        // Verificar si ya aplicamos esta configuración recientemente
-        const lastApplied = lastAppliedConfigRef.current;
-        const sameAsLast = lastApplied.min === userState.min && lastApplied.max === userState.max;
-        
-        if (sameAsLast) {
-          // Ya aplicamos esta configuración, no hacerlo de nuevo
-          return;
-        }
-        
-        // Solo actualizar si hay diferencia significativa para evitar loops
-        const minDiff = Math.abs(currentMin - userState.min);
-        const maxDiff = Math.abs(currentMax - userState.max);
-        
-        if (minDiff > 1000 || maxDiff > 1000) {
-          // Debounce para evitar aplicaciones repetitivas
-          const timeoutId = setTimeout(() => {
-            if (chartRef.current && chartRef.current.scales.x) {
-              chartRef.current.scales.x.min = userState.min;
-              chartRef.current.scales.x.max = userState.max;
-              chartRef.current.update('none');
-              
-              // Recordar la última configuración aplicada
-              lastAppliedConfigRef.current = {min: userState.min, max: userState.max};
-              
-              console.log('📷 [MinimalistChart] Aplicando configuración del usuario (debounced):', userState);
-            }
-          }, 50);
-          
-          return () => clearTimeout(timeoutId);
-        }
-      }
+    if (candleData.length > 0 && !isStreaming) {
+      startStreaming();
     }
-    // NO hacer nada si el usuario no ha interactuado - dejar que Chart.js mantenga su vista actual
-  }, [simpleCamera.state.lastUserAction, simpleCamera.state.chartJsState.min, simpleCamera.state.chartJsState.max]); // Reducir dependencias
-  */
+  }, [candleData, startStreaming, isStreaming]);
 
   if (Platform.OS !== 'web') {
     return (

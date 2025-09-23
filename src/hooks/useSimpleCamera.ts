@@ -13,8 +13,10 @@ export interface SimpleCameraState {
 export interface SimpleCameraControls {
   state: SimpleCameraState;
   isLocked: () => boolean;
+  isActivelyInteracting: () => boolean; // New method
   getCurrentState: () => SimpleCameraState; // Add this for immediate state access
   shouldForceViewport: () => boolean; // New method to check if viewport should be forced
+  shouldAutoAdjust: () => boolean; // New method to check if should auto-adjust
   getForcedViewport: () => { min: number; max: number } | null; // Get forced viewport
   onUserStartInteraction: () => void;
   onUserEndInteraction: () => void;
@@ -48,7 +50,7 @@ export const useSimpleCamera = ({
       const saved = sessionStorage.getItem('simpleCamera_state');
       if (saved) {
         const parsed = JSON.parse(saved);
-        console.log('📷 [SimpleCamera] Estado cargado desde sessionStorage:', parsed);
+        // console.log('📷 [SimpleCamera] Estado cargado desde sessionStorage:', parsed);
         return parsed;
       }
     } catch (error) {
@@ -92,22 +94,37 @@ export const useSimpleCamera = ({
     const currentState = stateRef.current;
     const hasViewport = currentState.chartJsState.min !== null && currentState.chartJsState.max !== null;
     
-    // FORZAR SIEMPRE LA CÁMARA DEL USUARIO MIENTRAS NO ESTÉ INTERACTUANDO
-    // Si el usuario ha interactuado alguna vez y tenemos un viewport guardado, siempre forzarlo
-    const shouldForceLock = hasViewport && currentState.lastUserAction !== null;
+    // Solo bloquear si:
+    // 1. El usuario ha interactuado (lastUserAction existe)
+    // 2. Tenemos un viewport guardado del usuario
+    // 3. El estado isLocked está activo
+    const shouldBeLocked = currentState.isLocked && hasViewport && currentState.lastUserAction !== null;
     
-    // Solo logear cuando hay cambios significativos para evitar spam
-    if (currentState.isLocked !== shouldForceLock || Math.random() < 0.01) { // Log 1% de las veces para debug
-      console.log('📷 [SimpleCamera] isLocked check (FORCED):', { 
+    // Log ocasional para debug (solo 1% de las veces para evitar spam)
+    if (Math.random() < 0.01) {
+      console.log('📷 [SimpleCamera] isLocked check:', { 
         stateIsLocked: currentState.isLocked, 
         hasViewport,
-        shouldForceLock,
+        shouldBeLocked,
         lastUserAction: currentState.lastUserAction ? new Date(currentState.lastUserAction).toLocaleTimeString() : null
       });
     }
     
-    return shouldForceLock;
+    return shouldBeLocked;
   }, []); // No dependencies - always uses current ref
+
+  // Check if user is actively interacting (recently) - different from just having preferences
+  const isActivelyInteracting = useCallback(() => {
+    const currentState = stateRef.current;
+    if (!currentState.lastUserAction) return false;
+    
+    // Consider user as "actively interacting" if last action was within 30 seconds
+    const now = Date.now();
+    const timeSinceLastAction = now - currentState.lastUserAction;
+    const isRecent = timeSinceLastAction < 30000; // 30 seconds
+    
+    return currentState.isLocked && isRecent;
+  }, []);
 
   // Get current state immediately
   const getCurrentState = useCallback(() => {
@@ -117,9 +134,28 @@ export const useSimpleCamera = ({
   // Check if viewport should be forced (user has interacted and we have saved viewport)
   const shouldForceViewport = useCallback(() => {
     const currentState = stateRef.current;
-    return currentState.lastUserAction !== null && 
-           currentState.chartJsState.min !== null && 
-           currentState.chartJsState.max !== null;
+    
+    // Solo forzar viewport si:
+    // 1. El usuario está bloqueado (tiene preferencias)
+    // 2. Tenemos un viewport guardado
+    // 3. NO se está interactuando activamente en este momento
+    const hasValidViewport = currentState.chartJsState.min !== null && currentState.chartJsState.max !== null;
+    const shouldForce = currentState.isLocked && hasValidViewport && currentState.lastUserAction !== null;
+    
+    return shouldForce;
+  }, []);
+
+  // Check if should auto-adjust (opposite of forcing viewport)
+  const shouldAutoAdjust = useCallback(() => {
+    const currentState = stateRef.current;
+    
+    // Auto-ajustar cuando:
+    // 1. El usuario no ha interactuado nunca (primera vez)
+    // 2. O cuando explícitamente se reseteó la cámara
+    const neverInteracted = currentState.lastUserAction === null;
+    const notLocked = !currentState.isLocked;
+    
+    return neverInteracted || notLocked;
   }, []);
 
   // Get the forced viewport values
@@ -156,6 +192,7 @@ export const useSimpleCamera = ({
     interactionTimeoutRef.current = setTimeout(() => {
       setState(prev => ({
         ...prev,
+        isLocked: true, // Confirmar que está bloqueado después de interacción
         lastUserAction: Date.now()
       }));
     }, 50);
@@ -213,9 +250,9 @@ export const useSimpleCamera = ({
     });
   }, [onStateChange]);
 
-  // Reset to latest candles - con limpieza de persistencia
+  // Reset to latest candles - con limpieza completa
   const resetToLatest = useCallback(() => {
-    console.log('📷 [SimpleCamera] Reset to latest');
+    console.log('📷 [SimpleCamera] Reset to latest - limpiando todo el estado');
     const newState = {
       isLocked: false,
       lastUserAction: null,
@@ -279,8 +316,10 @@ export const useSimpleCamera = ({
   const controls = useMemo(() => ({
     state,
     isLocked,
+    isActivelyInteracting,
     getCurrentState,
     shouldForceViewport,
+    shouldAutoAdjust,
     getForcedViewport,
     onUserStartInteraction,
     onUserEndInteraction,
@@ -288,7 +327,7 @@ export const useSimpleCamera = ({
     onUserPan,
     resetToLatest,
     getRecommendedViewport
-  }), [state, isLocked, getCurrentState, shouldForceViewport, getForcedViewport, onUserStartInteraction, onUserEndInteraction, onUserZoom, onUserPan, resetToLatest, getRecommendedViewport]);
+  }), [state, isLocked, isActivelyInteracting, getCurrentState, shouldForceViewport, shouldAutoAdjust, getForcedViewport, onUserStartInteraction, onUserEndInteraction, onUserZoom, onUserPan, resetToLatest, getRecommendedViewport]);
 
   return controls;
 };
