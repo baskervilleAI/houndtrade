@@ -1,9 +1,10 @@
-import React, { useRef, useEffect, useState, useCallback } from 'react';
+import React, { useRef, useEffect, useState, useCallback, useMemo } from 'react';
 import { View, StyleSheet, Text, Platform, TouchableOpacity, ScrollView } from 'react-native';
 import { useMarket } from '../../context/AppContext';
 import liveStreamingService, { CandleData, StreamUpdate, TimeInterval } from '../../services/liveStreamingService';
 import { useTechnicalIndicators, addIndicatorToChart } from '../../hooks/useTechnicalIndicators';
 import { useSimpleCamera } from '../../hooks/useSimpleCamera';
+import { usePersistentViewport } from '../../hooks/usePersistentViewport';
 
 interface MinimalistChartProps {
   height?: number;
@@ -71,6 +72,9 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
     // autoResetTimeMs eliminado - la cámara mantiene posición del usuario permanentemente
     onStateChange: onCameraStateChange,
   });
+
+  // Hook para persistencia robusta del viewport
+  const persistentViewport = usePersistentViewport(chartRef);
 
   // Helper functions para manejo de interacciones
   const startUserInteraction = useCallback(() => {
@@ -152,7 +156,9 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
             finalCenter: (finalScale.min + finalScale.max) / 2
           });
           
+          // NUEVO: Usar sistema de persistencia mejorado
           simpleCamera.onUserZoom(finalScale.min, finalScale.max, (finalScale.min + finalScale.max) / 2);
+          simpleCamera.lockCamera(); // Bloquear la cámara en la nueva posición
         }
         endUserInteraction();
         
@@ -224,7 +230,9 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
             finalCenter: (finalScale.min + finalScale.max) / 2
           });
           
+          // NUEVO: Usar sistema de persistencia mejorado
           simpleCamera.onUserPan(finalScale.min, finalScale.max, (finalScale.min + finalScale.max) / 2);
+          simpleCamera.lockCamera(); // Bloquear la cámara en la nueva posición
         }
         endUserInteraction();
         
@@ -243,6 +251,116 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
 
   // Calcular indicadores técnicos
   const technicalIndicators = useTechnicalIndicators(candleData);
+
+  // ============================================
+  // MEMOIZACIÓN DE OPCIONES PARA CHART.JS
+  // ============================================
+  
+  // CRÍTICO: Memoizar opciones para evitar recreación en cada render
+  // Esto previente que Chart.js resetee las escalas/zoom
+  const chartOptions = useMemo(() => ({
+    animation: {
+      duration: 0  // Desactivar animaciones para mejor rendimiento en live
+    },
+    responsive: false,
+    maintainAspectRatio: false,
+    parsing: false as const, // Importante para performance con datos de velas
+    interaction: {
+      intersect: false,
+      mode: 'index' as const
+    },
+    scales: {
+      x: {
+        type: 'time' as const,
+        time: {
+          unit: currentInterval.includes('m') ? 'minute' as const : 
+                currentInterval.includes('h') ? 'hour' as const : 'day' as const,
+          displayFormats: {
+            minute: 'HH:mm',
+            hour: 'HH:mm',
+            day: 'MM/dd'
+          }
+        },
+        ticks: {
+          color: '#ffffff',
+          maxTicksLimit: 12
+        },
+        grid: {
+          display: false
+        },
+        border: {
+          display: false
+        },
+        // CRÍTICO: Configuraciones para preservar viewport
+        bounds: 'data' as const,
+        // No definir min/max aquí - se manejan dinámicamente
+        adapters: {
+          date: {}
+        },
+        offset: false
+      },
+      y: {
+        type: 'linear' as const,
+        position: 'right' as const,
+        ticks: {
+          color: '#ffffff',
+          callback: function(value: any) {
+            return '$' + (value / 1000).toFixed(2) + 'k';
+          }
+        },
+        grid: {
+          display: false
+        },
+        border: {
+          display: false
+        }
+      }
+    },
+    plugins: {
+      title: {
+        display: true,
+        text: `${currentSymbol} - ${currentInterval.toUpperCase()} ${isStreaming ? '🔴 LIVE' : ''}`,
+        color: '#ffffff',
+        font: { size: 16 }
+      },
+      legend: {
+        labels: { color: '#ffffff' }
+      },
+      zoom: {
+        zoom: {
+          wheel: {
+            enabled: true,
+          },
+          pinch: {
+            enabled: true
+          },
+          mode: 'x' as const,
+          onZoom: function(context: any) {
+            const chart = context.chart;
+            const xScale = chart.scales.x;
+            
+            if (!xScale || !chart.data.datasets[0]?.data) return;
+            
+            // Usar el handler debounced para evitar múltiples eventos
+            debouncedZoomHandler(chart, xScale);
+          }
+        },
+        pan: {
+          enabled: true,
+          mode: 'x' as const,
+          onPan: function(context: any) {
+            const chart = context.chart;
+            const xScale = chart.scales.x;
+            
+            if (!xScale || !chart.data.datasets[0]?.data) return;
+            
+            // Usar el handler debounced para evitar múltiples eventos
+            debouncedPanHandler(chart, xScale);
+          }
+        }
+      }
+    }
+  }), [currentSymbol, currentInterval, isStreaming, debouncedZoomHandler, debouncedPanHandler]);
 
   const addLog = (message: string) => {
     console.log(`[MinimalistChart] ${message}`);
@@ -475,118 +593,11 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
         });
       }
 
-      // Crear gráfico
+      // Crear gráfico con opciones memoizadas
       chartRef.current = new Chart(ctx, {
         type: 'candlestick',
         data: { datasets },
-        options: {
-          animation: {
-            duration: 0  // Desactivar animaciones para mejor rendimiento en live
-          },
-          responsive: false,
-          maintainAspectRatio: false,
-          interaction: {
-            intersect: false,
-            mode: 'index'
-          },
-          scales: {
-            x: {
-              type: 'time',
-              time: {
-                unit: currentInterval.includes('m') ? 'minute' : 
-                      currentInterval.includes('h') ? 'hour' : 'day',
-                displayFormats: {
-                  minute: 'HH:mm',
-                  hour: 'HH:mm',
-                  day: 'MM/dd'
-                }
-              },
-              ticks: {
-                color: '#ffffff',
-                maxTicksLimit: 12
-              },
-              grid: {
-                display: false  // Eliminar líneas de grid horizontales
-              },
-              border: {
-                display: false  // Eliminar borde del eje
-              },
-              // CRÍTICO: Evitar reconfiguración automática del viewport
-              bounds: 'data',
-              // No auto-ajustar min/max cuando se agregan datos
-              suggestedMin: undefined,
-              suggestedMax: undefined,
-              // Configuraciones adicionales para preservar viewport
-              adapters: {
-                date: {}
-              },
-              // Evitar que Chart.js haga auto-fitting
-              offset: false
-            },
-            y: {
-              type: 'linear',
-              position: 'right',
-              ticks: {
-                color: '#ffffff',
-                callback: function(value: any) {
-                  return '$' + (value / 1000).toFixed(2) + 'k';
-                }
-              },
-              grid: {
-                display: false  // Eliminar líneas de grid verticales
-              },
-              border: {
-                display: false  // Eliminar borde del eje
-              }
-            }
-          },
-          plugins: {
-            title: {
-              display: true,
-              text: `${currentSymbol} - ${currentInterval.toUpperCase()} ${isStreaming ? '🔴 LIVE' : ''}`,
-              color: '#ffffff',
-              font: { size: 16 }
-            },
-            legend: {
-              labels: { color: '#ffffff' }
-            },
-            zoom: {
-              zoom: {
-                wheel: {
-                  enabled: true,
-                },
-                pinch: {
-                  enabled: true
-                },
-                mode: 'x',
-                onZoom: function(context: any) {
-                  // Usar el handler debounced para evitar múltiples eventos
-                  const chart = context.chart;
-                  const xScale = chart.scales.x;
-                  
-                  if (!xScale || !chart.data.datasets[0]?.data) return;
-                  
-                  // Aplicar el debounce agresivo
-                  debouncedZoomHandler(chart, xScale);
-                }
-              },
-              pan: {
-                enabled: true,
-                mode: 'x',
-                onPan: function(context: any) {
-                  // Usar el handler debounced para evitar múltiples eventos
-                  const chart = context.chart;
-                  const xScale = chart.scales.x;
-                  
-                  if (!xScale || !chart.data.datasets[0]?.data) return;
-                  
-                  // Aplicar el debounce agresivo
-                  debouncedPanHandler(chart, xScale);
-                }
-              }
-            }
-          }
-        }
+        options: chartOptions
       });
 
       setStatus(`✅ Gráfico listo (${candleData.length} velas)`);
@@ -595,26 +606,13 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
       setStatus(`Error: ${error.message}`);
       console.error('Error creando gráfico:', error);
     }
-  }, [candleData, currentSymbol, currentInterval, isStreaming, activeIndicators, technicalIndicators]);
+  }, [candleData, currentSymbol, currentInterval, isStreaming, activeIndicators, technicalIndicators, chartOptions, debouncedZoomHandler, debouncedPanHandler]);
 
   const updateChart = useCallback((newCandle: CandleData, isFinal: boolean) => {
-    // Obtener estado actual de la cámara al momento de la ejecución
-    const currentCameraState = simpleCamera.getCurrentState();
-    const shouldForceViewport = simpleCamera.shouldForceViewport();
-    const shouldAutoAdjust = simpleCamera.shouldAutoAdjust();
-    const forcedViewport = simpleCamera.getForcedViewport();
-    
     console.log('🚀 [updateChart] INICIO - Nueva vela recibida:', { 
       timestamp: new Date().toLocaleTimeString(),
       price: newCandle.c,
-      isFinal,
-      shouldForceViewport,
-      shouldAutoAdjust,
-      forcedViewport,
-      cameraState: {
-        isLocked: currentCameraState.isLocked,
-        hasUserViewport: currentCameraState.chartJsState.min !== null && currentCameraState.chartJsState.max !== null
-      }
+      isFinal
     });
     
     if (!chartRef.current) {
@@ -631,30 +629,20 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
     setLastUpdateTime(now);
 
     const chart = chartRef.current;
-    const dataset = chart.data.datasets[0];
+    
+    // ============================================
+    // PATRÓN OFICIAL CHART.JS: SNAPSHOT/RESTORE
+    // ============================================
+    
+    // 1) SNAPSHOT: Capturar viewport actual del usuario si la cámara está bloqueada
+    if (simpleCamera.shouldPersistViewport()) {
+      console.log('� [updateChart] Guardando viewport del usuario...');
+      persistentViewport.snapshot();
+    }
 
+    // 2) MUTACIÓN IN-SITU: Mutar datos existentes en lugar de recrear array
+    const dataset = chart.data.datasets[0];
     if (dataset && dataset.data) {
-      // DECISIÓN: ¿Forzar viewport del usuario o permitir auto-ajuste?
-      if (shouldForceViewport && forcedViewport) {
-        console.log('🔒 [updateChart] FORZANDO viewport del usuario:', forcedViewport);
-        
-        // Aplicar viewport del usuario ANTES de manipular datos
-        chart.options.scales!.x!.min = forcedViewport.min;
-        chart.options.scales!.x!.max = forcedViewport.max;
-        chart.scales.x.min = forcedViewport.min;
-        chart.scales.x.max = forcedViewport.max;
-      } else if (shouldAutoAdjust) {
-        console.log('🔄 [updateChart] MODO AUTO-AJUSTE - permitiendo que la cámara se mueva automáticamente');
-        
-        // Limpiar restricciones para permitir auto-ajuste
-        if (chart.options.scales?.x) {
-          delete chart.options.scales.x.min;
-          delete chart.options.scales.x.max;
-          delete chart.options.scales.x.suggestedMin;
-          delete chart.options.scales.x.suggestedMax;
-        }
-      }
-      
       // Buscar vela existente usando ventana de tiempo
       let existingIndex = -1;
       const updateTimestamp = newCandle.x;
@@ -690,91 +678,48 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
         const lastCandle = dataset.data[lastIndex] as any;
         if (lastCandle && Math.abs(lastCandle.x - updateTimestamp) < intervalMs) {
           existingIndex = lastIndex;
-        } else {
-          // Buscar en las últimas 5 velas
-          for (let i = Math.max(0, dataset.data.length - 5); i < dataset.data.length; i++) {
-            const candle = dataset.data[i] as any;
-            if (candle && Math.abs(candle.x - updateTimestamp) < intervalMs) {
-              existingIndex = i;
-              break;
-            }
-          }
         }
       }
-
+      
+      // MUTACIÓN IN-SITU: Actualizar o agregar vela
+      const candleData = {
+        x: newCandle.x,
+        o: newCandle.o,
+        h: newCandle.h,
+        l: newCandle.l,
+        c: newCandle.c
+      };
+      
       if (existingIndex >= 0) {
-        // Actualizar vela existente
-        const oldCandle = dataset.data[existingIndex] as any;
-        dataset.data[existingIndex] = {
-          x: newCandle.x,
-          o: newCandle.o,
-          h: newCandle.h,
-          l: newCandle.l,
-          c: newCandle.c
-        };
-        console.log(`[Chart] Updated candle at index ${existingIndex}: $${oldCandle?.c?.toFixed(4) || '?'} → $${newCandle.c.toFixed(4)} (${isFinal ? 'final' : 'live'})`);
+        // Actualizar vela existente (mutación in-situ)
+        console.log(`📊 [updateChart] Actualizando vela existente en índice ${existingIndex}`);
+        (dataset.data as any)[existingIndex] = candleData;
       } else {
-        // Agregar nueva vela
-        dataset.data.push({
-          x: newCandle.x,
-          o: newCandle.o,
-          h: newCandle.h,
-          l: newCandle.l,
-          c: newCandle.c
-        });
-        console.log(`[Chart] Added new candle: $${newCandle.c.toFixed(4)} at ${new Date(newCandle.x).toLocaleTimeString()}, total: ${dataset.data.length} (${isFinal ? 'final' : 'live'})`);
-
-        // NO eliminar velas antiguas - mantener todo el historial para que el usuario pueda navegar
+        // Agregar nueva vela (mutación in-situ)
+        console.log('📊 [updateChart] Agregando nueva vela');
+        (dataset.data as any[]).push(candleData);
       }
 
-      // Actualizar indicadores técnicos si están activos
-      if (activeIndicators.size > 0) {
-        updateTechnicalIndicators(chart);
+      // Mantener límite de velas (mutación in-situ)
+      const maxCandles = 900;
+      if (dataset.data.length > maxCandles) {
+        console.log(`🗂️ [updateChart] Limitando a ${maxCandles} velas`);
+        (dataset.data as any[]).splice(0, dataset.data.length - maxCandles);
       }
-
-      // Log estado antes del update
-      console.log('🔍 [updateChart] ANTES del chart.update:', {
-        shouldForceViewport,
-        shouldAutoAdjust,
-        forcedViewport,
-        currentMin: chart.scales.x?.min,
-        currentMax: chart.scales.x?.max
-      });
-      
-      // Chart.js update principal
-      console.log('⚙️ [updateChart] Ejecutando chart.update("none")...');
-      chart.update('none');
-      
-      // POST-UPDATE: Aplicar políticas de viewport según el estado de la cámara
-      if (shouldForceViewport && forcedViewport) {
-        // Verificar si Chart.js respetó nuestro viewport
-        const currentMin = chart.scales.x.min;
-        const currentMax = chart.scales.x.max;
-        const tolerance = 100; // Tolerancia en ms
-        const minChanged = Math.abs(currentMin - forcedViewport.min) > tolerance;
-        const maxChanged = Math.abs(currentMax - forcedViewport.max) > tolerance;
-        
-        if (minChanged || maxChanged) {
-          console.log('⚠️ [updateChart] Chart.js modificó viewport - restaurando preferencias del usuario');
-          console.log('   Viewport esperado:', forcedViewport);
-          console.log('   Viewport actual:', { currentMin, currentMax });
-          
-          // Restaurar viewport del usuario inmediatamente
-          chart.scales.x.min = forcedViewport.min;
-          chart.scales.x.max = forcedViewport.max;
-          chart.update('none');
-        }
-        
-        console.log('✅ [updateChart] Viewport del usuario mantenido correctamente');
-      } else if (shouldAutoAdjust) {
-        console.log('🔄 [updateChart] Permitiendo auto-ajuste de cámara');
-        // En modo auto-ajuste, Chart.js puede mover la cámara libremente
-        // No necesitamos hacer nada más aquí
-      }
-      
-      console.log('🏁 [updateChart] FIN - Proceso completado');
     }
-  }, [activeIndicators.size, currentInterval]);
+
+    // 3) UPDATE: Actualizar Chart.js sin animación
+    console.log('⚙️ [updateChart] Ejecutando chart.update("none")...');
+    chart.update('none');
+
+    // 4) RESTORE: Restaurar viewport del usuario si está bloqueado
+    if (simpleCamera.shouldPersistViewport() && persistentViewport.hasSnapshot()) {
+      console.log('🔄 [updateChart] Restaurando viewport del usuario...');
+      persistentViewport.restore('none');
+    }
+
+    console.log('✅ [updateChart] Actualización completada');
+  }, [currentInterval, simpleCamera, persistentViewport, lastUpdateTime, updateThrottleMs]);
 
   const changeTimeInterval = useCallback(async (newInterval: TimeInterval) => {
     setCurrentInterval(newInterval);
@@ -1156,13 +1101,16 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
                   simpleCamera.isLocked() ? styles.cameraManualButton : styles.cameraResetButton
                 ]}
                 onPress={() => {
+                  console.log('🔄 [UI] Usuario presionó botón de reset de cámara');
                   initialViewportSet.current = false; // Reset flag para permitir nuevo viewport inicial
-                  simpleCamera.resetToLatest();
+                  simpleCamera.resetToLatest(); // Limpia estado persistido
+                  persistentViewport.resetZoom('none'); // Reset usando Chart.js oficial
+                  persistentViewport.clearSnapshot(); // Limpia snapshot guardado
                   // El gráfico se reiniciará automáticamente con el próximo useEffect
                 }}
               >
                 <Text style={styles.indicatorButtonText}>
-                  {simpleCamera.isLocked() ? '📷 Reset' : '📷 100'}
+                  {simpleCamera.isLocked() ? '📷 Reset' : '📷 Auto'}
                 </Text>
               </TouchableOpacity>
 

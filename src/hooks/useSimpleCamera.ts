@@ -11,6 +11,13 @@ function debounce<T extends (...args: any[]) => void>(func: T, wait: number): T 
   }) as T;
 }
 
+/**
+ * Patrón mejorado para persistencia del viewport siguiendo las mejores prácticas de Chart.js:
+ * - No recrea options/plugins en cada render
+ * - Usa mutación en sitio para preservar escalas
+ * - Implementa el patrón snapshot/restore oficial
+ */
+
 export interface SimpleCameraState {
   isLocked: boolean;
   lastUserAction: number | null;
@@ -26,17 +33,23 @@ export interface SimpleCameraState {
 export interface SimpleCameraControls {
   state: SimpleCameraState;
   isLocked: () => boolean;
-  isActivelyInteracting: () => boolean; // New method
-  getCurrentState: () => SimpleCameraState; // Add this for immediate state access
-  shouldForceViewport: () => boolean; // New method to check if viewport should be forced
-  shouldAutoAdjust: () => boolean; // New method to check if should auto-adjust
-  getForcedViewport: () => { min: number; max: number } | null; // Get forced viewport
+  isActivelyInteracting: () => boolean;
+  getCurrentState: () => SimpleCameraState;
+  shouldForceViewport: () => boolean;
+  shouldAutoAdjust: () => boolean;
+  getForcedViewport: () => { min: number; max: number } | null;
   onUserStartInteraction: () => void;
   onUserEndInteraction: () => void;
   onUserZoom: (min: number, max: number, centerX: number) => void;
   onUserPan: (min: number, max: number, centerX: number) => void;
   resetToLatest: () => void;
   getRecommendedViewport: (totalCandles: number, candleData?: any[]) => { min?: number; max?: number };
+  
+  // NUEVOS métodos para compatibilidad con Chart.js oficial
+  updateFromChartViewport: (min: number | null, max: number | null) => void;
+  shouldPersistViewport: () => boolean;
+  lockCamera: () => void;
+  unlockCamera: () => void;
 }
 
 interface UseSimpleCameraProps {
@@ -359,6 +372,53 @@ export const useSimpleCamera = ({
     };
   }, [defaultVisibleCandles]);
 
+  // NUEVOS métodos para compatibilidad con Chart.js oficial
+
+  // Actualizar estado desde el viewport actual del chart (sin persistir)
+  const updateFromChartViewport = useCallback((min: number | null, max: number | null) => {
+    if (min !== null && max !== null) {
+      console.log('📷 [SimpleCamera] Actualizando desde Chart viewport:', { min, max });
+      setState(prev => ({
+        ...prev,
+        chartJsState: {
+          ...prev.chartJsState,
+          min,
+          max,
+          centerX: (min + max) / 2
+        }
+      }));
+    }
+  }, []);
+
+  // Determinar si el viewport debe persistirse basado en el estado actual
+  const shouldPersistViewport = useCallback(() => {
+    const currentState = stateRef.current;
+    return currentState.isLocked && 
+           currentState.chartJsState.min !== null && 
+           currentState.chartJsState.max !== null;
+  }, []);
+
+  // Bloquear la cámara en su posición actual
+  const lockCamera = useCallback(() => {
+    console.log('🔒 [SimpleCamera] Bloqueando cámara en posición actual');
+    setState(prev => ({
+      ...prev,
+      isLocked: true,
+      lastUserAction: Date.now(),
+      mode: 'USER_LOCKED'
+    }));
+  }, []);
+
+  // Desbloquear la cámara para seguimiento automático
+  const unlockCamera = useCallback(() => {
+    console.log('🔓 [SimpleCamera] Desbloqueando cámara para auto-seguimiento');
+    setState(prev => ({
+      ...prev,
+      isLocked: false,
+      mode: 'AUTO_ADJUST'
+    }));
+  }, []);
+
     // Memoize the return object to prevent unnecessary re-creations
   const controls = useMemo(() => ({
     state,
@@ -373,8 +433,32 @@ export const useSimpleCamera = ({
     onUserZoom,
     onUserPan,
     resetToLatest,
-    getRecommendedViewport
-  }), [state, isLocked, isActivelyInteracting, getCurrentState, shouldForceViewport, shouldAutoAdjust, shouldAutoAdjustForMode, getForcedViewport, onUserStartInteraction, onUserEndInteraction, onUserZoom, onUserPan, resetToLatest, getRecommendedViewport]);
+    getRecommendedViewport,
+    // NUEVOS métodos para Chart.js oficial
+    updateFromChartViewport,
+    shouldPersistViewport,
+    lockCamera,
+    unlockCamera
+  }), [
+    state, 
+    isLocked, 
+    isActivelyInteracting, 
+    getCurrentState, 
+    shouldForceViewport, 
+    shouldAutoAdjust, 
+    shouldAutoAdjustForMode, 
+    getForcedViewport, 
+    onUserStartInteraction, 
+    onUserEndInteraction, 
+    onUserZoom, 
+    onUserPan, 
+    resetToLatest, 
+    getRecommendedViewport,
+    updateFromChartViewport,
+    shouldPersistViewport,
+    lockCamera,
+    unlockCamera
+  ]);
 
   return controls;
 };
