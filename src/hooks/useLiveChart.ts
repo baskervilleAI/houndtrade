@@ -30,7 +30,7 @@ export const useLiveChart = (options: UseLiveChartOptions) => {
   const { 
     symbol, 
     interval, 
-    maxCandles = 100,
+    maxCandles = 1000, // Aumentado de 100 a 1000 para mejor historial
     enableUltraFast = false,
     cycleDelay = 100
   } = options;

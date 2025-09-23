@@ -99,7 +99,7 @@ class LiveStreamingService extends SimpleEventEmitter {
     return urls[urlIndex];
   }
 
-  private getHistoricalDataUrl(symbol: string, interval: TimeInterval, limit: number = 100): string {
+  private getHistoricalDataUrl(symbol: string, interval: TimeInterval, limit: number = 1000): string {
     return `https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`;
   }
 
@@ -444,7 +444,7 @@ class LiveStreamingService extends SimpleEventEmitter {
     }
   }
 
-  async loadHistoricalData(symbol: string, interval: TimeInterval, limit: number = 100): Promise<CandleData[]> {
+  async loadHistoricalData(symbol: string, interval: TimeInterval, limit: number = 1000): Promise<CandleData[]> {
     try {
       console.log(`📈 Cargando datos históricos: ${symbol} ${interval}`);
       

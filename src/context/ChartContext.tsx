@@ -74,8 +74,8 @@ function chartReducer(state: ChartState, action: ChartAction): ChartState {
       const currentCandles = state.candleData[action.payload.key] || [];
       const newCandles = [...currentCandles, action.payload.candle];
       
-      // Keep only last 200 candles for performance
-      const trimmedCandles = newCandles.slice(-200);
+      // Keep only last 1000 candles for performance while maintaining good historical data
+      const trimmedCandles = newCandles.slice(-1000);
 
       return {
         ...state,
@@ -149,7 +149,7 @@ export const ChartProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   const getKey = useCallback((symbol: string, timeframe: string) => `${symbol}_${timeframe}`, []);
 
   // Generate mock candles for fallback
-  const generateMockCandles = useCallback((symbol: string, count: number = 100): CandleData[] => {
+  const generateMockCandles = useCallback((symbol: string, count: number = 1000): CandleData[] => {
     const candles: CandleData[] = [];
     const basePrice = symbol === 'BTCUSDT' ? 95000 : 
                      symbol === 'ETHUSDT' ? 3500 : 
@@ -237,14 +237,14 @@ export const ChartProvider: React.FC<{ children: ReactNode }> = ({ children }) =
             candles = await binanceService.getKlines(
               symbol,
               binanceService.getIntervalFromTimeframe(timeframe),
-              200 // Más datos históricos para mejor visualización
+              1000 // Más datos históricos para mejor visualización (aumentado de 200 a 1000)
             );
             console.log(`🆕 Loaded ${candles.length} fresh candles for ${key}`);
           }
         } catch (apiError) {
           console.warn(`⚠️ Binance API failed for ${key}, using mock data:`, apiError);
           // Fallback to mock data
-          candles = generateMockCandles(symbol, 200);
+          candles = generateMockCandles(symbol, 1000);
           console.log(`🎭 Generated ${candles.length} mock candles for ${key}`);
         }
 
@@ -260,7 +260,7 @@ export const ChartProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       } catch (error) {
         console.error(`❌ Error loading candles for ${key}:`, error);
         // Final fallback - generate mock data
-        const mockCandles = generateMockCandles(symbol, 200);
+        const mockCandles = generateMockCandles(symbol, 1000);
         dispatch({ type: 'SET_CANDLES', payload: { key, candles: mockCandles } });
         console.log(`🎭 Fallback: Generated ${mockCandles.length} mock candles for ${key}`);
       } finally {

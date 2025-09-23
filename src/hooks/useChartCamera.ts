@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo, useRef } from 'react';
+import { useState, useCallback, useMemo, useRef, useEffect } from 'react';
 import { Dimensions } from 'react-native';
 
 const { width: screenWidth } = Dimensions.get('window');
@@ -16,6 +16,10 @@ export interface CameraState {
   // Visible range in terms of candle indices
   startIndex: number;
   endIndex: number;
+  // Camera lock state - prevents auto-updates during streaming
+  isLocked: boolean;
+  // Preserve manual adjustments during streaming
+  manuallyAdjusted: boolean;
 }
 
 export interface CameraControls {
@@ -46,6 +50,17 @@ export interface CameraControls {
   fitVisible: () => void;
   fitPriceRange: (min: number, max: number) => void;
   
+  // Camera lock controls - preserves camera state during streaming
+  lockCamera: () => void;
+  unlockCamera: () => void;
+  toggleLock: () => void;
+  isLocked: () => boolean;
+  
+  // Auto-follow controls for live data
+  enableAutoFollow: () => void;  // Automatically follow new data
+  disableAutoFollow: () => void; // Stay at current position
+  isAutoFollowing: () => boolean;
+  
   // Helper functions
   getVisibleRange: () => { start: number; end: number; count: number };
   isFullyVisible: () => boolean;
@@ -61,6 +76,7 @@ interface UseChartCameraProps {
   maxCandleWidth?: number;
   defaultZoom?: number;
   onCameraChange?: (camera: CameraState) => void;
+  onNewDataReceived?: boolean; // Signal that new data was received
 }
 
 export const useChartCamera = ({
@@ -71,11 +87,15 @@ export const useChartCamera = ({
   maxCandleWidth = 50,
   defaultZoom = 1.0,
   onCameraChange,
+  onNewDataReceived = false,
 }: UseChartCameraProps): CameraControls => {
   const [zoomLevel, setZoomLevel] = useState(defaultZoom);
   const [offsetX, setOffsetX] = useState(1); // Start at the end (most recent data)
   const [offsetY, setOffsetY] = useState(0); // Center vertically
   const [priceRange, setPriceRange] = useState({ min: 0, max: 100 });
+  const [isLocked, setIsLocked] = useState(false); // Camera lock state
+  const [autoFollow, setAutoFollow] = useState(true); // Auto-follow new data
+  const [manuallyAdjusted, setManuallyAdjusted] = useState(false);
   
   // Calculate derived values
   const candleWidth = useMemo(() => {
@@ -120,7 +140,18 @@ export const useChartCamera = ({
     maxPrice: priceRange.max,
     startIndex,
     endIndex,
-  }), [zoomLevel, offsetX, offsetY, priceRange, startIndex, endIndex]);
+    isLocked,
+    manuallyAdjusted,
+  }), [zoomLevel, offsetX, offsetY, priceRange, startIndex, endIndex, isLocked, manuallyAdjusted]);
+  
+  // Auto-follow effect: when new data is received and camera is not locked/manually adjusted
+  useEffect(() => {
+    if (onNewDataReceived && autoFollow && !isLocked && !manuallyAdjusted) {
+      // Automatically follow new data by staying at the end
+      setOffsetX(1);
+      console.log('📈 Auto-following new data - staying at end');
+    }
+  }, [onNewDataReceived, autoFollow, isLocked, manuallyAdjusted]);
   
   // Notify when camera changes
   const notifyChange = useCallback(() => {
@@ -130,61 +161,76 @@ export const useChartCamera = ({
   // Zoom controls
   const zoomIn = useCallback(() => {
     setZoomLevel(prev => Math.min(prev * 1.5, 20)); // Max 20x zoom
+    setManuallyAdjusted(true);
     notifyChange();
   }, [notifyChange]);
   
   const zoomOut = useCallback(() => {
     setZoomLevel(prev => Math.max(prev / 1.5, 0.1)); // Min 0.1x zoom
+    setManuallyAdjusted(true);
     notifyChange();
   }, [notifyChange]);
   
   const setZoom = useCallback((level: number) => {
     setZoomLevel(Math.max(0.1, Math.min(20, level)));
+    setManuallyAdjusted(true);
     notifyChange();
   }, [notifyChange]);
   
   const resetZoom = useCallback(() => {
     setZoomLevel(defaultZoom);
+    setManuallyAdjusted(false);
     notifyChange();
   }, [defaultZoom, notifyChange]);
   
   // Pan controls
   const panLeft = useCallback(() => {
     setOffsetX(prev => Math.max(0, prev - 0.1));
+    setManuallyAdjusted(true);
     notifyChange();
   }, [notifyChange]);
   
   const panRight = useCallback(() => {
     setOffsetX(prev => Math.min(1, prev + 0.1));
+    setManuallyAdjusted(true);
     notifyChange();
   }, [notifyChange]);
   
   const panUp = useCallback(() => {
     setOffsetY(prev => Math.max(-1, prev - 0.1));
+    setManuallyAdjusted(true);
     notifyChange();
   }, [notifyChange]);
   
   const panDown = useCallback(() => {
     setOffsetY(prev => Math.min(1, prev + 0.1));
+    setManuallyAdjusted(true);
     notifyChange();
   }, [notifyChange]);
   
   const setPan = useCallback((x: number, y: number) => {
     setOffsetX(Math.max(0, Math.min(1, x)));
     setOffsetY(Math.max(-1, Math.min(1, y)));
+    setManuallyAdjusted(true);
     notifyChange();
   }, [notifyChange]);
   
   // Navigation controls
   const goToStart = useCallback(() => {
     setOffsetX(0);
+    setManuallyAdjusted(true);
+    setAutoFollow(false);
     notifyChange();
   }, [notifyChange]);
   
   const goToEnd = useCallback(() => {
     setOffsetX(1);
+    setManuallyAdjusted(false); // Going to end is not considered manual if auto-follow is enabled
+    if (!autoFollow) {
+      setManuallyAdjusted(true);
+    }
     notifyChange();
-  }, [notifyChange]);
+  }, [notifyChange, autoFollow]);
   
   const goToIndex = useCallback((index: number) => {
     if (candleCount === 0) return;
@@ -192,6 +238,8 @@ export const useChartCamera = ({
     const normalizedIndex = Math.max(0, Math.min(candleCount - 1, index));
     const newOffsetX = normalizedIndex / (candleCount - 1);
     setOffsetX(newOffsetX);
+    setManuallyAdjusted(true);
+    setAutoFollow(false);
     notifyChange();
   }, [candleCount, notifyChange]);
   
@@ -206,6 +254,8 @@ export const useChartCamera = ({
     setZoomLevel(defaultZoom);
     setOffsetX(1); // Show most recent data
     setOffsetY(0);
+    setManuallyAdjusted(false);
+    setAutoFollow(true);
     notifyChange();
   }, [defaultZoom, notifyChange]);
   
@@ -213,12 +263,14 @@ export const useChartCamera = ({
     // Adjust zoom to fit visible candles optimally
     const optimalZoom = chartWidth / (visibleCandleCount * 8); // 8px per candle
     setZoomLevel(Math.max(0.1, Math.min(20, optimalZoom)));
+    setManuallyAdjusted(true);
     notifyChange();
   }, [chartWidth, visibleCandleCount, notifyChange]);
   
   const fitPriceRange = useCallback((min: number, max: number) => {
     setPriceRange({ min, max });
     setOffsetY(0); // Center on new price range
+    setManuallyAdjusted(true);
     notifyChange();
   }, [notifyChange]);
   
@@ -236,6 +288,44 @@ export const useChartCamera = ({
   const getCandleWidth = useCallback(() => candleWidth, [candleWidth]);
   
   const getVisibleCandleCount = useCallback(() => visibleCandleCount, [visibleCandleCount]);
+  
+  // Camera lock controls
+  const lockCamera = useCallback(() => {
+    setIsLocked(true);
+    console.log('📷 Camera locked - streaming updates will not affect view');
+  }, []);
+  
+  const unlockCamera = useCallback(() => {
+    setIsLocked(false);
+    console.log('📷 Camera unlocked - will follow live data');
+  }, []);
+  
+  const toggleLock = useCallback(() => {
+    setIsLocked(prev => {
+      const newLocked = !prev;
+      console.log(`📷 Camera ${newLocked ? 'locked' : 'unlocked'}`);
+      return newLocked;
+    });
+  }, []);
+  
+  const isLockedFn = useCallback(() => isLocked, [isLocked]);
+  
+  // Auto-follow controls
+  const enableAutoFollow = useCallback(() => {
+    setAutoFollow(true);
+    setOffsetX(1); // Go to end when enabling auto-follow
+    setManuallyAdjusted(false);
+    console.log('📈 Auto-follow enabled - will track new data');
+    notifyChange();
+  }, [notifyChange]);
+  
+  const disableAutoFollow = useCallback(() => {
+    setAutoFollow(false);
+    setManuallyAdjusted(true);
+    console.log('📈 Auto-follow disabled - staying at current position');
+  }, []);
+  
+  const isAutoFollowing = useCallback(() => autoFollow && !manuallyAdjusted, [autoFollow, manuallyAdjusted]);
   
   return {
     camera,
@@ -255,6 +345,13 @@ export const useChartCamera = ({
     fitAll,
     fitVisible,
     fitPriceRange,
+    lockCamera,
+    unlockCamera,
+    toggleLock,
+    isLocked: isLockedFn,
+    enableAutoFollow,
+    disableAutoFollow,
+    isAutoFollowing,
     getVisibleRange,
     isFullyVisible,
     getCandleWidth,
