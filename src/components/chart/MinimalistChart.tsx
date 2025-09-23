@@ -752,7 +752,7 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
         chart.scales.x.max = userState.max;
         chart.update('none');
         initialViewportSet.current = true;
-        console.log('📷 [MinimalistChart] Configuración del usuario cargada desde localStorage:', userState);
+        console.log('📷 [MinimalistChart] Configuración del usuario cargada SOLO EN PRIMERA CARGA:', userState);
         return;
       }
     }
@@ -767,9 +767,14 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
       initialViewportSet.current = true;
       console.log(`📷 [MinimalistChart] Vista inicial aplicada (solo sin configuración del usuario):`, { min: viewport.min, max: viewport.max });
     }
-  }, [candleData.length]); // Solo cuando se cargan los datos inicialmente
+  }, [candleData.length === 0 ? 0 : 1]); // Solo se ejecuta UNA VEZ cuando candleData pasa de vacío a tener datos
 
-  // Gestionar configuración de cámara - SOLO aplicar viewport del usuario
+  // Ref para rastrear la última configuración aplicada y evitar repeticiones
+  const lastAppliedConfigRef = useRef<{min: number | null, max: number | null}>({min: null, max: null});
+
+  // DESHABILITADO: Gestionar configuración de cámara automática
+  // Chart.js mantiene automáticamente el viewport del usuario sin nuestra intervención
+  /*
   useEffect(() => {
     if (!chartRef.current || candleData.length === 0) return;
     
@@ -782,17 +787,41 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
         const currentMin = chart.scales.x.min || 0;
         const currentMax = chart.scales.x.max || 0;
         
+        // Verificar si ya aplicamos esta configuración recientemente
+        const lastApplied = lastAppliedConfigRef.current;
+        const sameAsLast = lastApplied.min === userState.min && lastApplied.max === userState.max;
+        
+        if (sameAsLast) {
+          // Ya aplicamos esta configuración, no hacerlo de nuevo
+          return;
+        }
+        
         // Solo actualizar si hay diferencia significativa para evitar loops
-        if (Math.abs(currentMin - userState.min) > 1000 || Math.abs(currentMax - userState.max) > 1000) {
-          chart.scales.x.min = userState.min;
-          chart.scales.x.max = userState.max;
-          chart.update('none');
-          console.log('📷 [MinimalistChart] Aplicando configuración del usuario:', userState);
+        const minDiff = Math.abs(currentMin - userState.min);
+        const maxDiff = Math.abs(currentMax - userState.max);
+        
+        if (minDiff > 1000 || maxDiff > 1000) {
+          // Debounce para evitar aplicaciones repetitivas
+          const timeoutId = setTimeout(() => {
+            if (chartRef.current && chartRef.current.scales.x) {
+              chartRef.current.scales.x.min = userState.min;
+              chartRef.current.scales.x.max = userState.max;
+              chartRef.current.update('none');
+              
+              // Recordar la última configuración aplicada
+              lastAppliedConfigRef.current = {min: userState.min, max: userState.max};
+              
+              console.log('📷 [MinimalistChart] Aplicando configuración del usuario (debounced):', userState);
+            }
+          }, 50);
+          
+          return () => clearTimeout(timeoutId);
         }
       }
     }
     // NO hacer nada si el usuario no ha interactuado - dejar que Chart.js mantenga su vista actual
-  }, [simpleCamera.state.isUserInteracting, simpleCamera.state.lastUserAction, simpleCamera.state.chartJsState.min, simpleCamera.state.chartJsState.max]); // SOLO depender del estado de usuario
+  }, [simpleCamera.state.lastUserAction, simpleCamera.state.chartJsState.min, simpleCamera.state.chartJsState.max]); // Reducir dependencias
+  */
 
   if (Platform.OS !== 'web') {
     return (

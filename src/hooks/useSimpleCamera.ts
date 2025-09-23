@@ -9,7 +9,6 @@ const loadCameraState = () => {
     const saved = localStorage.getItem(CAMERA_STORAGE_KEY);
     if (saved) {
       const parsed = JSON.parse(saved);
-      console.log('📷 [SimpleCamera] Estado cargado desde localStorage:', parsed);
       return parsed;
     }
   } catch (error) {
@@ -18,14 +17,22 @@ const loadCameraState = () => {
   return null;
 };
 
-// Función para guardar estado en localStorage
+// Función para guardar estado en localStorage con debounce
+let saveTimeout: NodeJS.Timeout | null = null;
 const saveCameraState = (state: any) => {
-  try {
-    localStorage.setItem(CAMERA_STORAGE_KEY, JSON.stringify(state));
-    console.log('📷 [SimpleCamera] Estado guardado en localStorage:', state);
-  } catch (error) {
-    console.warn('📷 [SimpleCamera] Error guardando estado en localStorage:', error);
+  // Debounce las escrituras para evitar spam
+  if (saveTimeout) {
+    clearTimeout(saveTimeout);
   }
+  
+  saveTimeout = setTimeout(() => {
+    try {
+      localStorage.setItem(CAMERA_STORAGE_KEY, JSON.stringify(state));
+      console.log('📷 [SimpleCamera] Estado guardado en localStorage (debounced):', state);
+    } catch (error) {
+      console.warn('📷 [SimpleCamera] Error guardando estado en localStorage:', error);
+    }
+  }, 100); // 100ms debounce
 };
 
 export interface SimpleCameraState {
@@ -85,8 +92,12 @@ export const useSimpleCamera = ({
   onStateChange
 }: UseSimpleCameraProps = {}): SimpleCameraControls => {
   
-  // Cargar estado inicial desde localStorage
-  const savedState = loadCameraState();
+  // Cargar estado inicial desde localStorage SOLO UNA VEZ usando useState lazy initialization
+  const [savedState] = useState(() => {
+    const state = loadCameraState();
+    console.log('📷 [SimpleCamera] Carga inicial ÚNICA desde localStorage:', state);
+    return state;
+  });
   
   // Estado principal - inicializar con datos guardados si existen
   const [visibleCandles, setVisibleCandles] = useState(defaultVisibleCandles);
@@ -103,6 +114,7 @@ export const useSimpleCamera = ({
   
   // Referencias para timers
   const autoResetTimer = useRef<NodeJS.Timeout | null>(null);
+  const interactionDebounceTimer = useRef<NodeJS.Timeout | null>(null);
   
   // Estado combinado
   const state: SimpleCameraState = {
@@ -115,11 +127,11 @@ export const useSimpleCamera = ({
     defaultVisibleCandles,
   };
   
-  // Notificar cambios de estado y guardar en localStorage
+  // Notificar cambios de estado y guardar en localStorage con debounce
   useEffect(() => {
     onStateChange?.(state);
     
-    // Guardar en localStorage solo si el usuario ha interactuado
+    // Guardar en localStorage solo si el usuario ha interactuado (con debounce ya incluido)
     if (lastUserAction !== null) {
       saveCameraState({
         isUserInteracting,
@@ -130,7 +142,7 @@ export const useSimpleCamera = ({
         endIndex
       });
     }
-  }, [isUserInteracting, lastUserAction, visibleCandles, startIndex, endIndex, chartJsState.min, chartJsState.max]);
+  }, [isUserInteracting, lastUserAction, chartJsState.min, chartJsState.max]); // Reducir dependencias para evitar guardado excesivo
   
   // Auto-reset timer (DESHABILITADO - cámara debe ser independiente del streaming)
   const startAutoResetTimer = useCallback(() => {
@@ -160,26 +172,40 @@ export const useSimpleCamera = ({
   
   // Cuando el usuario INICIA interacción
   const onUserStartInteraction = useCallback(() => {
-    console.log('📷 [SimpleCamera] Usuario INICIA interacción - BLOQUEANDO auto-seguimiento');
-    setIsUserInteracting(true);
-    setLastUserAction(Date.now());
-    
-    // Cancelar auto-reset mientras interactúa
-    if (autoResetTimer.current) {
-      clearTimeout(autoResetTimer.current);
+    // Debounce para evitar llamadas repetitivas
+    if (interactionDebounceTimer.current) {
+      clearTimeout(interactionDebounceTimer.current);
     }
+    
+    interactionDebounceTimer.current = setTimeout(() => {
+      console.log('📷 [SimpleCamera] Usuario INICIA interacción - BLOQUEANDO auto-seguimiento');
+      setIsUserInteracting(true);
+      setLastUserAction(Date.now());
+      
+      // Cancelar auto-reset mientras interactúa
+      if (autoResetTimer.current) {
+        clearTimeout(autoResetTimer.current);
+      }
+    }, 10); // 10ms debounce muy corto para interacciones
   }, []);
   
   // Cuando el usuario TERMINA interacción
   const onUserEndInteraction = useCallback(() => {
-    console.log('📷 [SimpleCamera] Usuario TERMINA interacción - MANTENIENDO posición fija (sin auto-reset)');
-    setLastUserAction(Date.now());
+    // Debounce para evitar llamadas repetitivas
+    if (interactionDebounceTimer.current) {
+      clearTimeout(interactionDebounceTimer.current);
+    }
     
-    // NO iniciar timer de auto-reset - la cámara debe quedarse donde el usuario la dejó
-    // startAutoResetTimer(); // ← COMENTADO: esto causaba que se resetee automáticamente
-    
-    // La cámara se queda exactamente donde el usuario la dejó
-    console.log('📷 [SimpleCamera] Cámara fijada en posición del usuario permanentemente');
+    interactionDebounceTimer.current = setTimeout(() => {
+      console.log('📷 [SimpleCamera] Usuario TERMINA interacción - MANTENIENDO posición fija (sin auto-reset)');
+      setLastUserAction(Date.now());
+      
+      // NO iniciar timer de auto-reset - la cámara debe quedarse donde el usuario la dejó
+      // startAutoResetTimer(); // ← COMENTADO: esto causaba que se resetee automáticamente
+      
+      // La cámara se queda exactamente donde el usuario la dejó
+      console.log('📷 [SimpleCamera] Cámara fijada en posición del usuario permanentemente');
+    }, 50); // 50ms debounce para permitir que terminen todas las interacciones
   }, []);
   
   // Cuando el usuario hace zoom
@@ -214,9 +240,15 @@ export const useSimpleCamera = ({
   const resetToLatest = useCallback(() => {
     console.log('📷 [SimpleCamera] RESET MANUAL a las últimas', defaultVisibleCandles, 'velas');
     
-    // Limpiar timer
+    // Limpiar todos los timers
     if (autoResetTimer.current) {
       clearTimeout(autoResetTimer.current);
+    }
+    if (interactionDebounceTimer.current) {
+      clearTimeout(interactionDebounceTimer.current);
+    }
+    if (saveTimeout) {
+      clearTimeout(saveTimeout);
     }
     
     // Reset completo
@@ -258,63 +290,58 @@ export const useSimpleCamera = ({
     );
   }, [lastUserAction, chartJsState.min, chartJsState.max, isUserInteracting]);
   
-  // Obtener viewport recomendado
+  // Obtener viewport recomendado - SOLO para carga inicial
   const getRecommendedViewport = useCallback((totalCandles: number, candleData: any[]) => {
-    // SIEMPRE priorizar configuración del usuario si existe
-    if (lastUserAction !== null && chartJsState.min !== null && chartJsState.max !== null) {
-      console.log('📷 [SimpleCamera] Usando configuración del usuario (prioritaria):', chartJsState);
+    // Si el usuario YA interactuó, NO devolver NADA para evitar interferencias
+    if (lastUserAction !== null) {
+      console.log('📷 [SimpleCamera] Usuario ya interactuó - NO proporcionar viewport automático');
       return {
         startIndex: 0,
         endIndex: totalCandles,
-        min: chartJsState.min,
-        max: chartJsState.max,
+        min: null,
+        max: null,
       };
     }
     
     // Solo configurar vista inicial automática si NO hay configuración del usuario
-    if (lastUserAction === null) {
-      const targetVisible = Math.min(visibleCandles, totalCandles);
-      const calculatedStartIndex = Math.max(0, totalCandles - targetVisible);
-      const calculatedEndIndex = totalCandles;
+    const targetVisible = Math.min(visibleCandles, totalCandles);
+    const calculatedStartIndex = Math.max(0, totalCandles - targetVisible);
+    const calculatedEndIndex = totalCandles;
+    
+    let min: number | null = null;
+    let max: number | null = null;
+    
+    if (candleData && candleData.length > 0) {
+      const startCandle = candleData[calculatedStartIndex];
+      const endCandle = candleData[calculatedEndIndex - 1];
       
-      let min: number | null = null;
-      let max: number | null = null;
-      
-      if (candleData && candleData.length > 0) {
-        const startCandle = candleData[calculatedStartIndex];
-        const endCandle = candleData[calculatedEndIndex - 1];
-        
-        if (startCandle && endCandle) {
-          min = startCandle.x || startCandle.time;
-          max = endCandle.x || endCandle.time;
-        }
+      if (startCandle && endCandle) {
+        min = startCandle.x || startCandle.time;
+        max = endCandle.x || endCandle.time;
       }
-      
-      console.log('📷 [SimpleCamera] Configuración inicial automática (solo sin usuario):', { min, max, targetVisible });
-      
-      return {
-        startIndex: calculatedStartIndex,
-        endIndex: calculatedEndIndex,
-        min,
-        max,
-      };
     }
     
-    // Si el usuario interactuó pero se perdió la configuración, NO cambiar nada
-    console.log('📷 [SimpleCamera] Usuario interactuó pero configuración perdida - manteniendo vista actual');
+    console.log('📷 [SimpleCamera] Configuración inicial automática (solo sin usuario):', { min, max, targetVisible });
+    
     return {
-      startIndex: 0,
-      endIndex: totalCandles,
-      min: null,
-      max: null,
+      startIndex: calculatedStartIndex,
+      endIndex: calculatedEndIndex,
+      min,
+      max,
     };
-  }, [lastUserAction, chartJsState, visibleCandles]);
+  }, [lastUserAction, visibleCandles]);
   
-  // Limpiar timer al desmontar
+  // Limpiar timers al desmontar
   useEffect(() => {
     return () => {
       if (autoResetTimer.current) {
         clearTimeout(autoResetTimer.current);
+      }
+      if (interactionDebounceTimer.current) {
+        clearTimeout(interactionDebounceTimer.current);
+      }
+      if (saveTimeout) {
+        clearTimeout(saveTimeout);
       }
     };
   }, []);
