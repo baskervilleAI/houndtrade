@@ -1,3 +1,31 @@
+/**
+ * MinimalistChart - Componente de gráfico con sistema avanzado de debugging de cámara
+ * 
+ * DEBUGGING DETALLADO DE CÁMARA Y VIEWPORT:
+ * 
+ * 🔍 Para debuggear el sistema de cámara, usa en la consola del navegador:
+ *    window.debugCameraSystem()
+ * 
+ * 📋 Categorías de logs disponibles:
+ *    - 📷 CAMERA: Control general de cámara
+ *    - 🖼️ VIEWPORT: Estados detallados de viewport 
+ *    - 👆 INTERACTION: Interacciones del usuario (zoom, pan)
+ *    - 🌊 TIDAL: Sistema de gobernanza tidal
+ *    - ⚡ STATE: Transiciones de estado
+ *    - 💾 PERSISTENCE: Operaciones de sessionStorage
+ *    - 📊 CHART: Eventos de Chart.js
+ * 
+ * ⚙️ Para habilitar/deshabilitar categorías específicas:
+ *    debugLogger.setEnabled('STREAMING', true)  // Habilitar logs de streaming
+ *    debugLogger.setEnabled('PERFORMANCE', true) // Habilitar logs de performance
+ * 
+ * 🎯 Ciclo de vida completo trackeable:
+ *    1. Carga inicial → logs PERSISTENCE + VIEWPORT
+ *    2. Interacción usuario → logs INTERACTION + STATE
+ *    3. Persistencia viewport → logs TIDAL + CAMERA
+ *    4. Actualizaciones streaming → logs CHART + TIDAL
+ */
+
 import React, { useRef, useEffect, useState, useCallback, useMemo } from 'react';
 import { View, StyleSheet, Text, Platform, TouchableOpacity, ScrollView } from 'react-native';
 import { useMarket } from '../../context/AppContext';
@@ -5,6 +33,16 @@ import liveStreamingService, { CandleData, StreamUpdate, TimeInterval } from '..
 import { useTechnicalIndicators, addIndicatorToChart } from '../../hooks/useTechnicalIndicators';
 import { useSimpleCamera } from '../../hooks/useSimpleCamera';
 import { usePersistentViewport } from '../../hooks/usePersistentViewport';
+import { 
+  logChart, 
+  logTidalFlow, 
+  logLifecycle, 
+  logUserInteractionDetailed, 
+  logViewportState,
+  logTiming,
+  logSystemSnapshot,
+  logInteractionCycle
+} from '../../utils/debugLogger';
 
 interface MinimalistChartProps {
   height?: number;
@@ -63,7 +101,7 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
 
   // Callback estable para cambios de estado de cámara
   const onCameraStateChange = useCallback((cameraState: any) => {
-    // console.log('📷 [MinimalistChart] Simple camera state changed:', cameraState);
+    logViewportState(cameraState, 'CAMERA_STATE_CALLBACK');
   }, []);
 
   // Sistema de cámara simple y predecible
@@ -78,6 +116,12 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
 
   // Helper functions para manejo de interacciones
   const startUserInteraction = useCallback(() => {
+    const timestamp = Date.now();
+    logUserInteractionDetailed('START_USER_INTERACTION_CHART', {
+      timestamp: new Date(timestamp).toLocaleTimeString(),
+      component: 'MinimalistChart'
+    });
+    
     setIsUserInteracting(true);
     simpleCamera.onUserStartInteraction();
     
@@ -88,8 +132,20 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
   }, [simpleCamera]);
 
   const endUserInteraction = useCallback(() => {
+    const timestamp = Date.now();
+    logUserInteractionDetailed('END_USER_INTERACTION_CHART', {
+      timestamp: new Date(timestamp).toLocaleTimeString(),
+      component: 'MinimalistChart',
+      delay: 300
+    });
+    
     // Delay para capturar estado final
     userInteractionTimeoutRef.current = setTimeout(() => {
+      logUserInteractionDetailed('END_USER_INTERACTION_DELAYED', {
+        timestamp: new Date().toLocaleTimeString(),
+        component: 'MinimalistChart'
+      });
+      
       setIsUserInteracting(false);
       simpleCamera.onUserEndInteraction();
     }, 300); // 300ms delay para capturar estado final
@@ -102,21 +158,31 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
   const debouncedZoomHandler = useCallback((chart: any, xScale: any) => {
     const now = Date.now();
     
+    logUserInteractionDetailed('ZOOM_EVENT_RECEIVED', {
+      min: xScale.min,
+      max: xScale.max,
+      center: (xScale.min + xScale.max) / 2,
+      timestamp: new Date().toLocaleTimeString(),
+      globalBlocked: globalInteractionBlocked.current,
+      lastZoomTime: lastZoomProcessedTime.current,
+      timeSinceLastZoom: now - lastZoomProcessedTime.current
+    });
+    
     // BLOQUEO GLOBAL: Evitar cualquier solapamiento entre zoom y pan
     if (globalInteractionBlocked.current) {
-      console.log('🚫 [ZOOM] Evento ignorado - interacción global bloqueada');
+      logChart('ZOOM_EVENT_BLOCKED - global interaction blocked');
       return;
     }
     
-    // THROTTLE ESPECÍFICO PARA ZOOM: Solo 1 evento cada 150ms
-    if (now - lastZoomProcessedTime.current < 150) {
-      console.log('🚫 [ZOOM] Evento ignorado por throttle agresivo');
+    // THROTTLE ESPECÍFICO PARA ZOOM: Solo 1 evento cada 100ms (reducido)
+    if (now - lastZoomProcessedTime.current < 100) {
+      logChart('ZOOM_EVENT_BLOCKED - throttle limit');
       return;
     }
     
     // BLOQUEO: Evitar procesamiento simultáneo
     if (isProcessingZoom.current) {
-      console.log('🚫 [ZOOM] Evento ignorado - ya procesando zoom');
+      logChart('ZOOM_EVENT_BLOCKED - already processing zoom');
       return;
     }
     
@@ -131,23 +197,19 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
     
     // Debounce de 150ms
     zoomDebounceRef.current = setTimeout(() => {
-      console.log('🔍 [ZOOM] Usuario inicia ZOOM - Datos del evento:', {
+      const preInteractionState = simpleCamera.getCurrentState();
+      logUserInteractionDetailed('ZOOM_PROCESSING_START', {
         min: xScale.min,
         max: xScale.max,
-        center: (xScale.min + xScale.max) / 2,
-        timestamp: new Date().toLocaleTimeString()
-      });
-      
-      // Log del estado de la cámara antes de la interacción
-      const preInteractionState = simpleCamera.getCurrentState();
-      console.log(`🔍 [ZOOM] Estado PRE-interacción: {mode: ${preInteractionState.mode}, isLocked: ${preInteractionState.isLocked}}`);
+        center: (xScale.min + xScale.max) / 2
+      }, preInteractionState);
       
       // Notificar inicio de interacción inmediatamente
       startUserInteraction();
       
       // Log del estado después de notificar inicio
       const postStartState = simpleCamera.getCurrentState();
-      console.log(`🔍 [ZOOM] Estado POST-startInteraction: {mode: ${postStartState.mode}, isLocked: ${postStartState.isLocked}}`);
+      logViewportState(postStartState, 'POST_START_INTERACTION_ZOOM');
       
       // Limpiar timeout anterior si existe
       if (zoomTimeoutRef.current) {
@@ -158,61 +220,67 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
       zoomTimeoutRef.current = setTimeout(() => {
         const finalScale = chart.scales.x;
         if (finalScale) {
-          console.log('🔍 [ZOOM] Guardando estado final del zoom:', {
+          logUserInteractionDetailed('ZOOM_FINAL_STATE_CAPTURE', {
             finalMin: finalScale.min,
             finalMax: finalScale.max,
             finalCenter: (finalScale.min + finalScale.max) / 2
           });
           
           // NUEVO: Usar sistema de persistencia mejorado
-          console.log('🔍 [ZOOM] Llamando simpleCamera.onUserZoom con estado final...');
           simpleCamera.onUserZoom(finalScale.min, finalScale.max, (finalScale.min + finalScale.max) / 2);
-          
-          console.log('🔍 [ZOOM] Llamando simpleCamera.lockCamera...');
           simpleCamera.lockCamera(); // Bloquear la cámara en la nueva posición
           
           // Log del estado después del zoom completo
           const postZoomState = simpleCamera.getCurrentState();
-          console.log(`🔍 [ZOOM] Estado POST-zoom completo: {mode: ${postZoomState.mode}, isLocked: ${postZoomState.isLocked}, viewport: {min: ${postZoomState.chartJsState.min}, max: ${postZoomState.chartJsState.max}}}`);
+          logViewportState(postZoomState, 'POST_ZOOM_COMPLETE');
         }
         
-        console.log('🔍 [ZOOM] Llamando endUserInteraction...');
         endUserInteraction();
         
         // Log del estado después de end interaction
         const postEndState = simpleCamera.getCurrentState();
-        console.log(`🔍 [ZOOM] Estado POST-endUserInteraction: {mode: ${postEndState.mode}, isLocked: ${postEndState.isLocked}}`);
-        
+        logViewportState(postEndState, 'POST_END_INTERACTION_ZOOM');
         
         // Liberar bloqueos después de completar
         isProcessingZoom.current = false;
         
-        // CRÍTICO: Liberar bloqueo global después de un delay
+        // CRÍTICO: Liberar bloqueo global después de un delay más corto
         setTimeout(() => {
           globalInteractionBlocked.current = false;
-        }, 100);
-      }, 100);
-    }, 150);
+          logChart('ZOOM_GLOBAL_BLOCK_RELEASED');
+        }, 50); // Reducido de 100ms a 50ms para mejor respuesta
+      }, 50); // Reducido de 100ms a 50ms
+    }, 100); // Reducido de 150ms a 100ms
   }, [startUserInteraction, endUserInteraction, simpleCamera]);
 
   const debouncedPanHandler = useCallback((chart: any, xScale: any) => {
     const now = Date.now();
     
+    logUserInteractionDetailed('PAN_EVENT_RECEIVED', {
+      min: xScale.min,
+      max: xScale.max,
+      center: (xScale.min + xScale.max) / 2,
+      timestamp: new Date().toLocaleTimeString(),
+      globalBlocked: globalInteractionBlocked.current,
+      lastPanTime: lastPanProcessedTime.current,
+      timeSinceLastPan: now - lastPanProcessedTime.current
+    });
+    
     // BLOQUEO GLOBAL: Evitar cualquier solapamiento entre zoom y pan
     if (globalInteractionBlocked.current) {
-      console.log('🚫 [PAN] Evento ignorado - interacción global bloqueada');
+      logChart('PAN_EVENT_BLOCKED - global interaction blocked');
       return;
     }
     
-    // THROTTLE ESPECÍFICO PARA PAN: Solo 1 evento cada 150ms
-    if (now - lastPanProcessedTime.current < 150) {
-      console.log('🚫 [PAN] Evento ignorado por throttle agresivo');
+    // THROTTLE ESPECÍFICO PARA PAN: Solo 1 evento cada 100ms (reducido)
+    if (now - lastPanProcessedTime.current < 100) {
+      logChart('PAN_EVENT_BLOCKED - throttle limit');
       return;
     }
     
     // BLOQUEO: Evitar procesamiento simultáneo
     if (isProcessingPan.current) {
-      console.log('🚫 [PAN] Evento ignorado - ya procesando pan');
+      logChart('PAN_EVENT_BLOCKED - already processing pan');
       return;
     }
     
@@ -227,12 +295,12 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
     
     // Debounce de 150ms
     panDebounceRef.current = setTimeout(() => {
-      console.log('🔄 [PAN] Usuario inicia PAN - Datos del evento:', {
+      const preInteractionState = simpleCamera.getCurrentState();
+      logUserInteractionDetailed('PAN_PROCESSING_START', {
         min: xScale.min,
         max: xScale.max,
-        center: (xScale.min + xScale.max) / 2,
-        timestamp: new Date().toLocaleTimeString()
-      });
+        center: (xScale.min + xScale.max) / 2
+      }, preInteractionState);
       
       // Notificar inicio de interacción inmediatamente
       startUserInteraction();
@@ -246,7 +314,7 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
       panTimeoutRef.current = setTimeout(() => {
         const finalScale = chart.scales.x;
         if (finalScale) {
-          console.log('🔄 [PAN] Guardando estado final del pan:', {
+          logUserInteractionDetailed('PAN_FINAL_STATE_CAPTURE', {
             finalMin: finalScale.min,
             finalMax: finalScale.max,
             finalCenter: (finalScale.min + finalScale.max) / 2
@@ -261,12 +329,13 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
         // Liberar bloqueos después de completar
         isProcessingPan.current = false;
         
-        // CRÍTICO: Liberar bloqueo global después de un delay
+        // CRÍTICO: Liberar bloqueo global después de un delay más corto
         setTimeout(() => {
           globalInteractionBlocked.current = false;
-        }, 100);
-      }, 100);
-    }, 150);
+          logChart('PAN_GLOBAL_BLOCK_RELEASED');
+        }, 50); // Reducido de 100ms a 50ms para mejor respuesta
+      }, 50); // Reducido de 100ms a 50ms
+    }, 100); // Reducido de 150ms a 100ms
   }, [startUserInteraction, endUserInteraction, simpleCamera]);
 
   // ============================================
@@ -631,21 +700,29 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
   }, [candleData, currentSymbol, currentInterval, isStreaming, activeIndicators, technicalIndicators, chartOptions, debouncedZoomHandler, debouncedPanHandler]);
 
   const updateChart = useCallback((newCandle: CandleData, isFinal: boolean) => {
-    console.log('🚀 [updateChart] INICIO - Nueva vela recibida:', { 
-      timestamp: new Date().toLocaleTimeString(),
-      price: newCandle.c,
-      isFinal
+    const startTime = Date.now();
+    
+    logTidalFlow('UPDATE_CHART_START', {
+      newCandle: {
+        timestamp: new Date(newCandle.x).toLocaleTimeString(),
+        price: newCandle.c,
+        isFinal
+      },
+      chartExists: !!chartRef.current
     });
     
     if (!chartRef.current) {
-      console.log('❌ [updateChart] No hay chartRef disponible');
+      logChart('UPDATE_CHART_ABORT - no chart reference');
       return;
     }
 
     // Throttle updates for better performance, except for final candles
     const now = Date.now();
     if (!isFinal && now - lastUpdateTime < updateThrottleMs) {
-      console.log('⏭️ [updateChart] Throttled - saltando update');
+      logChart('UPDATE_CHART_THROTTLED', { 
+        timeSinceLastUpdate: now - lastUpdateTime,
+        threshold: updateThrottleMs 
+      });
       return;
     }
     setLastUpdateTime(now);
@@ -661,7 +738,15 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
                 ?? persistentViewport.getCurrentViewport() 
                 ?? { min: chart?.scales?.x?.min ?? 0, max: chart?.scales?.x?.max ?? 0 };
     
-    console.log('📸 [updateChart] Snapshot PRE-mutación:', snap);
+    logTidalFlow('UPDATE_CHART_SNAPSHOT', {
+      source: simpleCamera.getViewportFromCamera() ? 'camera' : 
+              persistentViewport.getCurrentViewport() ? 'persistent' : 'chart_scales',
+      viewport: snap,
+      cameraState: {
+        mode: simpleCamera.getCurrentState().mode,
+        isLocked: simpleCamera.isLocked()
+      }
+    });
     
     // B) MUTAR DATA EN SITIO (push/shift/assign), sin recrear arrays/objects
     const dataset = chart.data.datasets[0];
@@ -715,19 +800,30 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
       
       if (existingIndex >= 0) {
         // Actualizar vela existente (mutación in-situ)
-        console.log(`📊 [updateChart] Actualizando vela existente en índice ${existingIndex}`);
+        logTidalFlow('UPDATE_CHART_MUTATE_EXISTING', {
+          index: existingIndex,
+          oldPrice: (dataset.data as any)[existingIndex].c,
+          newPrice: candleData.c
+        });
         (dataset.data as any)[existingIndex] = candleData;
       } else {
         // Agregar nueva vela (mutación in-situ)
-        console.log('📊 [updateChart] Agregando nueva vela');
+        logTidalFlow('UPDATE_CHART_MUTATE_ADD_NEW', {
+          newPrice: candleData.c,
+          totalCandles: dataset.data.length + 1
+        });
         (dataset.data as any[]).push(candleData);
       }
 
       // Mantener límite de velas (mutación in-situ)
       const maxCandles = 900;
       if (dataset.data.length > maxCandles) {
-        console.log(`🗂️ [updateChart] Limitando a ${maxCandles} velas`);
-        (dataset.data as any[]).splice(0, dataset.data.length - maxCandles);
+        const removedCount = dataset.data.length - maxCandles;
+        logTidalFlow('UPDATE_CHART_MUTATE_TRIM', {
+          removedCount,
+          finalCount: maxCandles
+        });
+        (dataset.data as any[]).splice(0, removedCount);
       }
     }
 
@@ -738,16 +834,34 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
       lastCandleTime
     });
     
-    console.log('🌊 [updateChart] Viewport objetivo calculado:', desiredViewport);
+    logTidalFlow('UPDATE_CHART_TIDAL_COMPUTE', {
+      lastCandleTime: new Date(lastCandleTime).toLocaleTimeString(),
+      snapViewport: snap,
+      desiredViewport,
+      tideShift: {
+        deltaMin: desiredViewport.min - snap.min,
+        deltaMax: desiredViewport.max - snap.max
+      }
+    });
 
     // D) APLICAR viewport objetivo (no preguntar al chart) - SIN setState
     simpleCamera.applyViewportToChart(chart, desiredViewport);
 
     // E) chart.update('none') - sin animación para evitar saltos
-    console.log('⚙️ [updateChart] Ejecutando chart.update("none")...');
+    logTidalFlow('UPDATE_CHART_EXECUTE_UPDATE', {
+      updateMode: 'none',
+      chartUpdateStart: Date.now()
+    });
     chart.update('none');
 
-    console.log('✅ [updateChart] Actualización completada con gobernanza tidal - SIN setState');
+    const endTime = Date.now();
+    const duration = endTime - startTime;
+    
+    logTiming('UPDATE_CHART_COMPLETE', duration, {
+      isFinal,
+      candlePrice: newCandle.c,
+      finalViewport: desiredViewport
+    });
   }, [currentInterval, simpleCamera, persistentViewport, lastUpdateTime, updateThrottleMs]);
 
   const changeTimeInterval = useCallback(async (newInterval: TimeInterval) => {
@@ -838,7 +952,7 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
   useEffect(() => {
     // Handler estable que usa referencias para evitar dependencias circulares
     const handleCandleUpdate = (update: StreamUpdate) => {
-      console.log('📈 [handleCandleUpdate] NUEVA ACTUALIZACIÓN RECIBIDA:', {
+      logChart('STREAM_UPDATE_RECEIVED', {
         symbol: update.symbol,
         interval: update.interval,
         isFinal: update.isFinal,
@@ -848,13 +962,21 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
       });
       
       if (update.symbol === currentSymbol && update.interval === currentInterval) {
-        console.log(`[MinimalistChart] Candle update: ${update.symbol} ${update.interval} final:${update.isFinal} price:${update.candle.c}`);
+        logChart('STREAM_UPDATE_PROCESSING', {
+          symbol: update.symbol,
+          interval: update.interval,
+          isFinal: update.isFinal,
+          price: update.candle.c
+        });
         
-        console.log('🎯 [handleCandleUpdate] Llamando updateChart...');
         // CRÍTICO: updateChart NO debe hacer setState ni lockCamera durante ticks
         updateChart(update.candle, update.isFinal);
         
-        console.log('📊 [handleCandleUpdate] Actualizando candleData state...');
+        logChart('STREAM_UPDATE_CHART_COMPLETE', { 
+          symbol: update.symbol, 
+          price: update.candle.c 
+        });
+        
         setCandleData(prev => {
           const newData = [...prev];
           
@@ -887,16 +1009,31 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
             // Actualizar vela existente
             const oldPrice = newData[existingIndex].c;
             newData[existingIndex] = update.candle;
-            console.log(`[MinimalistChart] Updated existing candle at index ${existingIndex}: $${oldPrice.toFixed(4)} → $${update.candle.c.toFixed(4)} (${update.isFinal ? 'final' : 'live'})`);
+            logChart('STREAM_STATE_UPDATE_EXISTING', {
+              index: existingIndex,
+              oldPrice: oldPrice.toFixed(4),
+              newPrice: update.candle.c.toFixed(4),
+              isFinal: update.isFinal
+            });
           } else {
             // Agregar nueva vela
             newData.push(update.candle);
-            console.log(`[MinimalistChart] Added new candle: $${update.candle.c.toFixed(4)} at ${new Date(update.candle.x).toLocaleTimeString()}, total: ${newData.length} (${update.isFinal ? 'final' : 'live'})`);
+            logChart('STREAM_STATE_ADD_NEW', {
+              price: update.candle.c.toFixed(4),
+              timestamp: new Date(update.candle.x).toLocaleTimeString(),
+              totalCandles: newData.length,
+              isFinal: update.isFinal
+            });
             
             // Mantener solo las últimas velas según configuración de cámara
             const maxCandles = simpleCamera.isLocked() ? 200 : 100;
             if (newData.length > maxCandles) {
-              newData.shift();
+              const removedCount = newData.length - maxCandles;
+              newData.splice(0, removedCount);
+              logChart('STREAM_STATE_TRIM', {
+                removedCount,
+                finalCount: newData.length
+              });
             }
           }
           
@@ -980,7 +1117,7 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
 
   // Configuración inicial del viewport SOLO al cargar por primera vez
   useEffect(() => {
-    console.log('🎬 [Viewport Inicial] Hook ejecutándose:', {
+    logLifecycle('VIEWPORT_INITIAL_SETUP_CHECK', 'MinimalistChart', {
       hasChart: !!chartRef.current,
       candleCount: candleData.length,
       initialViewportSet: initialViewportSet.current,
@@ -989,7 +1126,10 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
     });
     
     if (!chartRef.current || candleData.length === 0 || initialViewportSet.current) {
-      console.log('⏭️ [Viewport Inicial] Saltando configuración inicial');
+      logLifecycle('VIEWPORT_INITIAL_SETUP_SKIP', 'MinimalistChart', {
+        reason: !chartRef.current ? 'no_chart' : 
+                candleData.length === 0 ? 'no_data' : 'already_set'
+      });
       return;
     }
     
@@ -998,34 +1138,46 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
     // Verificar si hay configuración guardada del usuario
     if (simpleCamera.isLocked()) {
       const userState = simpleCamera.state.chartJsState;
-      console.log('👤 [Viewport Inicial] Usuario tiene configuración guardada:', userState);
+      logViewportState(userState, 'CHECKING_USER_SAVED_CONFIG');
       
       if (chart.scales.x && userState.min !== null && userState.max !== null) {
-        console.log('🔧 [Viewport Inicial] Aplicando configuración del usuario...');
+        logLifecycle('VIEWPORT_APPLYING_USER_CONFIG', 'MinimalistChart', {
+          viewport: { min: userState.min, max: userState.max }
+        });
+        
         chart.scales.x.min = userState.min;
         chart.scales.x.max = userState.max;
         chart.update('none');
         initialViewportSet.current = true;
-        console.log('✅ [Viewport Inicial] Configuración del usuario aplicada');
+        
+        logViewportState({ min: userState.min, max: userState.max }, 'USER_CONFIG_APPLIED');
         return;
       }
     }
     
     // En modo auto-ajuste: configurar vista inicial de últimas 100 velas
     if (simpleCamera.shouldAutoAdjust()) {
-      console.log('🏠 [Viewport Inicial] Aplicando vista automática inicial...');
+      logLifecycle('VIEWPORT_APPLYING_AUTO_CONFIG', 'MinimalistChart');
+      
       const viewport = simpleCamera.getRecommendedViewport(candleData.length, candleData);
-      console.log('📊 [Viewport Inicial] Viewport recomendado:', viewport);
+      logViewportState(viewport, 'RECOMMENDED_VIEWPORT');
       
       if (chart.scales.x && viewport.min && viewport.max) {
-        console.log('⚙️ [Viewport Inicial] Configurando vista inicial...');
+        logLifecycle('VIEWPORT_SETTING_INITIAL_VIEW', 'MinimalistChart', {
+          viewport
+        });
+        
         chart.scales.x.min = viewport.min;
         chart.scales.x.max = viewport.max;
         chart.update('none');
         initialViewportSet.current = true;
-        console.log('✅ [Viewport Inicial] Vista inicial aplicada');
+        
+        logViewportState(viewport, 'INITIAL_VIEW_APPLIED');
       } else {
-        console.log('❌ [Viewport Inicial] No se pudo aplicar viewport - datos faltantes');
+        logLifecycle('VIEWPORT_INITIAL_SETUP_FAILED', 'MinimalistChart', {
+          reason: 'invalid_viewport_data',
+          viewport
+        });
       }
     }
   }, [candleData.length === 0 ? 0 : 1]); // Solo se ejecuta UNA VEZ cuando candleData pasa de vacío a tener datos
@@ -1036,6 +1188,47 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
       startStreaming();
     }
   }, [candleData, startStreaming, isStreaming]);
+
+  // Función global para debugging (disponible en consola del navegador)
+  useEffect(() => {
+    // Crear función global para debugging
+    if (typeof window !== 'undefined') {
+      (window as any).debugCameraSystem = () => {
+        const cameraState = simpleCamera.getCurrentState();
+        const chartScales = chartRef.current?.scales?.x;
+        const persistentState = persistentViewport.getCurrentViewport();
+        
+        logSystemSnapshot('MANUAL_DEBUG_REQUEST', cameraState, {
+          scalesMin: chartScales?.min,
+          scalesMax: chartScales?.max,
+          chartExists: !!chartRef.current
+        }, persistentState);
+        
+        console.log('📋 [DEBUG] Sistema de cámara - Estado completo:');
+        console.log('📷 Cámara:', cameraState);
+        console.log('📊 Chart Scales:', { min: chartScales?.min, max: chartScales?.max });
+        console.log('💾 Persistent:', persistentState);
+        console.log('🎭 Flags:', { 
+          initialViewportSet: initialViewportSet.current,
+          isUserInteracting,
+          isStreaming 
+        });
+        
+        return {
+          camera: cameraState,
+          chartScales: { min: chartScales?.min, max: chartScales?.max },
+          persistent: persistentState,
+          flags: { initialViewportSet: initialViewportSet.current, isUserInteracting, isStreaming }
+        };
+      };
+    }
+
+    return () => {
+      if (typeof window !== 'undefined') {
+        delete (window as any).debugCameraSystem;
+      }
+    };
+  }, [simpleCamera, persistentViewport, isUserInteracting, isStreaming]);
 
   if (Platform.OS !== 'web') {
     return (
@@ -1112,11 +1305,26 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
                   simpleCamera.isLocked() ? styles.cameraManualButton : styles.cameraResetButton
                 ]}
                 onPress={() => {
-                  console.log('🔄 [UI] Usuario presionó botón de reset de cámara');
+                  logUserInteractionDetailed('CAMERA_RESET_BUTTON_PRESSED', {
+                    currentMode: simpleCamera.getCurrentState().mode,
+                    wasLocked: simpleCamera.isLocked(),
+                    userAction: 'manual_reset_request'
+                  });
+                  
+                  const preResetState = simpleCamera.getCurrentState();
+                  logViewportState(preResetState, 'PRE_RESET');
+                  
                   initialViewportSet.current = false; // Reset flag para permitir nuevo viewport inicial
                   simpleCamera.resetToLatest(); // Limpia estado persistido
                   persistentViewport.resetZoom('none'); // Reset usando Chart.js oficial
                   persistentViewport.clearSnapshot(); // Limpia snapshot guardado
+                  
+                  logLifecycle('CAMERA_RESET_COMPLETE', 'MinimalistChart', {
+                    flagReset: true,
+                    stateCleared: true,
+                    snapshotCleared: true
+                  });
+                  
                   // El gráfico se reiniciará automáticamente con el próximo useEffect
                 }}
               >

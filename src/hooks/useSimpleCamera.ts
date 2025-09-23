@@ -1,5 +1,14 @@
 import { useState, useCallback, useRef, useMemo, useEffect } from 'react';
 import { Chart } from 'chart.js';
+import { 
+  logViewportState, 
+  logStateTransition, 
+  logPersistenceOp, 
+  logUserInteractionDetailed, 
+  logTidalFlow,
+  logLifecycle,
+  logCamera
+} from '../utils/debugLogger';
 
 // Utility functions
 function debounce<T extends (...args: any[]) => void>(func: T, wait: number): T {
@@ -214,52 +223,64 @@ export const useSimpleCamera = ({
   
   // Cargar estado inicial desde sessionStorage SOLO UNA VEZ
   const [state, setState] = useState<SimpleCameraState>(() => {
+    logLifecycle('INIT_START', 'useSimpleCamera', { typeof_window: typeof window });
+    
     if (typeof window === 'undefined') {
-      return {
+      const initialState = {
         mode: 'FIRST_LOAD',
         viewport: null,
         tide: 0.8,
-        cooldownMs: 3000,
+        cooldownMs: 1500, // Reducido de 3000ms a 1500ms para mayor responsividad
         lastUserActionTs: null,
         // Legacy para compatibilidad
         isLocked: false,
         lastUserAction: null,
         chartJsState: { min: null, max: null, centerX: null }
       };
+      logViewportState(initialState, 'INITIAL_STATE_SSR');
+      return initialState;
     }
     
     try {
       const raw = sessionStorage.getItem('simpleCamera_state');
       if (raw) {
         const parsed = JSON.parse(raw);
-        console.log('📷 [SimpleCamera] Estado cargado desde sessionStorage:', parsed);
-        return {
+        logPersistenceOp('LOAD_FROM_SESSIONSTORAGE', parsed, true);
+        
+        const restoredState = {
           mode: parsed.mode || 'FIRST_LOAD',
           viewport: parsed.viewport || null,
           tide: parsed.tide ?? 0.8,
-          cooldownMs: parsed.cooldownMs ?? 3000,
+          cooldownMs: parsed.cooldownMs ?? 1500, // Reducido de 3000ms a 1500ms
           lastUserActionTs: parsed.lastUserActionTs || null,
           // Legacy para compatibilidad
           isLocked: parsed.isLocked || false,
           lastUserAction: parsed.lastUserAction || null,
           chartJsState: parsed.chartJsState || { min: null, max: null, centerX: null }
         };
+        
+        logViewportState(restoredState, 'RESTORED_FROM_STORAGE');
+        return restoredState;
       }
     } catch (error) {
+      logPersistenceOp('LOAD_FROM_SESSIONSTORAGE', null, false);
       console.warn('📷 [SimpleCamera] Error cargando estado desde sessionStorage:', error);
     }
     
-    return {
+    const defaultState = {
       mode: 'FIRST_LOAD',
       viewport: null,
       tide: 0.8,
-      cooldownMs: 3000,
+      cooldownMs: 1500, // Reducido de 3000ms a 1500ms para mayor responsividad
       lastUserActionTs: null,
       // Legacy para compatibilidad
       isLocked: false,
       lastUserAction: null,
       chartJsState: { min: null, max: null, centerX: null }
     };
+    
+    logViewportState(defaultState, 'DEFAULT_STATE');
+    return defaultState;
   });
 
   // Use a ref to maintain current state accessible from callbacks
@@ -287,13 +308,22 @@ export const useSimpleCamera = ({
 
   // Persistir estado (solo después de carga inicial y sin reentradas)
   useEffect(() => {
-    if (loadingRef.current || inMutationRef.current) return;
+    if (loadingRef.current || inMutationRef.current) {
+      logPersistenceOp('SKIP_PERSIST - loading or in mutation', { loading: loadingRef.current, inMutation: inMutationRef.current });
+      return;
+    }
     
     if (typeof window !== 'undefined') {
       try {
         sessionStorage.setItem('simpleCamera_state', JSON.stringify(state));
-        console.log('📷 [SimpleCamera] Estado persistido en sessionStorage');
+        logPersistenceOp('SAVE_TO_SESSIONSTORAGE', { 
+          mode: state.mode, 
+          isLocked: state.isLocked,
+          viewport: state.viewport,
+          lastUserAction: state.lastUserAction ? new Date(state.lastUserAction).toLocaleTimeString() : null
+        }, true);
       } catch (error) {
+        logPersistenceOp('SAVE_TO_SESSIONSTORAGE', null, false);
         console.warn('📷 [SimpleCamera] Error guardando estado en sessionStorage:', error);
       }
     }
@@ -320,13 +350,15 @@ export const useSimpleCamera = ({
     // 3. El estado isLocked está activo
     const shouldBeLocked = currentState.isLocked && hasViewport && currentState.lastUserAction !== null;
     
-    // Log ocasional para debug (solo 1% de las veces para evitar spam)
+    // Log detallado para debugging (solo 1% de las veces para evitar spam)
     if (Math.random() < 0.01) {
-      console.log('📷 [SimpleCamera] isLocked check:', { 
+      logCamera('CAMERA_LOCK_CHECK', { 
         stateIsLocked: currentState.isLocked, 
         hasViewport,
         shouldBeLocked,
-        lastUserAction: currentState.lastUserAction ? new Date(currentState.lastUserAction).toLocaleTimeString() : null
+        mode: currentState.mode,
+        lastUserAction: currentState.lastUserAction ? new Date(currentState.lastUserAction).toLocaleTimeString() : null,
+        viewport: currentState.viewport
       });
     }
     
@@ -337,11 +369,15 @@ export const useSimpleCamera = ({
   const isActivelyInteracting = useCallback(() => {
     const currentState = stateRef.current;
     
-    console.log(`🔍 [SimpleCamera] isActivelyInteracting - Estado actual: {mode: ${currentState.mode}, lastUserAction: ${currentState.lastUserAction ? new Date(currentState.lastUserAction).toLocaleTimeString() : 'null'}}`);
+    logCamera('ACTIVELY_INTERACTING_CHECK', {
+      mode: currentState.mode, 
+      lastUserAction: currentState.lastUserAction ? new Date(currentState.lastUserAction).toLocaleTimeString() : 'null',
+      timeSinceAction: currentState.lastUserAction ? Date.now() - currentState.lastUserAction : null
+    });
     
     // Usar el nuevo modo de cámara para determinar interacción activa
     if (currentState.mode === 'USER_INTERACTING') {
-      console.log('🔍 [SimpleCamera] isActivelyInteracting: TRUE - modo USER_INTERACTING');
+      logCamera('ACTIVELY_INTERACTING: TRUE - USER_INTERACTING mode');
       return true;
     }
     
@@ -349,11 +385,14 @@ export const useSimpleCamera = ({
     if (currentState.lastUserAction !== null) {
       const timeSinceLastAction = Date.now() - currentState.lastUserAction;
       const isActive = timeSinceLastAction < 5000; // 5 segundos para considerarse interacción activa
-      console.log(`🔍 [SimpleCamera] isActivelyInteracting: ${isActive} - tiempo desde última acción: ${timeSinceLastAction}ms (límite: 5000ms)`);
+      logCamera(`ACTIVELY_INTERACTING: ${isActive}`, {
+        timeSinceAction: timeSinceLastAction,
+        threshold: 5000
+      });
       return isActive;
     }
     
-    console.log('🔍 [SimpleCamera] isActivelyInteracting: FALSE - no hay interacción reciente');
+    logCamera('ACTIVELY_INTERACTING: FALSE - no recent interaction');
     return false;
   }, []);
 
@@ -429,7 +468,12 @@ export const useSimpleCamera = ({
   // Start user interaction (con protección atómica)
   const onUserStartInteraction = useCallback(() => {
     const timestamp = Date.now();
-    console.log(`📷 [SimpleCamera] onUserStartInteraction - timestamp: ${new Date(timestamp).toLocaleTimeString()}`);
+    const preState = stateRef.current;
+    
+    logUserInteractionDetailed('START_INTERACTION', {
+      timestamp: new Date(timestamp).toLocaleTimeString(),
+      triggeredBy: 'user_gesture'
+    }, preState);
     
     atomic(() => {
       setState(prev => {
@@ -440,13 +484,15 @@ export const useSimpleCamera = ({
           lastUserActionTs: timestamp,
           mode: 'USER_INTERACTING' as const
         };
+        
+        logStateTransition(prev, newState, 'onUserStartInteraction');
         return shallowEqual(prev, newState) ? prev : newState;
       });
     });
     
     // Clear any existing timeout
     if (interactionTimeoutRef.current) {
-      console.log('📷 [SimpleCamera] onUserStartInteraction - Limpiando timeout existente');
+      logCamera('START_INTERACTION - clearing existing timeout');
       clearTimeout(interactionTimeoutRef.current);
     }
   }, [atomic]);
@@ -454,10 +500,16 @@ export const useSimpleCamera = ({
   // End user interaction (con protección atómica)
   const onUserEndInteraction = useCallback(() => {
     const timestamp = Date.now();
-    console.log(`📷 [SimpleCamera] onUserEndInteraction - timestamp: ${new Date(timestamp).toLocaleTimeString()}`);
-    // Small delay to ensure we capture the final state
+    const preState = stateRef.current;
+    
+    logUserInteractionDetailed('END_INTERACTION', {
+      timestamp: new Date(timestamp).toLocaleTimeString(),
+      timeoutDelay: 50
+    }, preState);
+    
+    // Small delay to ensure we capture the final state - REDUCIDO para mejor respuesta
     interactionTimeoutRef.current = setTimeout(() => {
-      console.log('📷 [SimpleCamera] onUserEndInteraction - Aplicando estado final después del timeout');
+      logCamera('END_INTERACTION - applying final state after timeout');
       atomic(() => {
         setState(prev => {
           const newState = {
@@ -467,16 +519,27 @@ export const useSimpleCamera = ({
             lastUserActionTs: timestamp,
             mode: 'USER_LOCKED' as const
           };
+          
+          logStateTransition(prev, newState, 'onUserEndInteraction_timeout');
+          logViewportState(newState, 'FINAL_INTERACTION_STATE');
           return shallowEqual(prev, newState) ? prev : newState;
         });
       });
-    }, 50);
+    }, 25); // Reducido de 50ms a 25ms para respuesta más rápida
   }, [atomic]);
 
   // Handle user zoom - con protección atómica contra reentradas
   const onUserZoom = useCallback((min: number, max: number, centerX: number) => {
     const timestamp = Date.now();
-    console.log(`📷 [SimpleCamera] onUserZoom - {min: ${min}, max: ${max}, centerX: ${centerX}, timestamp: ${new Date(timestamp).toLocaleTimeString()}}`);
+    const preState = stateRef.current;
+    
+    logUserInteractionDetailed('USER_ZOOM', {
+      min, 
+      max, 
+      centerX, 
+      timestamp: new Date(timestamp).toLocaleTimeString(),
+      range: max - min
+    }, preState);
     
     atomic(() => {
       setState(prev => {
@@ -494,6 +557,8 @@ export const useSimpleCamera = ({
           }
         };
         
+        logStateTransition(prev, newState, 'onUserZoom');
+        logViewportState(newState, 'AFTER_USER_ZOOM');
         return shallowEqual(prev, newState) ? prev : newState;
       });
     });
@@ -502,7 +567,15 @@ export const useSimpleCamera = ({
   // Handle user pan - con protección atómica contra reentradas
   const onUserPan = useCallback((min: number, max: number, centerX: number) => {
     const timestamp = Date.now();
-    console.log(`📷 [SimpleCamera] onUserPan - {min: ${min}, max: ${max}, centerX: ${centerX}, timestamp: ${new Date(timestamp).toLocaleTimeString()}}`);
+    const preState = stateRef.current;
+    
+    logUserInteractionDetailed('USER_PAN', {
+      min, 
+      max, 
+      centerX, 
+      timestamp: new Date(timestamp).toLocaleTimeString(),
+      range: max - min
+    }, preState);
     
     atomic(() => {
       setState(prev => {
@@ -520,6 +593,8 @@ export const useSimpleCamera = ({
           mode: 'USER_LOCKED' as const
         };
         
+        logStateTransition(prev, newState, 'onUserPan');
+        logViewportState(newState, 'AFTER_USER_PAN');
         return shallowEqual(prev, newState) ? prev : newState;
       });
     });
@@ -527,12 +602,17 @@ export const useSimpleCamera = ({
 
   // Reset to latest candles - con limpieza inmediata de sessionStorage
   const resetToLatest = useCallback(() => {
-    console.log('📷 [SimpleCamera] Reset to latest - limpiando todo el estado');
+    const preState = stateRef.current;
+    logUserInteractionDetailed('RESET_TO_LATEST', {
+      reason: 'user_requested_reset',
+      clearingSessionStorage: true
+    }, preState);
+    
     const newState: SimpleCameraState = {
       mode: 'FIRST_LOAD',
       viewport: null,
       tide: 0.8,
-      cooldownMs: 3000,
+      cooldownMs: 1500, // Reducido de 3000ms a 1500ms para mayor responsividad
       lastUserActionTs: null,
       // Legacy para compatibilidad
       isLocked: false,
@@ -544,17 +624,21 @@ export const useSimpleCamera = ({
       }
     };
     
+    logStateTransition(preState, newState, 'resetToLatest');
     setState(newState);
     
     // Limpiar sessionStorage inmediatamente (sin debounce para reset)
     if (typeof window !== 'undefined') {
       try {
         sessionStorage.removeItem('simpleCamera_state');
-        console.log('📷 [SimpleCamera] Estado limpiado de sessionStorage');
+        logPersistenceOp('CLEAR_SESSIONSTORAGE', null, true);
       } catch (error) {
+        logPersistenceOp('CLEAR_SESSIONSTORAGE', null, false);
         console.warn('📷 [SimpleCamera] Error limpiando sessionStorage:', error);
       }
     }
+    
+    logViewportState(newState, 'AFTER_RESET');
     
     if (onStateChange) {
       onStateChange(newState);
@@ -680,32 +764,63 @@ export const useSimpleCamera = ({
     lastCandleTime: number;
   }) => {
     const currentState = stateRef.current;
-    return computeTidalViewport({
+    
+    logTidalFlow('COMPUTE_TIDAL_VIEWPORT', {
+      input: options,
+      cameraState: {
+        mode: currentState.mode,
+        tide: currentState.tide,
+        isLocked: currentState.isLocked,
+        lastUserActionTs: currentState.lastUserActionTs
+      }
+    });
+    
+    const result = computeTidalViewport({
       camera: currentState,
       snap: options.snap,
       lastCandleTime: options.lastCandleTime
     });
+    
+    logTidalFlow('TIDAL_VIEWPORT_RESULT', {
+      input: options,
+      output: result,
+      shift: {
+        deltaMin: result.min - options.snap.min,
+        deltaMax: result.max - options.snap.max
+      }
+    });
+    
+    return result;
   }, []);
 
   // Aplicar viewport al chart de forma robusta (SIN RECURSIÓN)
   const applyViewportToChart = useCallback((chart: Chart, viewport: { min: number; max: number }) => {
+    logTidalFlow('APPLY_VIEWPORT_TO_CHART', {
+      viewport,
+      chartExists: !!chart,
+      hasZoomApi: typeof (chart as any).zoomScale === 'function',
+      hasScales: !!chart.options?.scales?.x
+    });
+    
     // Esta función NO debe llamarse a sí misma - arreglando la recursión
     try {
       // Método preferido: usar API del plugin chartjs-plugin-zoom
       if (typeof (chart as any).zoomScale === 'function') {
         (chart as any).zoomScale('x', viewport, 'none');
-        console.log('🎯 [ApplyViewport] Plugin usado:', viewport);
+        logTidalFlow('VIEWPORT_APPLIED_VIA_PLUGIN', { viewport });
         return;
       }
     } catch (error) {
-      console.warn('🎯 [ApplyViewport] Plugin no disponible, usando fallback');
+      logTidalFlow('PLUGIN_FALLBACK_NEEDED', { error: error?.toString() });
     }
 
     // Fallback: mutar options directamente
     if (chart.options.scales?.x) {
       chart.options.scales.x.min = viewport.min;
       chart.options.scales.x.max = viewport.max;
-      console.log('🎯 [ApplyViewport] Fallback usado:', viewport);
+      logTidalFlow('VIEWPORT_APPLIED_VIA_FALLBACK', { viewport });
+    } else {
+      logTidalFlow('VIEWPORT_APPLICATION_FAILED', { viewport, reason: 'no_x_scale' });
     }
   }, []);
 
@@ -748,12 +863,22 @@ export const useSimpleCamera = ({
   // Cooldown automático para cambiar de USER_INTERACTING a USER_LOCKED (SIN setState en tick)
   useEffect(() => {
     if (state.mode === 'USER_INTERACTING' && state.lastUserActionTs) {
+      logLifecycle('COOLDOWN_TIMER_START', 'useSimpleCamera', {
+        cooldownMs: state.cooldownMs,
+        lastUserActionTs: new Date(state.lastUserActionTs).toLocaleTimeString()
+      });
+      
       const timeoutId = setTimeout(() => {
-        console.log('⏰ [SimpleCamera] Cooldown completado - cambiando a USER_LOCKED');
+        logLifecycle('COOLDOWN_TIMER_COMPLETE', 'useSimpleCamera', {
+          transitionFrom: 'USER_INTERACTING',
+          transitionTo: 'USER_LOCKED'
+        });
+        
         atomic(() => {
           setState(prev => {
             if (prev.mode === 'USER_INTERACTING') {
               const newState = { ...prev, mode: 'USER_LOCKED' as const };
+              logStateTransition(prev, newState, 'cooldown_timeout');
               return shallowEqual(prev, newState) ? prev : newState;
             }
             return prev;
@@ -761,7 +886,10 @@ export const useSimpleCamera = ({
         });
       }, state.cooldownMs);
 
-      return () => clearTimeout(timeoutId);
+      return () => {
+        logLifecycle('COOLDOWN_TIMER_CLEANUP', 'useSimpleCamera');
+        clearTimeout(timeoutId);
+      };
     }
   }, [state.mode, state.lastUserActionTs, state.cooldownMs, atomic]);
 

@@ -401,7 +401,8 @@ class LiveStreamingService extends SimpleEventEmitter {
       if (pendingUpdate) {
         // Emitir solo la última actualización después del debounce
         this.emit('candleUpdate', pendingUpdate);
-        console.log(`📊 [LiveStreamingService] Debounced candle update emitted: ${pendingUpdate.symbol} ${pendingUpdate.interval} price:${pendingUpdate.candle.c}`);
+        // Usar debugLogger en lugar de console.log directo
+        // console.log(`📊 [LiveStreamingService] Debounced candle update emitted: ${pendingUpdate.symbol} ${pendingUpdate.interval} price:${pendingUpdate.candle.c}`);
         
         // Limpiar
         this.pendingUpdates.delete(updateKey);
