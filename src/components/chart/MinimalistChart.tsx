@@ -317,7 +317,18 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
               },
               border: {
                 display: false  // Eliminar borde del eje
-              }
+              },
+              // CRÍTICO: Evitar reconfiguración automática del viewport
+              bounds: 'data',
+              // No auto-ajustar min/max cuando se agregan datos
+              suggestedMin: undefined,
+              suggestedMax: undefined,
+              // Configuraciones adicionales para preservar viewport
+              adapters: {
+                date: {}
+              },
+              // Evitar que Chart.js haga auto-fitting
+              offset: false
             },
             y: {
               type: 'linear',
@@ -366,7 +377,12 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
                   if (now - lastUpdateTime < 200) return; // Throttle zoom events
                   setLastUpdateTime(now);
                   
-                  console.log('📷 [MinimalistChart] Usuario inicia ZOOM');
+                  console.log('� [ZOOM] Usuario inicia ZOOM - Datos del evento:', {
+                    min: xScale.min,
+                    max: xScale.max,
+                    center: (xScale.min + xScale.max) / 2,
+                    timestamp: new Date().toLocaleTimeString()
+                  });
                   
                   // Notificar inicio de interacción
                   simpleCamera.onUserStartInteraction();
@@ -375,6 +391,11 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
                   setTimeout(() => {
                     const finalScale = chart.scales.x;
                     if (finalScale) {
+                      console.log('🔍 [ZOOM] Guardando estado final del zoom:', {
+                        finalMin: finalScale.min,
+                        finalMax: finalScale.max,
+                        finalCenter: (finalScale.min + finalScale.max) / 2
+                      });
                       simpleCamera.onUserZoom(finalScale.min, finalScale.max, (finalScale.min + finalScale.max) / 2);
                     }
                     simpleCamera.onUserEndInteraction();
@@ -395,7 +416,12 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
                   if (now - lastUpdateTime < 200) return; // Throttle pan events
                   setLastUpdateTime(now);
                   
-                  console.log('📷 [MinimalistChart] Usuario inicia PAN');
+                  console.log('� [PAN] Usuario inicia PAN - Datos del evento:', {
+                    min: xScale.min,
+                    max: xScale.max,
+                    center: (xScale.min + xScale.max) / 2,
+                    timestamp: new Date().toLocaleTimeString()
+                  });
                   
                   // Notificar inicio de interacción
                   simpleCamera.onUserStartInteraction();
@@ -404,6 +430,11 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
                   setTimeout(() => {
                     const finalScale = chart.scales.x;
                     if (finalScale) {
+                      console.log('👆 [PAN] Guardando estado final del pan:', {
+                        finalMin: finalScale.min,
+                        finalMax: finalScale.max,
+                        finalCenter: (finalScale.min + finalScale.max) / 2
+                      });
                       simpleCamera.onUserPan(finalScale.min, finalScale.max, (finalScale.min + finalScale.max) / 2);
                     }
                     simpleCamera.onUserEndInteraction();
@@ -424,11 +455,22 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
   }, [candleData, currentSymbol, currentInterval, isStreaming, activeIndicators, technicalIndicators]);
 
   const updateChart = useCallback((newCandle: CandleData, isFinal: boolean) => {
-    if (!chartRef.current) return;
+    console.log('🚀 [updateChart] INICIO - Nueva vela recibida:', { 
+      timestamp: new Date().toLocaleTimeString(),
+      price: newCandle.c,
+      isFinal,
+      cameraLocked: simpleCamera.isLocked()
+    });
+    
+    if (!chartRef.current) {
+      console.log('❌ [updateChart] No hay chartRef disponible');
+      return;
+    }
 
     // Throttle updates for better performance, except for final candles
     const now = Date.now();
     if (!isFinal && now - lastUpdateTime < updateThrottleMs) {
+      console.log('⏭️ [updateChart] Throttled - saltando update');
       return;
     }
     setLastUpdateTime(now);
@@ -514,9 +556,71 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
         updateTechnicalIndicators(chart);
       }
 
-      // Usar 'none' para evitar animaciones en actualizaciones frecuentes
+      // CRÍTICO: Preservar viewport del usuario después de actualización
+      const wasUserInteracting = simpleCamera.isLocked();
+      let preservedMin: number | null = null;
+      let preservedMax: number | null = null;
+      
+      console.log('🔍 [updateChart] ANTES del chart.update:', {
+        wasUserInteracting,
+        currentMin: chart.scales.x?.min,
+        currentMax: chart.scales.x?.max,
+        cameraState: simpleCamera.state.chartJsState
+      });
+      
+      if (wasUserInteracting) {
+        preservedMin = chart.scales.x.min;
+        preservedMax = chart.scales.x.max;
+        console.log('📷 [MinimalistChart] PRESERVANDO viewport del usuario antes de update:', { preservedMin, preservedMax });
+      }
+      
       // Chart.js mantendrá automáticamente el viewport del usuario
+      console.log('⚙️ [updateChart] Ejecutando chart.update("none")...');
       chart.update('none');
+      console.log('✅ [updateChart] chart.update() completado');
+      
+      console.log('🔍 [updateChart] DESPUÉS del chart.update:', {
+        newMin: chart.scales.x?.min,
+        newMax: chart.scales.x?.max,
+        preserved: { preservedMin, preservedMax }
+      });
+      
+      // DOBLE VERIFICACIÓN: Restaurar viewport del usuario si Chart.js lo cambió
+      if (wasUserInteracting && preservedMin !== null && preservedMax !== null) {
+        const currentMin = chart.scales.x.min;
+        const currentMax = chart.scales.x.max;
+        
+        // Si Chart.js cambió el viewport sin permiso, restaurarlo INMEDIATAMENTE
+        const minChanged = Math.abs(currentMin - preservedMin) > 100; // Tolerancia más estricta
+        const maxChanged = Math.abs(currentMax - preservedMax) > 100;
+        
+        if (minChanged || maxChanged) {
+          console.log('⚠️ [MinimalistChart] Chart.js cambió viewport sin permiso - RESTAURANDO INMEDIATAMENTE');
+          console.log('   Antes:', { preservedMin, preservedMax });
+          console.log('   Después:', { currentMin, currentMax });
+          console.log('   Diferencias:', { 
+            minDiff: Math.abs(currentMin - preservedMin), 
+            maxDiff: Math.abs(currentMax - preservedMax) 
+          });
+          
+          // Restaurar inmediatamente
+          chart.scales.x.min = preservedMin;
+          chart.scales.x.max = preservedMax;
+          console.log('🔧 [updateChart] Ejecutando chart.update() para restaurar...');
+          chart.update('none');
+          
+          // Verificación adicional
+          const finalMin = chart.scales.x.min;
+          const finalMax = chart.scales.x.max;
+          console.log('✅ [MinimalistChart] Viewport restaurado:', { finalMin, finalMax });
+        } else {
+          console.log('✅ [MinimalistChart] Viewport del usuario se mantuvo correctamente');
+        }
+      } else {
+        console.log('ℹ️ [updateChart] Usuario no está interactuando - permitiendo comportamiento automático');
+      }
+      
+      console.log('🏁 [updateChart] FIN - Proceso completado');
     }
   }, [activeIndicators.size, currentInterval]); // Solo las dependencias que realmente importan
 
@@ -601,20 +705,81 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
     }
   }, [candleData, initializeChart]);
 
+  // HOOK CRÍTICO: Preservar viewport del usuario durante cualquier cambio en candleData
+  useEffect(() => {
+    console.log('🔄 [candleData Hook] Ejecutándose por cambio en candleData:', {
+      candleCount: candleData.length,
+      isLocked: simpleCamera.isLocked(),
+      userState: simpleCamera.state.chartJsState
+    });
+    
+    if (!chartRef.current || !simpleCamera.isLocked()) {
+      console.log('⏭️ [candleData Hook] Saltando - sin chart o usuario no ha interactuado');
+      return;
+    }
+    
+    const chart = chartRef.current;
+    const userState = simpleCamera.state.chartJsState;
+    
+    // Si el usuario tiene un viewport configurado, asegurarse de que se mantenga
+    if (userState.min !== null && userState.max !== null) {
+      const currentMin = chart.scales.x?.min;
+      const currentMax = chart.scales.x?.max;
+      
+      console.log('🔍 [candleData Hook] Comparando viewports:', {
+        userMin: userState.min,
+        userMax: userState.max,
+        currentMin,
+        currentMax,
+        needsUpdate: currentMin !== userState.min || currentMax !== userState.max
+      });
+      
+      // Solo actualizar si hay diferencia para evitar loops
+      if (currentMin !== userState.min || currentMax !== userState.max) {
+        console.log('🔒 [MinimalistChart] Forzando viewport del usuario durante cambio de candleData');
+        chart.scales.x.min = userState.min;
+        chart.scales.x.max = userState.max;
+        chart.update('none');
+        console.log('✅ [candleData Hook] Viewport forzado aplicado');
+      } else {
+        console.log('✅ [candleData Hook] Viewport ya está correcto');
+      }
+    } else {
+      console.log('ℹ️ [candleData Hook] Usuario no tiene viewport configurado');
+    }
+  }, [candleData.length, simpleCamera.state.chartJsState.min, simpleCamera.state.chartJsState.max]);
+
   useEffect(() => {
     const handleCandleUpdate = (update: StreamUpdate) => {
+      console.log('📈 [handleCandleUpdate] NUEVA ACTUALIZACIÓN RECIBIDA:', {
+        symbol: update.symbol,
+        interval: update.interval,
+        isFinal: update.isFinal,
+        price: update.candle.c,
+        timestamp: new Date().toLocaleTimeString(),
+        matchesCurrentChart: update.symbol === currentSymbol && update.interval === currentInterval
+      });
+      
       if (update.symbol === currentSymbol && update.interval === currentInterval) {
         console.log(`[MinimalistChart] Candle update: ${update.symbol} ${update.interval} final:${update.isFinal} price:${update.candle.c}`);
         
+        console.log('🎯 [handleCandleUpdate] Llamando updateChart...');
         updateChart(update.candle, update.isFinal);
         
         // NO desbloquear la cámara después de nuevas velas
         // La cámara debe quedarse EXACTAMENTE donde el usuario la dejó
         if (simpleCamera.isLocked()) {
           console.log(`[MinimalistChart] Nueva vela - cámara BLOQUEADA por usuario, manteniendo posición fija`);
+          console.log(`[MinimalistChart] Estado de cámara actual:`, {
+            isLocked: simpleCamera.isLocked(),
+            lastUserAction: simpleCamera.state.lastUserAction,
+            chartJsState: simpleCamera.state.chartJsState
+          });
         } else {
           console.log(`[MinimalistChart] Nueva vela - modo automático (solo al inicio)`);
         }
+        
+        console.log('📊 [handleCandleUpdate] Actualizando candleData state...');
         setCandleData(prev => {
           const newData = [...prev];
           
@@ -740,32 +905,51 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
 
   // Configuración inicial del viewport SOLO al cargar por primera vez (reload)
   useEffect(() => {
-    if (!chartRef.current || candleData.length === 0 || initialViewportSet.current) return;
+    console.log('🎬 [Viewport Inicial] Hook ejecutándose:', {
+      hasChart: !!chartRef.current,
+      candleCount: candleData.length,
+      initialViewportSet: initialViewportSet.current,
+      isLocked: simpleCamera.isLocked()
+    });
+    
+    if (!chartRef.current || candleData.length === 0 || initialViewportSet.current) {
+      console.log('⏭️ [Viewport Inicial] Saltando configuración inicial');
+      return;
+    }
     
     const chart = chartRef.current;
     
     // Verificar si hay configuración guardada del usuario
     if (simpleCamera.isLocked()) {
       const userState = simpleCamera.state.chartJsState;
+      console.log('👤 [Viewport Inicial] Usuario tiene configuración guardada:', userState);
+      
       if (chart.scales.x && userState.min !== null && userState.max !== null) {
+        console.log('🔧 [Viewport Inicial] Aplicando configuración del usuario...');
         chart.scales.x.min = userState.min;
         chart.scales.x.max = userState.max;
         chart.update('none');
         initialViewportSet.current = true;
-        console.log('📷 [MinimalistChart] Configuración del usuario cargada SOLO EN PRIMERA CARGA:', userState);
+        console.log('✅ [Viewport Inicial] Configuración del usuario aplicada:', userState);
         return;
       }
     }
     
     // Solo si NO hay configuración del usuario, aplicar vista inicial de últimas 100 velas
+    console.log('🏠 [Viewport Inicial] Aplicando vista automática inicial...');
     const viewport = simpleCamera.getRecommendedViewport(candleData.length, candleData);
+    console.log('📊 [Viewport Inicial] Viewport recomendado:', viewport);
     
     if (chart.scales.x && viewport.min && viewport.max) {
+      // PRIMERA configuración inicial - esto debe quedar fijo hasta que el usuario interactúe
+      console.log('⚙️ [Viewport Inicial] Configurando scales...');
       chart.scales.x.min = viewport.min;
       chart.scales.x.max = viewport.max;
       chart.update('none');
       initialViewportSet.current = true;
-      console.log(`📷 [MinimalistChart] Vista inicial aplicada (solo sin configuración del usuario):`, { min: viewport.min, max: viewport.max });
+      console.log(`✅ [Viewport Inicial] Vista inicial aplicada:`, { min: viewport.min, max: viewport.max });
+    } else {
+      console.log('❌ [Viewport Inicial] No se pudo aplicar viewport - datos faltantes');
     }
   }, [candleData.length === 0 ? 0 : 1]); // Solo se ejecuta UNA VEZ cuando candleData pasa de vacío a tener datos
 

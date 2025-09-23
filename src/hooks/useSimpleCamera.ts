@@ -129,6 +129,17 @@ export const useSimpleCamera = ({
   
   // Notificar cambios de estado y guardar en localStorage con debounce
   useEffect(() => {
+    console.log('📸 [SimpleCamera] Estado cambió:', {
+      isUserInteracting,
+      lastUserAction: lastUserAction ? new Date(lastUserAction).toLocaleTimeString() : null,
+      chartJsState,
+      isLocked: lastUserAction !== null && (
+        chartJsState.min !== null || 
+        chartJsState.max !== null || 
+        isUserInteracting
+      )
+    });
+    
     onStateChange?.(state);
     
     // Guardar en localStorage solo si el usuario ha interactuado (con debounce ya incluido)
@@ -211,6 +222,7 @@ export const useSimpleCamera = ({
   // Cuando el usuario hace zoom
   const onUserZoom = useCallback((min: number, max: number, centerX?: number, zoomLevel?: number) => {
     console.log('📷 [SimpleCamera] Usuario hizo ZOOM - guardando estado:', { min, max, centerX, zoomLevel });
+    console.log('📷 [SimpleCamera] Timestamp del ZOOM:', new Date().toLocaleTimeString());
     
     setChartJsState({
       min,
@@ -220,11 +232,15 @@ export const useSimpleCamera = ({
     });
     
     setLastUserAction(Date.now());
+    
+    // Asegurarse de que isUserInteracting esté en true
+    setIsUserInteracting(true);
   }, []);
   
   // Cuando el usuario hace pan
   const onUserPan = useCallback((min: number, max: number, centerX?: number) => {
     console.log('📷 [SimpleCamera] Usuario hizo PAN - guardando estado:', { min, max, centerX });
+    console.log('📷 [SimpleCamera] Timestamp del PAN:', new Date().toLocaleTimeString());
     
     setChartJsState(prev => ({
       ...prev,
@@ -234,6 +250,9 @@ export const useSimpleCamera = ({
     }));
     
     setLastUserAction(Date.now());
+    
+    // Asegurarse de que isUserInteracting esté en true
+    setIsUserInteracting(true);
   }, []);
   
   // Reset manual a las últimas velas
@@ -283,11 +302,23 @@ export const useSimpleCamera = ({
   // Verificar si está bloqueado
   const isLocked = useCallback(() => {
     // Bloqueado si el usuario ha interactuado alguna vez Y tiene configuración guardada
-    return lastUserAction !== null && (
-      chartJsState.min !== null || 
-      chartJsState.max !== null || 
-      isUserInteracting
-    );
+    const hasUserInteracted = lastUserAction !== null;
+    const hasViewportConfiguration = chartJsState.min !== null || chartJsState.max !== null;
+    const isCurrentlyInteracting = isUserInteracting;
+    
+    const locked = hasUserInteracted && (hasViewportConfiguration || isCurrentlyInteracting);
+    
+    if (locked) {
+      console.log('🔒 [SimpleCamera] Cámara BLOQUEADA - usuario tiene control:', {
+        hasUserInteracted,
+        hasViewportConfiguration,
+        isCurrentlyInteracting,
+        lastUserAction: lastUserAction ? new Date(lastUserAction).toLocaleTimeString() : null,
+        chartJsState: { min: chartJsState.min, max: chartJsState.max }
+      });
+    }
+    
+    return locked;
   }, [lastUserAction, chartJsState.min, chartJsState.max, isUserInteracting]);
   
   // Obtener viewport recomendado - SOLO para carga inicial
@@ -298,8 +329,8 @@ export const useSimpleCamera = ({
       return {
         startIndex: 0,
         endIndex: totalCandles,
-        min: null,
-        max: null,
+        min: null, // Importante: null para que Chart.js no cambie viewport
+        max: null, // Importante: null para que Chart.js no cambie viewport
       };
     }
     
