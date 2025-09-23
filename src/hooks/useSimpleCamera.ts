@@ -14,6 +14,8 @@ export interface SimpleCameraControls {
   state: SimpleCameraState;
   isLocked: () => boolean;
   getCurrentState: () => SimpleCameraState; // Add this for immediate state access
+  shouldForceViewport: () => boolean; // New method to check if viewport should be forced
+  getForcedViewport: () => { min: number; max: number } | null; // Get forced viewport
   onUserStartInteraction: () => void;
   onUserEndInteraction: () => void;
   onUserZoom: (min: number, max: number, centerX: number) => void;
@@ -32,39 +34,104 @@ export const useSimpleCamera = ({
   onStateChange
 }: UseSimpleCameraProps = {}): SimpleCameraControls => {
   
-  const [state, setState] = useState<SimpleCameraState>({
-    isLocked: false,
-    lastUserAction: null,
-    chartJsState: {
-      min: null,
-      max: null,
-      centerX: null,
+  // Cargar estado inicial desde sessionStorage si existe
+  const getInitialState = (): SimpleCameraState => {
+    if (typeof window === 'undefined') {
+      return {
+        isLocked: false,
+        lastUserAction: null,
+        chartJsState: { min: null, max: null, centerX: null }
+      };
     }
-  });
+    
+    try {
+      const saved = sessionStorage.getItem('simpleCamera_state');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        console.log('📷 [SimpleCamera] Estado cargado desde sessionStorage:', parsed);
+        return parsed;
+      }
+    } catch (error) {
+      console.warn('📷 [SimpleCamera] Error cargando estado desde sessionStorage:', error);
+    }
+    
+    return {
+      isLocked: false,
+      lastUserAction: null,
+      chartJsState: { min: null, max: null, centerX: null }
+    };
+  };
+  
+  const [state, setState] = useState<SimpleCameraState>(getInitialState());
 
   // Use a ref to maintain current state accessible from callbacks
   const stateRef = useRef(state);
   const interactionTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Update ref whenever state changes
+  // Update ref whenever state changes and persist to sessionStorage
   useEffect(() => {
     stateRef.current = state;
-  }, [state]);
+    
+    // Persistir estado en sessionStorage
+    if (typeof window !== 'undefined') {
+      try {
+        sessionStorage.setItem('simpleCamera_state', JSON.stringify(state));
+      } catch (error) {
+        console.warn('📷 [SimpleCamera] Error guardando estado en sessionStorage:', error);
+      }
+    }
+    
+    // Callback para notificar cambios de estado
+    if (onStateChange) {
+      onStateChange(state);
+    }
+  }, [state, onStateChange]);
 
   // Check if camera is locked (user has interacted) - use ref for immediate access
   const isLocked = useCallback(() => {
     const currentState = stateRef.current;
-    console.log('📷 [SimpleCamera] isLocked check:', { 
-      stateIsLocked: currentState.isLocked, 
-      hasViewport: currentState.chartJsState.min !== null && currentState.chartJsState.max !== null,
-      lastUserAction: currentState.lastUserAction ? new Date(currentState.lastUserAction).toLocaleTimeString() : null
-    });
-    return currentState.isLocked;
+    const hasViewport = currentState.chartJsState.min !== null && currentState.chartJsState.max !== null;
+    
+    // FORZAR SIEMPRE LA CÁMARA DEL USUARIO MIENTRAS NO ESTÉ INTERACTUANDO
+    // Si el usuario ha interactuado alguna vez y tenemos un viewport guardado, siempre forzarlo
+    const shouldForceLock = hasViewport && currentState.lastUserAction !== null;
+    
+    // Solo logear cuando hay cambios significativos para evitar spam
+    if (currentState.isLocked !== shouldForceLock || Math.random() < 0.01) { // Log 1% de las veces para debug
+      console.log('📷 [SimpleCamera] isLocked check (FORCED):', { 
+        stateIsLocked: currentState.isLocked, 
+        hasViewport,
+        shouldForceLock,
+        lastUserAction: currentState.lastUserAction ? new Date(currentState.lastUserAction).toLocaleTimeString() : null
+      });
+    }
+    
+    return shouldForceLock;
   }, []); // No dependencies - always uses current ref
 
   // Get current state immediately
   const getCurrentState = useCallback(() => {
     return stateRef.current;
+  }, []);
+
+  // Check if viewport should be forced (user has interacted and we have saved viewport)
+  const shouldForceViewport = useCallback(() => {
+    const currentState = stateRef.current;
+    return currentState.lastUserAction !== null && 
+           currentState.chartJsState.min !== null && 
+           currentState.chartJsState.max !== null;
+  }, []);
+
+  // Get the forced viewport values
+  const getForcedViewport = useCallback(() => {
+    const currentState = stateRef.current;
+    if (currentState.chartJsState.min !== null && currentState.chartJsState.max !== null) {
+      return {
+        min: currentState.chartJsState.min,
+        max: currentState.chartJsState.max
+      };
+    }
+    return null;
   }, []);
 
   // Start user interaction
@@ -94,7 +161,7 @@ export const useSimpleCamera = ({
     }, 50);
   }, []);
 
-  // Handle user zoom
+  // Handle user zoom - con persistencia mejorada
   const onUserZoom = useCallback((min: number, max: number, centerX: number) => {
     console.log('📷 [SimpleCamera] User zoom:', { min, max, centerX });
     setState(prev => {
@@ -109,6 +176,9 @@ export const useSimpleCamera = ({
         }
       };
       
+      // Actualizar también el ref inmediatamente para acceso sincrónico
+      stateRef.current = newState;
+      
       if (onStateChange) {
         onStateChange(newState);
       }
@@ -117,7 +187,7 @@ export const useSimpleCamera = ({
     });
   }, [onStateChange]);
 
-  // Handle user pan
+  // Handle user pan - con persistencia mejorada
   const onUserPan = useCallback((min: number, max: number, centerX: number) => {
     console.log('📷 [SimpleCamera] User pan:', { min, max, centerX });
     setState(prev => {
@@ -132,6 +202,9 @@ export const useSimpleCamera = ({
         }
       };
       
+      // Actualizar también el ref inmediatamente para acceso sincrónico
+      stateRef.current = newState;
+      
       if (onStateChange) {
         onStateChange(newState);
       }
@@ -140,27 +213,34 @@ export const useSimpleCamera = ({
     });
   }, [onStateChange]);
 
-  // Reset to latest candles
+  // Reset to latest candles - con limpieza de persistencia
   const resetToLatest = useCallback(() => {
     console.log('📷 [SimpleCamera] Reset to latest');
-    setState(prev => {
-      const newState = {
-        ...prev,
-        isLocked: false,
-        lastUserAction: null,
-        chartJsState: {
-          min: null,
-          max: null,
-          centerX: null
-        }
-      };
-      
-      if (onStateChange) {
-        onStateChange(newState);
+    const newState = {
+      isLocked: false,
+      lastUserAction: null,
+      chartJsState: {
+        min: null,
+        max: null,
+        centerX: null
       }
-      
-      return newState;
-    });
+    };
+    
+    setState(newState);
+    
+    // Limpiar también sessionStorage
+    if (typeof window !== 'undefined') {
+      try {
+        sessionStorage.removeItem('simpleCamera_state');
+        console.log('📷 [SimpleCamera] Estado limpiado de sessionStorage');
+      } catch (error) {
+        console.warn('📷 [SimpleCamera] Error limpiando sessionStorage:', error);
+      }
+    }
+    
+    if (onStateChange) {
+      onStateChange(newState);
+    }
   }, [onStateChange]);
 
   // Get recommended viewport for initial setup
@@ -200,13 +280,15 @@ export const useSimpleCamera = ({
     state,
     isLocked,
     getCurrentState,
+    shouldForceViewport,
+    getForcedViewport,
     onUserStartInteraction,
     onUserEndInteraction,
     onUserZoom,
     onUserPan,
     resetToLatest,
     getRecommendedViewport
-  }), [state, isLocked, getCurrentState, onUserStartInteraction, onUserEndInteraction, onUserZoom, onUserPan, resetToLatest, getRecommendedViewport]);
+  }), [state, isLocked, getCurrentState, shouldForceViewport, getForcedViewport, onUserStartInteraction, onUserEndInteraction, onUserZoom, onUserPan, resetToLatest, getRecommendedViewport]);
 
   return controls;
 };
