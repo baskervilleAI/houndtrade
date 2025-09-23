@@ -31,6 +31,8 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
   const [candleData, setCandleData] = useState<CandleData[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
   const [activeIndicators, setActiveIndicators] = useState<Set<string>>(new Set());
+  const [lastUpdateTime, setLastUpdateTime] = useState<number>(0);
+  const updateThrottleMs = 100; // Throttle updates to max 10fps for better performance
 
   const { selectedPair } = useMarket();
   const currentSymbol = symbol || selectedPair;
@@ -41,6 +43,64 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
   const addLog = (message: string) => {
     console.log(`[MinimalistChart] ${message}`);
   };
+
+  const updateTechnicalIndicators = useCallback((chart: any) => {
+    if (!chart || !chart.data || !chart.data.datasets) return;
+
+    const candleDataset = chart.data.datasets[0];
+    if (!candleDataset || !candleDataset.data) return;
+
+    // Extraer datos de velas para recalcular indicadores
+    const currentCandles: CandleData[] = candleDataset.data.map((candle: any) => ({
+      x: candle.x,
+      o: candle.o,
+      h: candle.h,
+      l: candle.l,
+      c: candle.c
+    }));
+
+    // Recalcular indicadores técnicos
+    const indicators = useTechnicalIndicators(currentCandles);
+
+    // Actualizar datasets de indicadores
+    chart.data.datasets.forEach((dataset: any, index: number) => {
+      if (index === 0) return; // Skip candlestick dataset
+
+      if (dataset.label === 'SMA 20' && activeIndicators.has('sma20')) {
+        dataset.data = currentCandles.map((candle: CandleData, i: number) => ({
+          x: candle.x,
+          y: indicators.sma20[i]
+        })).filter((point: any) => !isNaN(point.y));
+      } else if (dataset.label === 'SMA 50' && activeIndicators.has('sma50')) {
+        dataset.data = currentCandles.map((candle: CandleData, i: number) => ({
+          x: candle.x,
+          y: indicators.sma50[i]
+        })).filter((point: any) => !isNaN(point.y));
+      } else if (dataset.label === 'EMA 20' && activeIndicators.has('ema20')) {
+        dataset.data = currentCandles.map((candle: CandleData, i: number) => ({
+          x: candle.x,
+          y: indicators.ema20[i]
+        })).filter((point: any) => !isNaN(point.y));
+      } else if (dataset.label && dataset.label.startsWith('BB') && activeIndicators.has('bollinger')) {
+        if (dataset.label === 'BB Upper') {
+          dataset.data = currentCandles.map((candle: CandleData, i: number) => ({
+            x: candle.x,
+            y: indicators.bollinger.upper[i]
+          })).filter((point: any) => !isNaN(point.y));
+        } else if (dataset.label === 'BB Middle') {
+          dataset.data = currentCandles.map((candle: CandleData, i: number) => ({
+            x: candle.x,
+            y: indicators.bollinger.middle[i]
+          })).filter((point: any) => !isNaN(point.y));
+        } else if (dataset.label === 'BB Lower') {
+          dataset.data = currentCandles.map((candle: CandleData, i: number) => ({
+            x: candle.x,
+            y: indicators.bollinger.lower[i]
+          })).filter((point: any) => !isNaN(point.y));
+        }
+      }
+    });
+  }, [activeIndicators]);
 
   const initializeChart = useCallback(async () => {
     if (Platform.OS !== 'web') {
@@ -216,11 +276,11 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
         type: 'candlestick',
         data: { datasets },
         options: {
+          animation: {
+            duration: 0  // Desactivar animaciones para mejor rendimiento en live
+          },
           responsive: false,
           maintainAspectRatio: false,
-          animation: {
-            duration: 200
-          },
           interaction: {
             intersect: false,
             mode: 'index'
@@ -305,14 +365,67 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
   const updateChart = useCallback((newCandle: CandleData, isFinal: boolean) => {
     if (!chartRef.current) return;
 
+    // Throttle updates for better performance, except for final candles
+    const now = Date.now();
+    if (!isFinal && now - lastUpdateTime < updateThrottleMs) {
+      return;
+    }
+    setLastUpdateTime(now);
+
     const chart = chartRef.current;
     const dataset = chart.data.datasets[0];
 
     if (dataset && dataset.data) {
-      const existingIndex = dataset.data.findIndex((candle: any) => candle.x === newCandle.x);
+      // Buscar vela existente usando ventana de tiempo en lugar de timestamp exacto
+      let existingIndex = -1;
+      const updateTimestamp = newCandle.x;
+      
+      // Función para obtener intervalo en milisegundos
+      const getIntervalMs = (interval: string): number => {
+        const intervals: { [key: string]: number } = {
+          '1m': 60 * 1000,
+          '3m': 3 * 60 * 1000,
+          '5m': 5 * 60 * 1000,
+          '15m': 15 * 60 * 1000,
+          '30m': 30 * 60 * 1000,
+          '1h': 60 * 60 * 1000,
+          '2h': 2 * 60 * 60 * 1000,
+          '4h': 4 * 60 * 60 * 1000,
+          '6h': 6 * 60 * 60 * 1000,
+          '8h': 8 * 60 * 60 * 1000,
+          '12h': 12 * 60 * 60 * 1000,
+          '1d': 24 * 60 * 60 * 1000,
+          '3d': 3 * 24 * 60 * 60 * 1000,
+          '1w': 7 * 24 * 60 * 60 * 1000,
+          '1M': 30 * 24 * 60 * 60 * 1000,
+        };
+        return intervals[interval] || 60 * 1000;
+      };
+      
+      const intervalMs = getIntervalMs(currentInterval);
+      
+      // Buscar en las últimas velas primero (más eficiente para streaming)
+      if (dataset.data.length > 0) {
+        // Verificar la última vela primero
+        const lastIndex = dataset.data.length - 1;
+        const lastCandle = dataset.data[lastIndex] as any;
+        if (lastCandle && Math.abs(lastCandle.x - updateTimestamp) < intervalMs) {
+          existingIndex = lastIndex;
+        } else {
+          // Buscar en las últimas 5 velas
+          for (let i = Math.max(0, dataset.data.length - 5); i < dataset.data.length; i++) {
+            const candle = dataset.data[i] as any;
+            if (candle && Math.abs(candle.x - updateTimestamp) < intervalMs) {
+              existingIndex = i;
+              break;
+            }
+          }
+        }
+      }
 
       if (existingIndex >= 0) {
         // Actualizar vela existente
+        const oldCandle = dataset.data[existingIndex] as any;
         dataset.data[existingIndex] = {
           x: newCandle.x,
           o: newCandle.o,
@@ -320,8 +433,9 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
           l: newCandle.l,
           c: newCandle.c
         };
-      } else if (isFinal) {
-        // Agregar nueva vela solo si está cerrada
+        console.log(`[Chart] Updated candle at index ${existingIndex}: $${oldCandle?.c?.toFixed(4) || '?'} → $${newCandle.c.toFixed(4)} (${isFinal ? 'final' : 'live'})`);
+      } else {
+        // Agregar nueva vela
         dataset.data.push({
           x: newCandle.x,
           o: newCandle.o,
@@ -329,6 +443,7 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
           l: newCandle.l,
           c: newCandle.c
         });
+        console.log(`[Chart] Added new candle: $${newCandle.c.toFixed(4)} at ${new Date(newCandle.x).toLocaleTimeString()}, total: ${dataset.data.length} (${isFinal ? 'final' : 'live'})`);
 
         // Mantener solo las últimas 200 velas visibles
         if (dataset.data.length > 200) {
@@ -336,9 +451,15 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
         }
       }
 
+      // Actualizar indicadores técnicos si están activos
+      if (activeIndicators.size > 0) {
+        updateTechnicalIndicators(chart);
+      }
+
+      // Usar 'none' para evitar animaciones en actualizaciones frecuentes
       chart.update('none');
     }
-  }, []);
+  }, [activeIndicators, lastUpdateTime, updateThrottleMs, currentInterval]);
 
   const changeTimeInterval = useCallback(async (newInterval: TimeInterval) => {
     setCurrentInterval(newInterval);
@@ -365,17 +486,24 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
   }, [currentSymbol, currentInterval, isStreaming]);
 
   const startStreaming = useCallback(async () => {
+    if (isStreaming) {
+      console.log('📊 Streaming ya está activo');
+      return;
+    }
+
     try {
       setStatus('Conectando streaming...');
 
-      await liveStreamingService.connect();
       await liveStreamingService.subscribeToStream(currentSymbol, currentInterval);
       
       setIsStreaming(true);
+      setStatus('✅ Streaming conectado');
     } catch (error: any) {
       console.error('Error iniciando streaming:', error);
+      setStatus(`⚠️ Streaming en modo polling (WebSocket falló)`);
+      setIsStreaming(true); // Aún funciona con polling
     }
-  }, [currentSymbol, currentInterval]);
+  }, [currentSymbol, currentInterval, isStreaming]);
 
   const stopStreaming = useCallback(() => {
     liveStreamingService.unsubscribeFromStream(currentSymbol, currentInterval);
@@ -417,25 +545,83 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
   useEffect(() => {
     const handleCandleUpdate = (update: StreamUpdate) => {
       if (update.symbol === currentSymbol && update.interval === currentInterval) {
+        console.log(`[MinimalistChart] Candle update: ${update.symbol} ${update.interval} final:${update.isFinal} price:${update.candle.c}`);
+        
         updateChart(update.candle, update.isFinal);
         
-        // Actualizar el estado local
+        // Actualizar el estado local de manera sincronizada
         setCandleData(prev => {
           const newData = [...prev];
-          const existingIndex = newData.findIndex(candle => candle.x === update.candle.x);
+          
+          // Buscar vela existente considerando ventana de tiempo en lugar de timestamp exacto
+          let existingIndex = -1;
+          const updateTimestamp = update.candle.x;
+          
+          // Para la última vela (más común en streaming), verificar primero el final del array
+          if (newData.length > 0) {
+            const lastCandle = newData[newData.length - 1];
+            const intervalMs = getIntervalInMs(currentInterval);
+            const timeDiff = Math.abs(lastCandle.x - updateTimestamp);
+            
+            // Si la diferencia de tiempo es menor que el intervalo, es la misma vela
+            if (timeDiff < intervalMs) {
+              existingIndex = newData.length - 1;
+            } else {
+              // Buscar en las últimas 5 velas por si acaso
+              for (let i = Math.max(0, newData.length - 5); i < newData.length - 1; i++) {
+                const candleTimeDiff = Math.abs(newData[i].x - updateTimestamp);
+                if (candleTimeDiff < intervalMs) {
+                  existingIndex = i;
+                  break;
+                }
+              }
+            }
+          }
           
           if (existingIndex >= 0) {
+            // Actualizar vela existente
+            const oldPrice = newData[existingIndex].c;
             newData[existingIndex] = update.candle;
-          } else if (update.isFinal) {
+            console.log(`[MinimalistChart] Updated existing candle at index ${existingIndex}: $${oldPrice.toFixed(4)} → $${update.candle.c.toFixed(4)} (${update.isFinal ? 'final' : 'live'})`);
+          } else {
+            // Agregar nueva vela
             newData.push(update.candle);
+            console.log(`[MinimalistChart] Added new candle: $${update.candle.c.toFixed(4)} at ${new Date(update.candle.x).toLocaleTimeString()}, total: ${newData.length} (${update.isFinal ? 'final' : 'live'})`);
+            
+            // Mantener solo las últimas 200 velas
             if (newData.length > 200) {
               newData.shift();
             }
           }
           
+          // Ordenar por timestamp para asegurar orden correcto
+          newData.sort((a, b) => a.x - b.x);
+          
           return newData;
         });
       }
+    };
+
+    // Función auxiliar para obtener intervalos en milisegundos
+    const getIntervalInMs = (interval: string): number => {
+      const intervals: { [key: string]: number } = {
+        '1m': 60 * 1000,
+        '3m': 3 * 60 * 1000,
+        '5m': 5 * 60 * 1000,
+        '15m': 15 * 60 * 1000,
+        '30m': 30 * 60 * 1000,
+        '1h': 60 * 60 * 1000,
+        '2h': 2 * 60 * 60 * 1000,
+        '4h': 4 * 60 * 60 * 1000,
+        '6h': 6 * 60 * 60 * 1000,
+        '8h': 8 * 60 * 60 * 1000,
+        '12h': 12 * 60 * 60 * 1000,
+        '1d': 24 * 60 * 60 * 1000,
+        '3d': 3 * 24 * 60 * 60 * 1000,
+        '1w': 7 * 24 * 60 * 60 * 1000,
+        '1M': 30 * 24 * 60 * 60 * 1000,
+      };
+      return intervals[interval] || 60 * 1000;
     };
 
     liveStreamingService.on('candleUpdate', handleCandleUpdate);
@@ -447,6 +633,23 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
 
   // Cleanup al desmontar
   useEffect(() => {
+    // Listeners para estado de conexión
+    const handleConnected = () => {
+      setStatus('✅ WebSocket conectado');
+    };
+
+    const handleDisconnected = () => {
+      setStatus('🔄 Reconectando...');
+    };
+
+    const handleMaxReconnectReached = () => {
+      setStatus('⚠️ Usando modo polling (WebSocket no disponible)');
+    };
+
+    liveStreamingService.on('connected', handleConnected);
+    liveStreamingService.on('disconnected', handleDisconnected);
+    liveStreamingService.on('maxReconnectAttemptsReached', handleMaxReconnectReached);
+
     return () => {
       if (isStreaming) {
         liveStreamingService.unsubscribeFromStream(currentSymbol, currentInterval);
@@ -454,6 +657,11 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
       if (chartRef.current) {
         chartRef.current.destroy();
       }
+      
+      // Limpiar listeners
+      liveStreamingService.off('connected', handleConnected);
+      liveStreamingService.off('disconnected', handleDisconnected);
+      liveStreamingService.off('maxReconnectAttemptsReached', handleMaxReconnectReached);
     };
   }, []);
 
