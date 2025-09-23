@@ -39,13 +39,16 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
   const { selectedPair } = useMarket();
   const currentSymbol = symbol || selectedPair;
 
+  // Callback estable para cambios de estado de cámara
+  const onCameraStateChange = useCallback((cameraState: any) => {
+    console.log('📷 [MinimalistChart] Simple camera state changed:', cameraState);
+  }, []);
+
   // Sistema de cámara simple y predecible
   const simpleCamera = useSimpleCamera({
     defaultVisibleCandles: 100,
     // autoResetTimeMs eliminado - la cámara mantiene posición del usuario permanentemente
-    onStateChange: useCallback((cameraState: any) => {
-      console.log('📷 [MinimalistChart] Simple camera state changed:', cameraState);
-    }, []),
+    onStateChange: onCameraStateChange,
   });
 
   // Calcular indicadores técnicos
@@ -455,11 +458,18 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
   }, [candleData, currentSymbol, currentInterval, isStreaming, activeIndicators, technicalIndicators]);
 
   const updateChart = useCallback((newCandle: CandleData, isFinal: boolean) => {
+    // Obtener estado actual de la cámara al momento de la ejecución
+    const currentCameraState = simpleCamera.getCurrentState();
+    const cameraLocked = currentCameraState.isLocked;
+    
     console.log('🚀 [updateChart] INICIO - Nueva vela recibida:', { 
       timestamp: new Date().toLocaleTimeString(),
       price: newCandle.c,
       isFinal,
-      cameraLocked: simpleCamera.isLocked()
+      cameraLocked,
+      cameraStateIsLocked: currentCameraState.isLocked,
+      hasUserViewport: currentCameraState.chartJsState.min !== null && currentCameraState.chartJsState.max !== null,
+      cameraViewport: currentCameraState.chartJsState
     });
     
     if (!chartRef.current) {
@@ -557,7 +567,7 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
       }
 
       // CRÍTICO: Preservar viewport del usuario después de actualización
-      const wasUserInteracting = simpleCamera.isLocked();
+      const wasUserInteracting = cameraLocked; // Usar la variable calculada al inicio
       let preservedMin: number | null = null;
       let preservedMax: number | null = null;
       
@@ -565,7 +575,7 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
         wasUserInteracting,
         currentMin: chart.scales.x?.min,
         currentMax: chart.scales.x?.max,
-        cameraState: simpleCamera.state.chartJsState
+        cameraState: currentCameraState.chartJsState
       });
       
       if (wasUserInteracting) {
@@ -622,7 +632,7 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
       
       console.log('🏁 [updateChart] FIN - Proceso completado');
     }
-  }, [activeIndicators.size, currentInterval]); // Solo las dependencias que realmente importan
+  }, [activeIndicators.size, currentInterval]); // Removed simpleCamera dependency as we use getCurrentState()
 
   const changeTimeInterval = useCallback(async (newInterval: TimeInterval) => {
     setCurrentInterval(newInterval);
@@ -768,12 +778,13 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
         
         // NO desbloquear la cámara después de nuevas velas
         // La cámara debe quedarse EXACTAMENTE donde el usuario la dejó
-        if (simpleCamera.isLocked()) {
+        const currentCameraState = simpleCamera.getCurrentState();
+        if (currentCameraState.isLocked) {
           console.log(`[MinimalistChart] Nueva vela - cámara BLOQUEADA por usuario, manteniendo posición fija`);
           console.log(`[MinimalistChart] Estado de cámara actual:`, {
-            isLocked: simpleCamera.isLocked(),
-            lastUserAction: simpleCamera.state.lastUserAction,
-            chartJsState: simpleCamera.state.chartJsState
+            isLocked: currentCameraState.isLocked,
+            lastUserAction: currentCameraState.lastUserAction,
+            chartJsState: currentCameraState.chartJsState
           });
         } else {
           console.log(`[MinimalistChart] Nueva vela - modo automático (solo al inicio)`);

@@ -1,4 +1,4 @@
-import { useColorScheme } from 'react-native';
+import { useColorScheme, Platform } from 'react-native';
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -123,30 +123,38 @@ export const RADIUS = {
   full: 9999,
 } as const;
 
-// Shadow presets
+// Shadow presets - React Native Web compatible
 export const SHADOWS = {
-  sm: {
+  sm: Platform.OS === 'web' ? {
+    boxShadow: '0px 1px 2px rgba(0, 0, 0, 0.05)',
+  } : {
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.05,
     shadowRadius: 2,
     elevation: 1,
   },
-  md: {
+  md: Platform.OS === 'web' ? {
+    boxShadow: '0px 2px 4px rgba(0, 0, 0, 0.1)',
+  } : {
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 4,
     elevation: 3,
   },
-  lg: {
+  lg: Platform.OS === 'web' ? {
+    boxShadow: '0px 4px 8px rgba(0, 0, 0, 0.15)',
+  } : {
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.15,
     shadowRadius: 8,
     elevation: 5,
   },
-  xl: {
+  xl: Platform.OS === 'web' ? {
+    boxShadow: '0px 8px 16px rgba(0, 0, 0, 0.2)',
+  } : {
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 8 },
     shadowOpacity: 0.2,
