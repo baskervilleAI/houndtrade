@@ -20,6 +20,16 @@ export interface CameraState {
   isLocked: boolean;
   // Preserve manual adjustments during streaming
   manuallyAdjusted: boolean;
+  // Chart.js specific camera state
+  chartJsZoom: {
+    min: number | null;
+    max: number | null;
+    centerX: number | null;
+  };
+  // Force show latest candles flag
+  followLatest: boolean;
+  // Maximum candles to display (default 900)
+  maxVisibleCandles: number;
 }
 
 export interface CameraControls {
@@ -61,6 +71,12 @@ export interface CameraControls {
   disableAutoFollow: () => void; // Stay at current position
   isAutoFollowing: () => boolean;
   
+  // Chart.js specific camera controls
+  setChartJsZoomState: (min: number | null, max: number | null, centerX?: number | null) => void;
+  resetCameraToLatest: () => void;
+  lockCameraPosition: () => void;
+  setMaxVisibleCandlesCount: (count: number) => void;
+  
   // Helper functions
   getVisibleRange: () => { start: number; end: number; count: number };
   isFullyVisible: () => boolean;
@@ -96,6 +112,15 @@ export const useChartCamera = ({
   const [isLocked, setIsLocked] = useState(false); // Camera lock state
   const [autoFollow, setAutoFollow] = useState(true); // Auto-follow new data
   const [manuallyAdjusted, setManuallyAdjusted] = useState(false);
+  
+  // Chart.js specific camera state
+  const [chartJsZoom, setChartJsZoom] = useState<{ min: number | null; max: number | null; centerX: number | null }>({
+    min: null,
+    max: null,
+    centerX: null,
+  });
+  const [followLatest, setFollowLatest] = useState(true);
+  const [maxVisibleCandles, setMaxVisibleCandles] = useState(900);
   
   // Calculate derived values
   const candleWidth = useMemo(() => {
@@ -142,7 +167,10 @@ export const useChartCamera = ({
     endIndex,
     isLocked,
     manuallyAdjusted,
-  }), [zoomLevel, offsetX, offsetY, priceRange, startIndex, endIndex, isLocked, manuallyAdjusted]);
+    chartJsZoom,
+    followLatest,
+    maxVisibleCandles,
+  }), [zoomLevel, offsetX, offsetY, priceRange, startIndex, endIndex, isLocked, manuallyAdjusted, chartJsZoom, followLatest, maxVisibleCandles]);
   
   // Auto-follow effect: when new data is received and camera is not locked/manually adjusted
   useEffect(() => {
@@ -327,6 +355,43 @@ export const useChartCamera = ({
   
   const isAutoFollowing = useCallback(() => autoFollow && !manuallyAdjusted, [autoFollow, manuallyAdjusted]);
   
+  // Chart.js specific camera controls
+  const setChartJsZoomState = useCallback((min: number | null, max: number | null, centerX?: number | null) => {
+    setChartJsZoom({
+      min,
+      max,
+      centerX: centerX || null,
+    });
+    if (min !== null || max !== null) {
+      setManuallyAdjusted(true);
+    }
+    console.log('📷 Chart.js zoom state updated:', { min, max, centerX });
+    notifyChange();
+  }, [notifyChange]);
+  
+  const resetCameraToLatest = useCallback(() => {
+    setFollowLatest(true);
+    setManuallyAdjusted(false);
+    setAutoFollow(true);
+    setOffsetX(1);
+    setChartJsZoom({ min: null, max: null, centerX: null });
+    console.log('📷 Camera reset to follow latest candles');
+    notifyChange();
+  }, [notifyChange]);
+  
+  const lockCameraPosition = useCallback(() => {
+    setIsLocked(true);
+    setFollowLatest(false);
+    setAutoFollow(false);
+    console.log('📷 Camera position locked');
+  }, []);
+  
+  const setMaxVisibleCandlesCount = useCallback((count: number) => {
+    setMaxVisibleCandles(Math.max(100, Math.min(2000, count)));
+    console.log(`📷 Max visible candles set to: ${count}`);
+    notifyChange();
+  }, [notifyChange]);
+  
   return {
     camera,
     zoomIn,
@@ -352,6 +417,10 @@ export const useChartCamera = ({
     enableAutoFollow,
     disableAutoFollow,
     isAutoFollowing,
+    setChartJsZoomState,
+    resetCameraToLatest,
+    lockCameraPosition,
+    setMaxVisibleCandlesCount,
     getVisibleRange,
     isFullyVisible,
     getCandleWidth,

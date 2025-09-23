@@ -56,7 +56,13 @@ export const ChartJSFinancialChart: React.FC<ChartJSFinancialChartProps> = ({
       };
     }
 
-    const candleData = candles.map((candle, index) => {
+    // ✅ FORZAR LÍMITE DE 900 VELAS - Siempre mostrar las últimas 900
+    const maxCandles = 900;
+    const limitedCandles = candles.length > maxCandles ? candles.slice(-maxCandles) : candles;
+    
+    console.log(`📊 Chart data limited: ${candles.length} → ${limitedCandles.length} candles (max: ${maxCandles})`);
+
+    const candleData = limitedCandles.map((candle, index) => {
       // Validate candle data
       if (!candle || typeof candle.open !== 'number' || typeof candle.close !== 'number') {
         console.warn(`⚠️ Invalid candle at index ${index}:`, candle);
@@ -87,7 +93,7 @@ export const ChartJSFinancialChart: React.FC<ChartJSFinancialChartProps> = ({
       };
     }).filter(Boolean); // Remove null entries
 
-    const volumeData = showVolume ? candles.map((candle, index) => {
+    const volumeData = showVolume ? limitedCandles.map((candle, index) => {
       if (!candle) return null;
       const volume = Number(candle.volume);
       if (isNaN(volume)) return null;
@@ -98,15 +104,17 @@ export const ChartJSFinancialChart: React.FC<ChartJSFinancialChartProps> = ({
       };
     }).filter(Boolean) : [];
 
-    const lastPrice = lastCandle?.close || (candles.length > 0 ? candles[candles.length - 1].close : 0);
+    const lastPrice = lastCandle?.close || (limitedCandles.length > 0 ? limitedCandles[limitedCandles.length - 1].close : 0);
 
-    console.log(`✅ ChartJSFinancialChart: Processed ${candleData.length} valid candles`);
+    console.log(`✅ ChartJSFinancialChart: Processed ${candleData.length} valid candles (limited to ${maxCandles})`);
     
     return {
       candleData,
       volumeData,
       lastPrice: Number(lastPrice),
       symbol,
+      totalCandles: candles.length, // Original count for reference
+      displayedCandles: candleData.length, // Actually displayed
     };
   }, [candles, showVolume, lastCandle, symbol]);
 
@@ -193,6 +201,8 @@ export const ChartJSFinancialChart: React.FC<ChartJSFinancialChartProps> = ({
             
             <div class="chart-controls">
                 <button class="control-btn" onclick="resetZoom()">🔄 Reset</button>
+                <button class="control-btn" onclick="resetCamera()">📷 Camera</button>
+                <button class="control-btn" onclick="lockCamera()">🔒 Lock</button>
                 <button class="control-btn" onclick="autoFitChart()">📏 Auto</button>
                 <button class="control-btn" onclick="zoomIn()">🔍+</button>
                 <button class="control-btn" onclick="zoomOut()">🔍-</button>
@@ -572,7 +582,121 @@ export const ChartJSFinancialChart: React.FC<ChartJSFinancialChartProps> = ({
             };
 
             // Funciones de control
-            function resetZoom() {
+            // Variables de estado de cámara
+            let cameraState = {
+                isLocked: false,
+                followLatest: true,
+                userZoomLevel: 1.0,
+                userCenterX: null,
+                lastManualAdjustment: null
+            };
+
+            function resetCamera() {
+                console.log('📷 Reset Camera - volviendo a las últimas velas');
+                cameraState.followLatest = true;
+                cameraState.isLocked = false;
+                cameraState.userZoomLevel = 1.0;
+                cameraState.userCenterX = null;
+                cameraState.lastManualAdjustment = null;
+                
+                goToLatest();
+                
+                sendMessageToRN({ 
+                    type: 'CAMERA_RESET',
+                    followLatest: true
+                });
+            }
+
+            function lockCamera() {
+                console.log('📷 Bloqueando cámara en posición actual');
+                cameraState.isLocked = true;
+                cameraState.followLatest = false;
+                
+                if (mainChart) {
+                    const xScale = mainChart.scales.x;
+                    cameraState.userCenterX = (xScale.min + xScale.max) / 2;
+                    const totalRange = currentData.candleData.length > 0 ? 
+                        (currentData.candleData[currentData.candleData.length - 1].x - currentData.candleData[0].x) : 1;
+                    const visibleRange = xScale.max - xScale.min;
+                    cameraState.userZoomLevel = totalRange / visibleRange;
+                }
+                
+                sendMessageToRN({ 
+                    type: 'CAMERA_LOCKED',
+                    isLocked: true,
+                    centerX: cameraState.userCenterX,
+                    zoomLevel: cameraState.userZoomLevel
+                });
+            }
+
+            function setCameraToLatest() {
+                console.log('📷 Configurando cámara para seguir últimas velas');
+                if (cameraState.isLocked) {
+                    console.log('📷 Cámara bloqueada - ignorando comando');
+                    return;
+                }
+                
+                cameraState.followLatest = true;
+                
+                if (mainChart && currentData.candleData.length > 0) {
+                    // Configurar para mostrar las últimas velas respetando el zoom del usuario
+                    const candles = currentData.candleData;
+                    const candleCount = candles.length;
+                    const visibleCandleCount = Math.min(50, Math.floor(candleCount / cameraState.userZoomLevel));
+                    
+                    const endIndex = candleCount;
+                    const startIndex = Math.max(0, endIndex - visibleCandleCount);
+                    
+                    const startTime = candles[startIndex].x;
+                    const endTime = candles[endIndex - 1].x;
+                    const padding = (endTime - startTime) * 0.02;
+                    
+                    mainChart.options.scales.x.min = startTime - padding;
+                    mainChart.options.scales.x.max = endTime + padding;
+                    mainChart.update('none');
+                    
+                    if (volumeChart) {
+                        volumeChart.options.scales.x.min = mainChart.options.scales.x.min;
+                        volumeChart.options.scales.x.max = mainChart.options.scales.x.max;
+                        volumeChart.update('none');
+                    }
+                }
+                
+                sendMessageToRN({ 
+                    type: 'CAMERA_FOLLOWING_LATEST',
+                    followLatest: true
+                });
+            }
+
+            function adjustCameraAfterUpdate() {
+                console.log('📷 Ajustando cámara después de actualización de vela');
+                
+                // Si la cámara está bloqueada, no hacer nada
+                if (cameraState.isLocked) {
+                    console.log('📷 Cámara bloqueada - manteniendo posición');
+                    return;
+                }
+                
+                // Si debe seguir las últimas velas
+                if (cameraState.followLatest) {
+                    setCameraToLatest();
+                } else if (cameraState.userCenterX) {
+                    // Mantener la posición del usuario pero actualizar los datos
+                    const currentRange = mainChart.scales.x.max - mainChart.scales.x.min;
+                    const newMin = cameraState.userCenterX - currentRange / 2;
+                    const newMax = cameraState.userCenterX + currentRange / 2;
+                    
+                    mainChart.options.scales.x.min = newMin;
+                    mainChart.options.scales.x.max = newMax;
+                    mainChart.update('none');
+                    
+                    if (volumeChart) {
+                        volumeChart.options.scales.x.min = newMin;
+                        volumeChart.options.scales.x.max = newMax;
+                        volumeChart.update('none');
+                    }
+                }
+            }
                 if (mainChart) {
                     mainChart.resetZoom();
                 }
@@ -970,6 +1094,9 @@ export const ChartJSFinancialChart: React.FC<ChartJSFinancialChartProps> = ({
                     statusElement.textContent = \`\${data.symbol} - \${validCandles ? validCandles.length : 0} velas cargadas\`;
                     statusElement.className = '${isStreaming ? 'streaming' : 'paused'}';
                 }
+                
+                // ✅ AJUSTAR CÁMARA DESPUÉS DE CADA ACTUALIZACIÓN
+                adjustCameraAfterUpdate();
             }
 
             function initializeCharts() {
@@ -1036,6 +1163,18 @@ export const ChartJSFinancialChart: React.FC<ChartJSFinancialChartProps> = ({
                             break;
                         case 'RESET_ZOOM':
                             resetZoom();
+                            break;
+                        case 'RESET_CAMERA':
+                            resetCamera();
+                            break;
+                        case 'LOCK_CAMERA':
+                            lockCamera();
+                            break;
+                        case 'SET_CAMERA_TO_LATEST':
+                            setCameraToLatest();
+                            break;
+                        case 'ADJUST_CAMERA_AFTER_UPDATE':
+                            adjustCameraAfterUpdate();
                             break;
                         case 'AUTO_FIT':
                             autoFitChart();
@@ -1125,6 +1264,15 @@ export const ChartJSFinancialChart: React.FC<ChartJSFinancialChartProps> = ({
           // Estos eventos se manejan internamente en el WebView
           console.log(`📊 Chart action: ${message.type}`, message);
           break;
+        case 'CAMERA_RESET':
+          console.log('📷 Camera reset to latest');
+          break;
+        case 'CAMERA_LOCKED':
+          console.log('📷 Camera locked at position:', message);
+          break;
+        case 'CAMERA_FOLLOWING_LATEST':
+          console.log('📷 Camera following latest candles');
+          break;
       }
     } catch (error) {
       console.error('Error parsing WebView message:', error);
@@ -1156,6 +1304,15 @@ export const ChartJSFinancialChart: React.FC<ChartJSFinancialChartProps> = ({
     },
     toggleVolume: () => {
       webViewRef.current?.postMessage(JSON.stringify({ type: 'TOGGLE_VOLUME' }));
+    },
+    resetCamera: () => {
+      webViewRef.current?.postMessage(JSON.stringify({ type: 'RESET_CAMERA' }));
+    },
+    lockCamera: () => {
+      webViewRef.current?.postMessage(JSON.stringify({ type: 'LOCK_CAMERA' }));
+    },
+    adjustCameraAfterUpdate: () => {
+      webViewRef.current?.postMessage(JSON.stringify({ type: 'ADJUST_CAMERA_AFTER_UPDATE' }));
     },
   }), []);
 

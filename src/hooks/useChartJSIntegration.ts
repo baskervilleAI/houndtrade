@@ -55,6 +55,12 @@ export const useChartJSIntegration = ({
         case 'RESET_ZOOM':
           cameraControls.resetZoom();
           break;
+        case 'RESET_CAMERA':
+          cameraControls.resetCameraToLatest();
+          break;
+        case 'LOCK_CAMERA':
+          cameraControls.lockCameraPosition();
+          break;
         case 'PAN_LEFT':
           cameraControls.panLeft();
           break;
@@ -70,6 +76,11 @@ export const useChartJSIntegration = ({
         case 'SET_ZOOM':
           if (params?.zoom) {
             cameraControls.setZoom(params.zoom);
+          }
+          break;
+        case 'SET_MAX_CANDLES':
+          if (params?.count) {
+            cameraControls.setMaxVisibleCandlesCount(params.count);
           }
           break;
       }
@@ -141,12 +152,16 @@ export const useChartJSWebView = (candleCount: number) => {
     zoomIn: () => sendAction('ZOOM_IN'),
     zoomOut: () => sendAction('ZOOM_OUT'),
     resetZoom: () => sendAction('RESET_ZOOM'),
+    resetCamera: () => sendAction('RESET_CAMERA'),
+    lockCamera: () => sendAction('LOCK_CAMERA'),
     panLeft: () => sendAction('PAN_LEFT'),
     panRight: () => sendAction('PAN_RIGHT'),
     goToLatest: () => sendAction('GO_TO_LATEST'),
     autoFit: () => sendAction('AUTO_FIT'),
     toggleVolume: () => sendAction('TOGGLE_VOLUME'),
     setZoom: (zoom: number) => sendAction('SET_ZOOM', { zoom }),
+    setMaxCandles: (count: number) => sendAction('SET_MAX_CANDLES', { count }),
+    adjustCameraAfterUpdate: () => sendAction('ADJUST_CAMERA_AFTER_UPDATE'),
   };
 
   return {
@@ -205,6 +220,20 @@ export const useChartJSDirect = (candleCount: number) => {
             chartRef.current.zoom(params.zoom);
           }
           break;
+        case 'RESET_CAMERA':
+          // Reset camera to show latest data
+          if (chartRef.current.resetZoom) {
+            chartRef.current.resetZoom();
+          }
+          break;
+        case 'LOCK_CAMERA':
+          // For direct Chart.js, we can store the current view state
+          console.log('🔒 Camera locked at current position');
+          break;
+        case 'SET_MAX_CANDLES':
+          // This would need to be handled at the data level
+          console.log('📊 Max candles set to:', params?.count);
+          break;
         // Agregar más acciones según sea necesario
       }
       console.log(`✅ Acción ejecutada: ${action}`);
@@ -222,7 +251,10 @@ export const useChartJSDirect = (candleCount: number) => {
     zoomIn: () => executeAction('ZOOM_IN'),
     zoomOut: () => executeAction('ZOOM_OUT'),
     resetZoom: () => executeAction('RESET_ZOOM'),
+    resetCamera: () => executeAction('RESET_CAMERA'),
+    lockCamera: () => executeAction('LOCK_CAMERA'),
     setZoom: (zoom: number) => executeAction('SET_ZOOM', { zoom }),
+    setMaxCandles: (count: number) => executeAction('SET_MAX_CANDLES', { count }),
   };
 
   return {
