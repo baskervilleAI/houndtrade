@@ -12,10 +12,8 @@ import { useAuth, useTrading, useMarket } from '../../context/AppContext';
 import { useMarketData } from '../../hooks/useMarketData';
 import { formatPrice, formatPercentage, formatCurrency } from '../../utils/formatters';
 import AdvancedCandlestickChart from '../../components/chart/AdvancedCandlestickChart';
-import { OrderForm } from '../../components/trading/OrderForm';
-import { PositionsList } from '../../components/trading/PositionsList';
+import MinimalistChart from '../../components/chart/MinimalistChart';
 import { MarketData } from '../../components/trading/MarketData';
-import { StreamingDebugPanel } from '../../components/debug/StreamingDebugPanel';
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
 
@@ -25,7 +23,6 @@ const isMobile = screenWidth < 768;
 const isSmallMobile = screenWidth < 400;
 
 export const TradingScreen: React.FC = () => {
-  const [selectedTab, setSelectedTab] = useState<'chart' | 'positions' | 'orders'>('chart');
   const { user, logout } = useAuth();
   const { balance, equity, totalPnl, pnlPercentage } = useTrading();
   const { selectedPair, tickers } = useMarket();
@@ -90,71 +87,16 @@ export const TradingScreen: React.FC = () => {
       {/* Market Data */}
       <MarketData />
 
-      {/* Tab Navigation */}
-      <View style={styles.tabContainer}>
-        <TouchableOpacity
-          style={[styles.tab, selectedTab === 'chart' && styles.activeTab]}
-          onPress={() => setSelectedTab('chart')}
-        >
-          <Text style={[styles.tabText, selectedTab === 'chart' && styles.activeTabText]}>
-            Gráfico
-          </Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.tab, selectedTab === 'positions' && styles.activeTab]}
-          onPress={() => setSelectedTab('positions')}
-        >
-          <Text style={[styles.tabText, selectedTab === 'positions' && styles.activeTabText]}>
-            Posiciones
-          </Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.tab, selectedTab === 'orders' && styles.activeTab]}
-          onPress={() => setSelectedTab('orders')}
-        >
-          <Text style={[styles.tabText, selectedTab === 'orders' && styles.activeTabText]}>
-            Órdenes
-          </Text>
-        </TouchableOpacity>
-      </View>
-
-      {/* Content */}
+      {/* Maximized Chart Content */}
       <View style={styles.content}>
-        {selectedTab === 'chart' && (
-          <View style={styles.chartContainer}>
-            {isTablet ? (
-              // Tablet layout: side by side
-              <View style={styles.tabletLayout}>
-                <View style={styles.tabletChartSection}>
-                  <AdvancedCandlestickChart height={400} width={600} symbol={selectedPair} />
-                </View>
-                <View style={styles.tabletOrderSection}>
-                  <OrderForm />
-                </View>
-              </View>
-            ) : (
-              // Mobile layout: stacked
-              <View style={styles.mobileLayout}>
-                <View style={styles.mobileChartSection}>
-                  <AdvancedCandlestickChart height={280} width={screenWidth - 20} symbol={selectedPair} />
-                </View>
-                <View style={styles.mobileOrderSection}>
-                  <OrderForm />
-                </View>
-              </View>
-            )}
-          </View>
-        )}
-        {selectedTab === 'positions' && <PositionsList />}
-        {selectedTab === 'orders' && (
-          <View style={styles.ordersContainer}>
-            <Text style={styles.comingSoon}>Historial de órdenes próximamente</Text>
-          </View>
-        )}
+        <View style={styles.chartContainer}>
+          <MinimalistChart 
+            height={screenHeight - 220} 
+            width={screenWidth - 20} 
+            symbol={selectedPair} 
+          />
+        </View>
       </View>
-
-      {/* Debug Panel - Solo en desarrollo */}
-      {__DEV__ && !isSmallMobile && <StreamingDebugPanel />}
     </View>
   );
 };
@@ -251,69 +193,10 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     textAlign: 'center',
   },
-  tabContainer: {
-    flexDirection: 'row',
-    borderBottomWidth: 1,
-    borderBottomColor: '#333333',
-    minHeight: isSmallMobile ? 40 : 48,
-  },
-  tab: {
-    flex: 1,
-    paddingVertical: isSmallMobile ? 8 : 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  activeTab: {
-    borderBottomWidth: 2,
-    borderBottomColor: '#00ff88',
-  },
-  tabText: {
-    fontSize: isSmallMobile ? 12 : 14,
-    color: '#888888',
-    fontWeight: '500',
-  },
-  activeTabText: {
-    color: '#00ff88',
-  },
   content: {
     flex: 1,
   },
   chartContainer: {
     flex: 1,
-  },
-  // Tablet layouts
-  tabletLayout: {
-    flex: 1,
-    flexDirection: 'row',
-  },
-  tabletChartSection: {
-    flex: 0.7,
-    paddingRight: 8,
-  },
-  tabletOrderSection: {
-    flex: 0.3,
-    paddingLeft: 8,
-    minWidth: 300,
-  },
-  // Mobile layouts
-  mobileLayout: {
-    flex: 1,
-  },
-  mobileChartSection: {
-    flex: 0.65,
-    minHeight: screenHeight * 0.4,
-  },
-  mobileOrderSection: {
-    flex: 0.35,
-    minHeight: 200,
-  },
-  ordersContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  comingSoon: {
-    fontSize: 16,
-    color: '#888888',
   },
 });
