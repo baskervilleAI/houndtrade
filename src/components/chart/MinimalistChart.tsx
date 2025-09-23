@@ -27,6 +27,7 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const chartRef = useRef<any>(null);
+  const initialViewportSet = useRef<boolean>(false); // Flag para rastrear si ya se configuró el viewport inicial
   const [status, setStatus] = useState<string>('Inicializando...');
   const [currentInterval, setCurrentInterval] = useState<TimeInterval>('1m');
   const [candleData, setCandleData] = useState<CandleData[]>([]);
@@ -415,35 +416,6 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
       });
 
       setStatus(`✅ Gráfico listo (${candleData.length} velas)`);
-      
-      // Configurar cámara inicial o aplicar posición del usuario
-      setTimeout(() => {
-        if (chartRef.current && candleData.length > 0) {
-          const chart = chartRef.current;
-          
-          // Si el usuario tiene una posición guardada, usarla
-          if (simpleCamera.isLocked()) {
-            const viewport = simpleCamera.getRecommendedViewport(candleData.length, candleData);
-            if (viewport.min && viewport.max && chart.scales.x) {
-              chart.scales.x.min = viewport.min;
-              chart.scales.x.max = viewport.max;
-              chart.update('none');
-              console.log('📷 [MinimalistChart] Aplicando posición guardada del usuario');
-            }
-          } else if (candleData.length > 100) {
-            // Solo configurar cámara inicial si el usuario NO ha interactuado
-            const totalCandles = candleData.length;
-            const visibleStart = Math.max(0, totalCandles - 100);
-            
-            if (chart.scales.x) {
-              chart.scales.x.min = candleData[visibleStart]?.x;
-              chart.scales.x.max = candleData[totalCandles - 1]?.x;
-              chart.update('none');
-              console.log('📷 [MinimalistChart] Cámara inicial configurada para mostrar las últimas 100 velas');
-            }
-          }
-        }
-      }, 100);
 
     } catch (error: any) {
       setStatus(`Error: ${error.message}`);
@@ -534,11 +506,7 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
         });
         console.log(`[Chart] Added new candle: $${newCandle.c.toFixed(4)} at ${new Date(newCandle.x).toLocaleTimeString()}, total: ${dataset.data.length} (${isFinal ? 'final' : 'live'})`);
 
-                // Mantener solo las últimas velas según configuración de cámara
-        const maxCandles = simpleCamera.isLocked() ? 200 : 100;
-        if (dataset.data.length > maxCandles) {
-          dataset.data.splice(0, dataset.data.length - maxCandles);
-        }
+        // NO eliminar velas antiguas - mantener todo el historial para que el usuario pueda navegar
       }
 
       // Actualizar indicadores técnicos si están activos
@@ -547,6 +515,7 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
       }
 
       // Usar 'none' para evitar animaciones en actualizaciones frecuentes
+      // Chart.js mantendrá automáticamente el viewport del usuario
       chart.update('none');
     }
   }, [activeIndicators.size, currentInterval]); // Solo las dependencias que realmente importan
@@ -639,14 +608,13 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
         
         updateChart(update.candle, update.isFinal);
         
-        // Solo notificar cambios si no está bloqueada la cámara
-        if (!simpleCamera.isLocked()) {
-          console.log(`[MinimalistChart] Nueva vela - cámara desbloqueada, permitiendo auto-seguimiento`);
+        // NO desbloquear la cámara después de nuevas velas
+        // La cámara debe quedarse EXACTAMENTE donde el usuario la dejó
+        if (simpleCamera.isLocked()) {
+          console.log(`[MinimalistChart] Nueva vela - cámara BLOQUEADA por usuario, manteniendo posición fija`);
         } else {
-          console.log(`[MinimalistChart] Nueva vela - cámara BLOQUEADA, manteniendo posición`);
+          console.log(`[MinimalistChart] Nueva vela - modo automático (solo al inicio)`);
         }
-        
-        // Actualizar el estado local de manera sincronizada
         setCandleData(prev => {
           const newData = [...prev];
           
@@ -770,43 +738,61 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
     }
   }, [candleData, startStreaming, isStreaming]);
 
-  // Gestionar configuración de cámara simple - aplicar viewport recomendado
+  // Configuración inicial del viewport SOLO al cargar por primera vez (reload)
+  useEffect(() => {
+    if (!chartRef.current || candleData.length === 0 || initialViewportSet.current) return;
+    
+    const chart = chartRef.current;
+    
+    // Verificar si hay configuración guardada del usuario
+    if (simpleCamera.isLocked()) {
+      const userState = simpleCamera.state.chartJsState;
+      if (chart.scales.x && userState.min !== null && userState.max !== null) {
+        chart.scales.x.min = userState.min;
+        chart.scales.x.max = userState.max;
+        chart.update('none');
+        initialViewportSet.current = true;
+        console.log('📷 [MinimalistChart] Configuración del usuario cargada desde localStorage:', userState);
+        return;
+      }
+    }
+    
+    // Solo si NO hay configuración del usuario, aplicar vista inicial de últimas 100 velas
+    const viewport = simpleCamera.getRecommendedViewport(candleData.length, candleData);
+    
+    if (chart.scales.x && viewport.min && viewport.max) {
+      chart.scales.x.min = viewport.min;
+      chart.scales.x.max = viewport.max;
+      chart.update('none');
+      initialViewportSet.current = true;
+      console.log(`📷 [MinimalistChart] Vista inicial aplicada (solo sin configuración del usuario):`, { min: viewport.min, max: viewport.max });
+    }
+  }, [candleData.length]); // Solo cuando se cargan los datos inicialmente
+
+  // Gestionar configuración de cámara - SOLO aplicar viewport del usuario
   useEffect(() => {
     if (!chartRef.current || candleData.length === 0) return;
     
     const chart = chartRef.current;
-    const viewport = simpleCamera.getRecommendedViewport(candleData.length, candleData);
     
-    // Solo aplicar si no está bloqueada la cámara (usuario no interactuando)
-    if (!simpleCamera.isLocked()) {
-      if (chart.scales.x && viewport.min && viewport.max) {
-        const currentMin = chart.scales.x.min || 0;
-        const currentMax = chart.scales.x.max || 0;
-        
-        // Solo actualizar si hay cambio significativo (más de 1 minuto)
-        if (Math.abs(currentMin - viewport.min) > 60000 || Math.abs(currentMax - viewport.max) > 60000) {
-          chart.scales.x.min = viewport.min;
-          chart.scales.x.max = viewport.max;
-          chart.update('none');
-          console.log(`📷 [MinimalistChart] Auto-ajuste aplicado:`, { min: viewport.min, max: viewport.max });
-        }
-      }
-    } else {
-      // Si está bloqueada, usar configuración del usuario
+    // SOLO aplicar si el usuario ha interactuado y tenemos configuración guardada
+    if (simpleCamera.isLocked()) {
       const userState = simpleCamera.state.chartJsState;
       if (chart.scales.x && userState.min !== null && userState.max !== null) {
         const currentMin = chart.scales.x.min || 0;
         const currentMax = chart.scales.x.max || 0;
         
+        // Solo actualizar si hay diferencia significativa para evitar loops
         if (Math.abs(currentMin - userState.min) > 1000 || Math.abs(currentMax - userState.max) > 1000) {
           chart.scales.x.min = userState.min;
           chart.scales.x.max = userState.max;
           chart.update('none');
-          console.log('📷 [MinimalistChart] Configuración de usuario aplicada:', userState);
+          console.log('📷 [MinimalistChart] Aplicando configuración del usuario:', userState);
         }
       }
     }
-  }, [candleData.length, simpleCamera.state.isUserInteracting]); // Solo cuando cambia número de velas o estado de interacción
+    // NO hacer nada si el usuario no ha interactuado - dejar que Chart.js mantenga su vista actual
+  }, [simpleCamera.state.isUserInteracting, simpleCamera.state.lastUserAction, simpleCamera.state.chartJsState.min, simpleCamera.state.chartJsState.max]); // SOLO depender del estado de usuario
 
   if (Platform.OS !== 'web') {
     return (
@@ -882,7 +868,11 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
                   styles.indicatorButton, 
                   simpleCamera.isLocked() ? styles.cameraManualButton : styles.cameraResetButton
                 ]}
-                onPress={() => simpleCamera.resetToLatest()}
+                onPress={() => {
+                  initialViewportSet.current = false; // Reset flag para permitir nuevo viewport inicial
+                  simpleCamera.resetToLatest();
+                  // El gráfico se reiniciará automáticamente con el próximo useEffect
+                }}
               >
                 <Text style={styles.indicatorButtonText}>
                   {simpleCamera.isLocked() ? '📷 Reset' : '📷 100'}

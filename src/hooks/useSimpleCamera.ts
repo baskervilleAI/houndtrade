@@ -1,5 +1,33 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 
+// Clave para localStorage
+const CAMERA_STORAGE_KEY = 'houndtrade_camera_state';
+
+// Función para cargar estado desde localStorage
+const loadCameraState = () => {
+  try {
+    const saved = localStorage.getItem(CAMERA_STORAGE_KEY);
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      console.log('📷 [SimpleCamera] Estado cargado desde localStorage:', parsed);
+      return parsed;
+    }
+  } catch (error) {
+    console.warn('📷 [SimpleCamera] Error cargando estado desde localStorage:', error);
+  }
+  return null;
+};
+
+// Función para guardar estado en localStorage
+const saveCameraState = (state: any) => {
+  try {
+    localStorage.setItem(CAMERA_STORAGE_KEY, JSON.stringify(state));
+    console.log('📷 [SimpleCamera] Estado guardado en localStorage:', state);
+  } catch (error) {
+    console.warn('📷 [SimpleCamera] Error guardando estado en localStorage:', error);
+  }
+};
+
 export interface SimpleCameraState {
   // Configuración de la cámara
   visibleCandles: number;
@@ -57,17 +85,20 @@ export const useSimpleCamera = ({
   onStateChange
 }: UseSimpleCameraProps = {}): SimpleCameraControls => {
   
-  // Estado principal
+  // Cargar estado inicial desde localStorage
+  const savedState = loadCameraState();
+  
+  // Estado principal - inicializar con datos guardados si existen
   const [visibleCandles, setVisibleCandles] = useState(defaultVisibleCandles);
   const [startIndex, setStartIndex] = useState(0);
   const [endIndex, setEndIndex] = useState(defaultVisibleCandles);
-  const [isUserInteracting, setIsUserInteracting] = useState(false);
-  const [lastUserAction, setLastUserAction] = useState<number | null>(null);
+  const [isUserInteracting, setIsUserInteracting] = useState(savedState?.isUserInteracting || false);
+  const [lastUserAction, setLastUserAction] = useState<number | null>(savedState?.lastUserAction || null);
   const [chartJsState, setChartJsState] = useState({
-    min: null as number | null,
-    max: null as number | null,
-    centerX: null as number | null,
-    zoomLevel: null as number | null,
+    min: savedState?.chartJsState?.min || null,
+    max: savedState?.chartJsState?.max || null,
+    centerX: savedState?.chartJsState?.centerX || null,
+    zoomLevel: savedState?.chartJsState?.zoomLevel || null,
   });
   
   // Referencias para timers
@@ -84,10 +115,22 @@ export const useSimpleCamera = ({
     defaultVisibleCandles,
   };
   
-  // Notificar cambios de estado
+  // Notificar cambios de estado y guardar en localStorage
   useEffect(() => {
     onStateChange?.(state);
-  }, [isUserInteracting, lastUserAction, visibleCandles, startIndex, endIndex]);
+    
+    // Guardar en localStorage solo si el usuario ha interactuado
+    if (lastUserAction !== null) {
+      saveCameraState({
+        isUserInteracting,
+        lastUserAction,
+        chartJsState,
+        visibleCandles,
+        startIndex,
+        endIndex
+      });
+    }
+  }, [isUserInteracting, lastUserAction, visibleCandles, startIndex, endIndex, chartJsState.min, chartJsState.max]);
   
   // Auto-reset timer (DESHABILITADO - cámara debe ser independiente del streaming)
   const startAutoResetTimer = useCallback(() => {
@@ -188,6 +231,14 @@ export const useSimpleCamera = ({
     setVisibleCandles(defaultVisibleCandles);
     setStartIndex(0);
     setEndIndex(defaultVisibleCandles);
+    
+    // Limpiar localStorage
+    try {
+      localStorage.removeItem(CAMERA_STORAGE_KEY);
+      console.log('📷 [SimpleCamera] Estado limpiado de localStorage');
+    } catch (error) {
+      console.warn('📷 [SimpleCamera] Error limpiando localStorage:', error);
+    }
   }, [defaultVisibleCandles]);
   
   // Bloquear posición actual
@@ -199,61 +250,63 @@ export const useSimpleCamera = ({
   
   // Verificar si está bloqueado
   const isLocked = useCallback(() => {
-    return lastUserAction !== null; // Bloqueado si el usuario ha interactuado alguna vez
-  }, [lastUserAction]);
+    // Bloqueado si el usuario ha interactuado alguna vez Y tiene configuración guardada
+    return lastUserAction !== null && (
+      chartJsState.min !== null || 
+      chartJsState.max !== null || 
+      isUserInteracting
+    );
+  }, [lastUserAction, chartJsState.min, chartJsState.max, isUserInteracting]);
   
   // Obtener viewport recomendado
   const getRecommendedViewport = useCallback((totalCandles: number, candleData: any[]) => {
-    // Si el usuario ha interactuado alguna vez, usar su configuración guardada
-    if (lastUserAction) {
-      // Verificar si tenemos configuración guardada válida
-      if (chartJsState.min !== null && chartJsState.max !== null) {
-        console.log('📷 [SimpleCamera] Usuario ha interactuado - usando configuración guardada');
-        return {
-          startIndex: 0, // Chart.js maneja esto internamente
-          endIndex: totalCandles,
-          min: chartJsState.min,
-          max: chartJsState.max,
-        };
-      } else {
-        console.log('📷 [SimpleCamera] Usuario ha interactuado pero configuración perdida - manteniendo posición fija');
-        // Si el usuario interactuó pero perdimos la configuración, mantener la vista actual
-        // En lugar de resetear a las últimas 100
-        return {
-          startIndex: 0,
-          endIndex: totalCandles,
-          min: null, // Chart.js mantendrá la vista actual
-          max: null,
-        };
-      }
+    // SIEMPRE priorizar configuración del usuario si existe
+    if (lastUserAction !== null && chartJsState.min !== null && chartJsState.max !== null) {
+      console.log('📷 [SimpleCamera] Usando configuración del usuario (prioritaria):', chartJsState);
+      return {
+        startIndex: 0,
+        endIndex: totalCandles,
+        min: chartJsState.min,
+        max: chartJsState.max,
+      };
     }
     
-    // Modo automático: mostrar las últimas N velas
-    const targetVisible = Math.min(visibleCandles, totalCandles);
-    const calculatedStartIndex = Math.max(0, totalCandles - targetVisible);
-    const calculatedEndIndex = totalCandles;
-    
-    // Si tenemos datos de velas, calcular min/max basado en timestamps
-    let min: number | null = null;
-    let max: number | null = null;
-    
-    if (candleData && candleData.length > 0) {
-      const startCandle = candleData[calculatedStartIndex];
-      const endCandle = candleData[calculatedEndIndex - 1];
+    // Solo configurar vista inicial automática si NO hay configuración del usuario
+    if (lastUserAction === null) {
+      const targetVisible = Math.min(visibleCandles, totalCandles);
+      const calculatedStartIndex = Math.max(0, totalCandles - targetVisible);
+      const calculatedEndIndex = totalCandles;
       
-      if (startCandle && endCandle) {
-        min = startCandle.x || startCandle.time;
-        max = endCandle.x || endCandle.time;
+      let min: number | null = null;
+      let max: number | null = null;
+      
+      if (candleData && candleData.length > 0) {
+        const startCandle = candleData[calculatedStartIndex];
+        const endCandle = candleData[calculatedEndIndex - 1];
+        
+        if (startCandle && endCandle) {
+          min = startCandle.x || startCandle.time;
+          max = endCandle.x || endCandle.time;
+        }
       }
+      
+      console.log('📷 [SimpleCamera] Configuración inicial automática (solo sin usuario):', { min, max, targetVisible });
+      
+      return {
+        startIndex: calculatedStartIndex,
+        endIndex: calculatedEndIndex,
+        min,
+        max,
+      };
     }
     
-    console.log('📷 [SimpleCamera] Modo automático - últimas', targetVisible, 'velas de', totalCandles);
-    
+    // Si el usuario interactuó pero se perdió la configuración, NO cambiar nada
+    console.log('📷 [SimpleCamera] Usuario interactuó pero configuración perdida - manteniendo vista actual');
     return {
-      startIndex: calculatedStartIndex,
-      endIndex: calculatedEndIndex,
-      min,
-      max,
+      startIndex: 0,
+      endIndex: totalCandles,
+      min: null,
+      max: null,
     };
   }, [lastUserAction, chartJsState, visibleCandles]);
   
