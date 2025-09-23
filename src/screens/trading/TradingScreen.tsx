@@ -11,7 +11,6 @@ import {
 import { useAuth, useTrading, useMarket } from '../../context/AppContext';
 import { useMarketData } from '../../hooks/useMarketData';
 import { formatPrice, formatPercentage, formatCurrency } from '../../utils/formatters';
-import AdvancedCandlestickChart from '../../components/chart/AdvancedCandlestickChart';
 import MinimalistChart from '../../components/chart/MinimalistChart';
 import { MarketData } from '../../components/trading/MarketData';
 
