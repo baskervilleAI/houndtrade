@@ -138,8 +138,16 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
         timestamp: new Date().toLocaleTimeString()
       });
       
+      // Log del estado de la cámara antes de la interacción
+      const preInteractionState = simpleCamera.getCurrentState();
+      console.log(`🔍 [ZOOM] Estado PRE-interacción: {mode: ${preInteractionState.mode}, isLocked: ${preInteractionState.isLocked}}`);
+      
       // Notificar inicio de interacción inmediatamente
       startUserInteraction();
+      
+      // Log del estado después de notificar inicio
+      const postStartState = simpleCamera.getCurrentState();
+      console.log(`🔍 [ZOOM] Estado POST-startInteraction: {mode: ${postStartState.mode}, isLocked: ${postStartState.isLocked}}`);
       
       // Limpiar timeout anterior si existe
       if (zoomTimeoutRef.current) {
@@ -157,10 +165,24 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
           });
           
           // NUEVO: Usar sistema de persistencia mejorado
+          console.log('🔍 [ZOOM] Llamando simpleCamera.onUserZoom con estado final...');
           simpleCamera.onUserZoom(finalScale.min, finalScale.max, (finalScale.min + finalScale.max) / 2);
+          
+          console.log('🔍 [ZOOM] Llamando simpleCamera.lockCamera...');
           simpleCamera.lockCamera(); // Bloquear la cámara en la nueva posición
+          
+          // Log del estado después del zoom completo
+          const postZoomState = simpleCamera.getCurrentState();
+          console.log(`🔍 [ZOOM] Estado POST-zoom completo: {mode: ${postZoomState.mode}, isLocked: ${postZoomState.isLocked}, viewport: {min: ${postZoomState.chartJsState.min}, max: ${postZoomState.chartJsState.max}}}`);
         }
+        
+        console.log('🔍 [ZOOM] Llamando endUserInteraction...');
         endUserInteraction();
+        
+        // Log del estado después de end interaction
+        const postEndState = simpleCamera.getCurrentState();
+        console.log(`🔍 [ZOOM] Estado POST-endUserInteraction: {mode: ${postEndState.mode}, isLocked: ${postEndState.isLocked}}`);
+        
         
         // Liberar bloqueos después de completar
         isProcessingZoom.current = false;
@@ -630,21 +652,18 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
 
     const chart = chartRef.current;
     
-    // Variables para control inteligente de persistencia
-    const isActivelyInteracting = simpleCamera.isActivelyInteracting();
-    let shouldSnapshot = false;
-    
     // ============================================
-    // PATRÓN OFICIAL CHART.JS: SNAPSHOT/RESTORE
+    // GOBERNANZA TIDAL - ORDEN FIJO SIN setState
     // ============================================
     
-    // 1) SNAPSHOT: Capturar viewport actual del usuario si la cámara está bloqueada
-    if (simpleCamera.shouldPersistViewport()) {
-      console.log('� [updateChart] Guardando viewport del usuario...');
-      persistentViewport.snapshot();
-    }
-
-    // 2) MUTACIÓN IN-SITU: Mutar datos existentes en lugar de recrear array
+    // A) SNAPSHOT: Capturar viewport ANTES de tocar data - usar estado de cámara (NO chart scales)
+    const snap = simpleCamera.getViewportFromCamera() 
+                ?? persistentViewport.getCurrentViewport() 
+                ?? { min: chart?.scales?.x?.min ?? 0, max: chart?.scales?.x?.max ?? 0 };
+    
+    console.log('📸 [updateChart] Snapshot PRE-mutación:', snap);
+    
+    // B) MUTAR DATA EN SITIO (push/shift/assign), sin recrear arrays/objects
     const dataset = chart.data.datasets[0];
     if (dataset && dataset.data) {
       // Buscar vela existente usando ventana de tiempo
@@ -712,24 +731,23 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
       }
     }
 
-    // 3) UPDATE: Actualizar Chart.js sin animación
+    // C) COMPUTAR "viewport objetivo" según la marea tidal (SIN setState)
+    const lastCandleTime = newCandle.x;
+    const desiredViewport = simpleCamera.computeTidalViewport({
+      snap,
+      lastCandleTime
+    });
+    
+    console.log('🌊 [updateChart] Viewport objetivo calculado:', desiredViewport);
+
+    // D) APLICAR viewport objetivo (no preguntar al chart) - SIN setState
+    simpleCamera.applyViewportToChart(chart, desiredViewport);
+
+    // E) chart.update('none') - sin animación para evitar saltos
     console.log('⚙️ [updateChart] Ejecutando chart.update("none")...');
     chart.update('none');
 
-    // 4) RESTORE INTELIGENTE: Solo restaurar si habíamos hecho snapshot Y no hay interacción
-    if (shouldSnapshot && persistentViewport.hasSnapshot() && !simpleCamera.isActivelyInteracting()) {
-      console.log('🔄 [updateChart] Restaurando viewport del usuario...');
-      persistentViewport.restore('none');
-    } else if (simpleCamera.isActivelyInteracting()) {
-      console.log('🎯 [updateChart] Manteniendo interacción fluida - no restaurando viewport');
-      // Actualizar el estado de la cámara con el viewport actual para futuras restauraciones
-      const currentViewport = persistentViewport.getCurrentViewport();
-      if (currentViewport) {
-        simpleCamera.updateFromChartViewport(currentViewport.min, currentViewport.max);
-      }
-    }
-
-    console.log('✅ [updateChart] Actualización completada');
+    console.log('✅ [updateChart] Actualización completada con gobernanza tidal - SIN setState');
   }, [currentInterval, simpleCamera, persistentViewport, lastUpdateTime, updateThrottleMs]);
 
   const changeTimeInterval = useCallback(async (newInterval: TimeInterval) => {
@@ -818,6 +836,7 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
   // El hook se ejecutaba en cada cambio de candleData creando interferencias
 
   useEffect(() => {
+    // Handler estable que usa referencias para evitar dependencias circulares
     const handleCandleUpdate = (update: StreamUpdate) => {
       console.log('📈 [handleCandleUpdate] NUEVA ACTUALIZACIÓN RECIBIDA:', {
         symbol: update.symbol,
@@ -832,27 +851,8 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
         console.log(`[MinimalistChart] Candle update: ${update.symbol} ${update.interval} final:${update.isFinal} price:${update.candle.c}`);
         
         console.log('🎯 [handleCandleUpdate] Llamando updateChart...');
+        // CRÍTICO: updateChart NO debe hacer setState ni lockCamera durante ticks
         updateChart(update.candle, update.isFinal);
-        
-        // Mostrar estado actual de la cámara para debug
-        const currentCameraState = simpleCamera.getCurrentState();
-        const shouldAutoAdjust = simpleCamera.shouldAutoAdjust();
-        
-        if (shouldAutoAdjust) {
-          console.log(`[MinimalistChart] Nueva vela - MODO AUTO-AJUSTE activo`);
-        } else if (currentCameraState.isLocked) {
-          console.log(`[MinimalistChart] Nueva vela - cámara BLOQUEADA por usuario, manteniendo posición fija`);
-          console.log(`[MinimalistChart] Estado de cámara:`, {
-            isLocked: currentCameraState.isLocked,
-            lastUserAction: currentCameraState.lastUserAction ? new Date(currentCameraState.lastUserAction).toLocaleTimeString() : null,
-            viewport: {
-              min: currentCameraState.chartJsState.min,
-              max: currentCameraState.chartJsState.max
-            }
-          });
-        } else {
-          console.log(`[MinimalistChart] Nueva vela - estado de cámara indefinido`);
-        }
         
         console.log('📊 [handleCandleUpdate] Actualizando candleData state...');
         setCandleData(prev => {
@@ -935,7 +935,7 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
     return () => {
       liveStreamingService.off('candleUpdate', handleCandleUpdate);
     };
-  }, [currentSymbol, currentInterval]); // Solo dependencias que realmente importan
+  }, [currentSymbol, currentInterval, updateChart]); // Dependencias estables, NO incluir simpleCamera
 
   // Cleanup al desmontar
   useEffect(() => {
