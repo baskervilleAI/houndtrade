@@ -11,12 +11,6 @@ import {
 import { useAuth, useTrading, useMarket } from '../../context/AppContext';
 import { useMarketData } from '../../hooks/useMarketData';
 import { formatPrice, formatPercentage, formatCurrency } from '../../utils/formatters';
-import CandlestickChartFinal from '../../components/chart/CandlestickChart_WebOptimized';
-import DirectCandlestickChart from '../../components/chart/DirectCandlestickChart';
-import SimpleChartTest from '../../components/chart/SimpleChartTest';
-import ChartJSFinancialDirect from '../../components/chart/ChartJSFinancialDirect';
-import CandlestickChartNative from '../../components/chart/CandlestickChartNative';
-import CandlestickChartMain from '../../components/chart/CandlestickChartMain';
 import AdvancedCandlestickChart from '../../components/chart/AdvancedCandlestickChart';
 import { OrderForm } from '../../components/trading/OrderForm';
 import { PositionsList } from '../../components/trading/PositionsList';
@@ -128,13 +122,6 @@ export const TradingScreen: React.FC = () => {
       <View style={styles.content}>
         {selectedTab === 'chart' && (
           <View style={styles.chartContainer}>
-            {/* Componente de prueba que funciona */}
-            {__DEV__ && (
-              <View style={styles.testContainer}>
-                <CandlestickChartNative height={180} width={280} />
-              </View>
-            )}
-            
             {isTablet ? (
               // Tablet layout: side by side
               <View style={styles.tabletLayout}>
@@ -293,17 +280,6 @@ const styles = StyleSheet.create({
   },
   chartContainer: {
     flex: 1,
-  },
-  testContainer: {
-    position: 'absolute',
-    top: 10,
-    right: 10,
-    zIndex: 1000,
-    backgroundColor: 'rgba(0, 0, 0, 0.8)',
-    borderRadius: 8,
-    padding: 4,
-    flexDirection: 'column',
-    gap: 4,
   },
   // Tablet layouts
   tabletLayout: {

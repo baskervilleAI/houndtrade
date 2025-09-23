@@ -267,8 +267,54 @@ export const ChartJSWebDirect: React.FC<ChartJSWebDirectProps> = ({
               case 'RESET_ZOOM':
                 chartRef.current?.resetZoom?.();
                 break;
+              case 'ZOOM_IN':
+                if (chartRef.current) {
+                  const xScale = chartRef.current.scales.x;
+                  const center = (xScale.min + xScale.max) / 2;
+                  const currentRange = xScale.max - xScale.min;
+                  const newRange = currentRange * 0.75;
+                  
+                  chartRef.current.options.scales.x.min = center - newRange / 2;
+                  chartRef.current.options.scales.x.max = center + newRange / 2;
+                  chartRef.current.update('none');
+                }
+                break;
+              case 'ZOOM_OUT':
+                if (chartRef.current) {
+                  const xScale = chartRef.current.scales.x;
+                  const center = (xScale.min + xScale.max) / 2;
+                  const currentRange = xScale.max - xScale.min;
+                  const newRange = currentRange * 1.33;
+                  
+                  chartRef.current.options.scales.x.min = center - newRange / 2;
+                  chartRef.current.options.scales.x.max = center + newRange / 2;
+                  chartRef.current.update('none');
+                }
+                break;
               case 'ZOOM':
                 chartRef.current?.zoom?.(data.factor);
+                break;
+              case 'PAN_LEFT':
+                if (chartRef.current && chartData.candleData.length > 0) {
+                  const xScale = chartRef.current.scales.x;
+                  const currentRange = xScale.max - xScale.min;
+                  const panAmount = currentRange * 0.2;
+                  
+                  chartRef.current.options.scales.x.min = xScale.min - panAmount;
+                  chartRef.current.options.scales.x.max = xScale.max - panAmount;
+                  chartRef.current.update('none');
+                }
+                break;
+              case 'PAN_RIGHT':
+                if (chartRef.current && chartData.candleData.length > 0) {
+                  const xScale = chartRef.current.scales.x;
+                  const currentRange = xScale.max - xScale.min;
+                  const panAmount = currentRange * 0.2;
+                  
+                  chartRef.current.options.scales.x.min = xScale.min + panAmount;
+                  chartRef.current.options.scales.x.max = xScale.max + panAmount;
+                  chartRef.current.update('none');
+                }
                 break;
               case 'GO_TO_LATEST':
                 if (chartRef.current && chartData.candleData.length > 0) {

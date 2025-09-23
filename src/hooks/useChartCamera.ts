@@ -261,3 +261,10 @@ export const useChartCamera = ({
     getVisibleCandleCount,
   };
 };
+
+// Re-export integration hooks
+export { 
+  useChartJSIntegration, 
+  useChartJSWebView, 
+  useChartJSDirect 
+} from './useChartJSIntegration';

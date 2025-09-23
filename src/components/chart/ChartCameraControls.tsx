@@ -18,6 +18,9 @@ interface ChartCameraControlsProps {
   candleCount: number;
   currentTimestamp?: number;
   onGoToDate?: (date: Date) => void;
+  // Nuevas props para integración con Chart.js
+  chartRef?: any;
+  onChartAction?: (action: string, params?: any) => void;
 }
 
 export const ChartCameraControls: React.FC<ChartCameraControlsProps> = ({
@@ -27,6 +30,8 @@ export const ChartCameraControls: React.FC<ChartCameraControlsProps> = ({
   candleCount,
   currentTimestamp,
   onGoToDate,
+  chartRef,
+  onChartAction,
 }) => {
   const [customZoom, setCustomZoom] = React.useState('');
   const [gotoIndex, setGotoIndex] = React.useState('');
@@ -35,13 +40,74 @@ export const ChartCameraControls: React.FC<ChartCameraControlsProps> = ({
   const { camera } = cameraControls;
   const visibleRange = cameraControls.getVisibleRange();
 
+  // Funciones mejoradas que integran con Chart.js
+  const handleZoomIn = () => {
+    if (onChartAction) {
+      onChartAction('ZOOM_IN');
+    } else {
+      cameraControls.zoomIn();
+    }
+  };
+
+  const handleZoomOut = () => {
+    if (onChartAction) {
+      onChartAction('ZOOM_OUT');
+    } else {
+      cameraControls.zoomOut();
+    }
+  };
+
+  const handleResetZoom = () => {
+    if (onChartAction) {
+      onChartAction('RESET_ZOOM');
+    } else {
+      cameraControls.resetZoom();
+    }
+  };
+
+  const handlePanLeft = () => {
+    if (onChartAction) {
+      onChartAction('PAN_LEFT');
+    } else {
+      cameraControls.panLeft();
+    }
+  };
+
+  const handlePanRight = () => {
+    if (onChartAction) {
+      onChartAction('PAN_RIGHT');
+    } else {
+      cameraControls.panRight();
+    }
+  };
+
+  const handleGoToLatest = () => {
+    if (onChartAction) {
+      onChartAction('GO_TO_LATEST');
+    } else {
+      cameraControls.goToEnd();
+    }
+  };
+
+  const handleAutoFit = () => {
+    if (onChartAction) {
+      onChartAction('AUTO_FIT');
+    } else {
+      cameraControls.fitAll();
+    }
+  };
+
   const handleCustomZoom = () => {
     const zoom = parseFloat(customZoom);
     if (isNaN(zoom) || zoom <= 0) {
       Alert.alert('Error', 'Por favor ingresa un valor de zoom válido (mayor a 0)');
       return;
     }
-    cameraControls.setZoom(zoom);
+    if (onChartAction) {
+      onChartAction('SET_ZOOM', { zoom });
+    } else {
+      cameraControls.setZoom(zoom);
+    }
     setCustomZoom('');
   };
 
@@ -118,13 +184,13 @@ export const ChartCameraControls: React.FC<ChartCameraControlsProps> = ({
               <Text style={styles.sectionTitle}>🔍 Control de Zoom</Text>
               
               <View style={styles.buttonRow}>
-                <TouchableOpacity style={styles.actionButton} onPress={cameraControls.zoomOut}>
+                <TouchableOpacity style={styles.actionButton} onPress={handleZoomOut}>
                   <Text style={styles.buttonText}>🔍- Alejar</Text>
                 </TouchableOpacity>
-                <TouchableOpacity style={styles.actionButton} onPress={cameraControls.zoomIn}>
+                <TouchableOpacity style={styles.actionButton} onPress={handleZoomIn}>
                   <Text style={styles.buttonText}>🔍+ Acercar</Text>
                 </TouchableOpacity>
-                <TouchableOpacity style={styles.actionButton} onPress={cameraControls.resetZoom}>
+                <TouchableOpacity style={styles.actionButton} onPress={handleResetZoom}>
                   <Text style={styles.buttonText}>↻ Reset</Text>
                 </TouchableOpacity>
               </View>
@@ -176,13 +242,13 @@ export const ChartCameraControls: React.FC<ChartCameraControlsProps> = ({
                   <Text style={styles.panButtonText}>⬆️</Text>
                 </TouchableOpacity>
                 <View style={styles.panRow}>
-                  <TouchableOpacity style={styles.panButton} onPress={cameraControls.panLeft}>
+                  <TouchableOpacity style={styles.panButton} onPress={handlePanLeft}>
                     <Text style={styles.panButtonText}>⬅️</Text>
                   </TouchableOpacity>
                   <TouchableOpacity style={styles.centerButton} onPress={() => cameraControls.setPan(0.5, 0)}>
                     <Text style={styles.panButtonText}>⭕</Text>
                   </TouchableOpacity>
-                  <TouchableOpacity style={styles.panButton} onPress={cameraControls.panRight}>
+                  <TouchableOpacity style={styles.panButton} onPress={handlePanRight}>
                     <Text style={styles.panButtonText}>➡️</Text>
                   </TouchableOpacity>
                 </View>
@@ -200,7 +266,7 @@ export const ChartCameraControls: React.FC<ChartCameraControlsProps> = ({
                 <TouchableOpacity style={styles.actionButton} onPress={cameraControls.goToStart}>
                   <Text style={styles.buttonText}>⏮️ Inicio</Text>
                 </TouchableOpacity>
-                <TouchableOpacity style={styles.actionButton} onPress={cameraControls.goToEnd}>
+                <TouchableOpacity style={styles.actionButton} onPress={handleGoToLatest}>
                   <Text style={styles.buttonText}>⏭️ Final</Text>
                 </TouchableOpacity>
               </View>
@@ -242,7 +308,7 @@ export const ChartCameraControls: React.FC<ChartCameraControlsProps> = ({
               <Text style={styles.sectionTitle}>📐 Ajuste Automático</Text>
               
               <View style={styles.buttonRow}>
-                <TouchableOpacity style={styles.actionButton} onPress={cameraControls.fitAll}>
+                <TouchableOpacity style={styles.actionButton} onPress={handleAutoFit}>
                   <Text style={styles.buttonText}>📊 Ajustar Todo</Text>
                 </TouchableOpacity>
                 <TouchableOpacity style={styles.actionButton} onPress={cameraControls.fitVisible}>
@@ -259,8 +325,13 @@ export const ChartCameraControls: React.FC<ChartCameraControlsProps> = ({
                 <TouchableOpacity 
                   style={styles.quickButton} 
                   onPress={() => {
-                    cameraControls.setZoom(1);
-                    cameraControls.goToEnd();
+                    if (onChartAction) {
+                      onChartAction('AUTO_FIT');
+                      onChartAction('GO_TO_LATEST');
+                    } else {
+                      cameraControls.setZoom(1);
+                      cameraControls.goToEnd();
+                    }
                   }}
                 >
                   <Text style={styles.quickButtonText}>🏠 Vista Principal</Text>
@@ -269,8 +340,13 @@ export const ChartCameraControls: React.FC<ChartCameraControlsProps> = ({
                 <TouchableOpacity 
                   style={styles.quickButton} 
                   onPress={() => {
-                    cameraControls.setZoom(5);
-                    cameraControls.goToEnd();
+                    if (onChartAction) {
+                      onChartAction('SET_ZOOM', { zoom: 5 });
+                      onChartAction('GO_TO_LATEST');
+                    } else {
+                      cameraControls.setZoom(5);
+                      cameraControls.goToEnd();
+                    }
                   }}
                 >
                   <Text style={styles.quickButtonText}>🔬 Vista Detalle</Text>
@@ -279,8 +355,12 @@ export const ChartCameraControls: React.FC<ChartCameraControlsProps> = ({
                 <TouchableOpacity 
                   style={styles.quickButton} 
                   onPress={() => {
-                    cameraControls.setZoom(0.5);
-                    cameraControls.setPan(0.5, 0);
+                    if (onChartAction) {
+                      onChartAction('RESET_ZOOM');
+                    } else {
+                      cameraControls.setZoom(0.5);
+                      cameraControls.setPan(0.5, 0);
+                    }
                   }}
                 >
                   <Text style={styles.quickButtonText}>🌐 Vista General</Text>
@@ -289,8 +369,13 @@ export const ChartCameraControls: React.FC<ChartCameraControlsProps> = ({
                 <TouchableOpacity 
                   style={styles.quickButton} 
                   onPress={() => {
-                    cameraControls.setZoom(2);
-                    cameraControls.goToEnd();
+                    if (onChartAction) {
+                      onChartAction('SET_ZOOM', { zoom: 2 });
+                      onChartAction('GO_TO_LATEST');
+                    } else {
+                      cameraControls.setZoom(2);
+                      cameraControls.goToEnd();
+                    }
                   }}
                 >
                   <Text style={styles.quickButtonText}>📈 Trading View</Text>

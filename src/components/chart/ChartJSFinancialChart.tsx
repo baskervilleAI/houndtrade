@@ -193,9 +193,11 @@ export const ChartJSFinancialChart: React.FC<ChartJSFinancialChartProps> = ({
             
             <div class="chart-controls">
                 <button class="control-btn" onclick="resetZoom()">🔄 Reset</button>
-                <button class="control-btn" onclick="autoFitChart()">📏 Auto-Fit</button>
+                <button class="control-btn" onclick="autoFitChart()">📏 Auto</button>
                 <button class="control-btn" onclick="zoomIn()">🔍+</button>
                 <button class="control-btn" onclick="zoomOut()">🔍-</button>
+                <button class="control-btn" onclick="panLeft()">⬅️</button>
+                <button class="control-btn" onclick="panRight()">➡️</button>
                 <button class="control-btn" onclick="goToLatest()">⏭️ Último</button>
                 <button class="control-btn" onclick="toggleVolume()">📊 Vol</button>
             </div>
@@ -230,17 +232,18 @@ export const ChartJSFinancialChart: React.FC<ChartJSFinancialChartProps> = ({
                         borderColor: {
                             up: '#00ff88',
                             down: '#ff4444',
-                            unchanged: '#999999',
+                            unchanged: '#888888',
                         },
                         backgroundColor: {
-                            up: 'rgba(0, 255, 136, 0.1)',
-                            down: 'rgba(255, 68, 68, 0.1)',
-                            unchanged: 'rgba(153, 153, 153, 0.1)',
+                            up: 'rgba(0, 255, 136, 0.2)',
+                            down: 'rgba(255, 68, 68, 0.2)',
+                            unchanged: 'rgba(136, 136, 136, 0.2)',
                         },
-                        borderWidth: 1,
+                        borderWidth: 2,
                         barThickness: 'flex',
-                        maxBarThickness: 12,
-                        minBarLength: 2,
+                        maxBarThickness: 16,
+                        minBarLength: 1,
+                        borderSkipped: false,
                     }]
                 },
                 options: {
@@ -271,10 +274,15 @@ export const ChartJSFinancialChart: React.FC<ChartJSFinancialChartProps> = ({
                                 lineWidth: 0.5
                             },
                             ticks: {
-                                color: '#888',
-                                maxTicksLimit: 10,
+                                color: '#e0e0e0',
+                                maxTicksLimit: 12,
                                 autoSkip: true,
-                                source: 'data'
+                                source: 'data',
+                                font: {
+                                    size: 11,
+                                    family: "'SF Pro Display', -apple-system, BlinkMacSystemFont, sans-serif"
+                                },
+                                padding: 8
                             },
                             border: {
                                 color: '#333'
@@ -290,13 +298,31 @@ export const ChartJSFinancialChart: React.FC<ChartJSFinancialChartProps> = ({
                                 lineWidth: 0.5
                             },
                             ticks: {
-                                color: '#888',
-                                maxTicksLimit: 8,
+                                color: '#e0e0e0',
+                                maxTicksLimit: 10,
+                                font: {
+                                    size: 11,
+                                    family: "'SF Pro Display', -apple-system, BlinkMacSystemFont, sans-serif",
+                                    weight: '500'
+                                },
+                                padding: 12,
                                 callback: function(value) {
-                                    return '$' + Number(value).toLocaleString(undefined, {
-                                        minimumFractionDigits: 0,
-                                        maximumFractionDigits: 2
-                                    });
+                                    const num = Number(value);
+                                    if (num >= 1000000) {
+                                        return '$' + (num / 1000000).toFixed(2) + 'M';
+                                    } else if (num >= 100000) {
+                                        return '$' + (num / 1000).toFixed(0) + 'K';
+                                    } else if (num >= 10000) {
+                                        return '$' + (num / 1000).toFixed(1) + 'K';
+                                    } else if (num >= 1000) {
+                                        return '$' + (num / 1000).toFixed(2) + 'K';
+                                    } else if (num >= 100) {
+                                        return '$' + num.toFixed(0);
+                                    } else if (num >= 10) {
+                                        return '$' + num.toFixed(1);
+                                    } else {
+                                        return '$' + num.toFixed(2);
+                                    }
                                 }
                             },
                             border: {
@@ -353,27 +379,88 @@ export const ChartJSFinancialChart: React.FC<ChartJSFinancialChartProps> = ({
                             pan: {
                                 enabled: enableControlsFlag,
                                 mode: 'x',
+                                threshold: 10,
+                                speed: 20,
+                                onPanStart: function(context) {
+                                    console.log('🔄 Paneo iniciado');
+                                },
+                                onPan: function(context) {
+                                    const chart = context.chart;
+                                    const xScale = chart.scales.x;
+                                    console.log('🔄 Paneo en progreso:', {
+                                        center: new Date((xScale.min + xScale.max) / 2).toLocaleTimeString()
+                                    });
+                                },
                                 onPanComplete: function(context) {
                                     const chart = context.chart;
                                     const xScale = chart.scales.x;
                                     const panX = (xScale.min + xScale.max) / 2;
-                                    sendMessageToRN({ type: 'PAN', panX: panX });
+                                    const totalRange = currentData.candleData.length > 0 ? 
+                                        (currentData.candleData[currentData.candleData.length - 1].x - currentData.candleData[0].x) : 1;
+                                    const position = (panX - (currentData.candleData[0]?.x || 0)) / totalRange;
+                                    
+                                    console.log('🔄 Paneo completado:', {
+                                        center: new Date(panX).toLocaleTimeString(),
+                                        position: (position * 100).toFixed(1) + '%'
+                                    });
+                                    
+                                    sendMessageToRN({ 
+                                        type: 'PAN', 
+                                        panX: panX,
+                                        position: position,
+                                        center: panX
+                                    });
                                 }
                             },
                             zoom: {
                                 wheel: {
                                     enabled: enableControlsFlag,
+                                    speed: 0.1,
+                                    modifierKey: null,
                                 },
                                 pinch: {
                                     enabled: enableControlsFlag
                                 },
                                 mode: 'x',
+                                limits: {
+                                    x: {
+                                        min: 'original',
+                                        max: 'original'
+                                    }
+                                },
+                                onZoomStart: function(context) {
+                                    console.log('🔍 Zoom iniciado');
+                                },
+                                onZoom: function(context) {
+                                    const chart = context.chart;
+                                    const xScale = chart.scales.x;
+                                    console.log('🔍 Zoom en progreso:', {
+                                        min: new Date(xScale.min).toLocaleTimeString(),
+                                        max: new Date(xScale.max).toLocaleTimeString()
+                                    });
+                                },
                                 onZoomComplete: function(context) {
                                     const chart = context.chart;
                                     const xScale = chart.scales.x;
-                                    const zoomLevel = (xScale.max - xScale.min) / (chart.data.datasets[0].data.length || 1);
-                                    sendMessageToRN({ type: 'ZOOM', zoomLevel: zoomLevel });
+                                    const totalRange = currentData.candleData.length > 0 ? 
+                                        (currentData.candleData[currentData.candleData.length - 1].x - currentData.candleData[0].x) : 1;
+                                    const visibleRange = xScale.max - xScale.min;
+                                    const zoomLevel = totalRange / visibleRange;
+                                    
+                                    console.log('🔍 Zoom completado:', {
+                                        zoomLevel: zoomLevel.toFixed(2),
+                                        visibleCandles: Math.floor(visibleRange / (1000 * 60)), // Aproximado en minutos
+                                        totalCandles: currentData.candleData.length
+                                    });
+                                    
+                                    sendMessageToRN({ 
+                                        type: 'ZOOM', 
+                                        zoomLevel: zoomLevel,
+                                        visibleRange: visibleRange,
+                                        totalRange: totalRange
+                                    });
                                 }
+                            }
                             }
                         }
                     },
@@ -496,59 +583,213 @@ export const ChartJSFinancialChart: React.FC<ChartJSFinancialChartProps> = ({
             }
 
             function zoomIn() {
+                console.log('🔍+ Zoom In iniciado');
                 if (mainChart) {
-                    mainChart.zoom(1.2);
+                    const xScale = mainChart.scales.x;
+                    const center = (xScale.min + xScale.max) / 2;
+                    const currentRange = xScale.max - xScale.min;
+                    const newRange = currentRange * 0.75; // Zoom más preciso
+                    
+                    const newMin = center - newRange / 2;
+                    const newMax = center + newRange / 2;
+                    
+                    // Asegurar que no excedamos los límites de datos
+                    if (currentData.candleData.length > 0) {
+                        const dataMin = currentData.candleData[0].x;
+                        const dataMax = currentData.candleData[currentData.candleData.length - 1].x;
+                        
+                        mainChart.options.scales.x.min = Math.max(newMin, dataMin);
+                        mainChart.options.scales.x.max = Math.min(newMax, dataMax);
+                    } else {
+                        mainChart.options.scales.x.min = newMin;
+                        mainChart.options.scales.x.max = newMax;
+                    }
+                    
+                    mainChart.update('none');
+                    console.log('🔍+ Zoom In completado - nuevo rango:', {
+                        min: new Date(mainChart.options.scales.x.min).toLocaleTimeString(),
+                        max: new Date(mainChart.options.scales.x.max).toLocaleTimeString()
+                    });
                 }
                 if (volumeChart) {
-                    volumeChart.zoom(1.2);
+                    volumeChart.options.scales.x.min = mainChart.options.scales.x.min;
+                    volumeChart.options.scales.x.max = mainChart.options.scales.x.max;
+                    volumeChart.update('none');
                 }
+                
+                sendMessageToRN({ 
+                    type: 'ZOOM_IN', 
+                    newRange: mainChart?.options.scales.x.max - mainChart?.options.scales.x.min 
+                });
             }
 
             function zoomOut() {
+                console.log('🔍- Zoom Out iniciado');
                 if (mainChart) {
-                    mainChart.zoom(0.8);
+                    const xScale = mainChart.scales.x;
+                    const center = (xScale.min + xScale.max) / 2;
+                    const currentRange = xScale.max - xScale.min;
+                    const newRange = currentRange * 1.33; // Zoom más preciso
+                    
+                    const newMin = center - newRange / 2;
+                    const newMax = center + newRange / 2;
+                    
+                    // Asegurar que no excedamos los límites de datos
+                    if (currentData.candleData.length > 0) {
+                        const dataMin = currentData.candleData[0].x;
+                        const dataMax = currentData.candleData[currentData.candleData.length - 1].x;
+                        
+                        mainChart.options.scales.x.min = Math.max(newMin, dataMin - (dataMax - dataMin) * 0.05);
+                        mainChart.options.scales.x.max = Math.min(newMax, dataMax + (dataMax - dataMin) * 0.05);
+                    } else {
+                        mainChart.options.scales.x.min = newMin;
+                        mainChart.options.scales.x.max = newMax;
+                    }
+                    
+                    mainChart.update('none');
+                    console.log('🔍- Zoom Out completado - nuevo rango:', {
+                        min: new Date(mainChart.options.scales.x.min).toLocaleTimeString(),
+                        max: new Date(mainChart.options.scales.x.max).toLocaleTimeString()
+                    });
                 }
                 if (volumeChart) {
-                    volumeChart.zoom(0.8);
+                    volumeChart.options.scales.x.min = mainChart.options.scales.x.min;
+                    volumeChart.options.scales.x.max = mainChart.options.scales.x.max;
+                    volumeChart.update('none');
                 }
+                
+                sendMessageToRN({ 
+                    type: 'ZOOM_OUT', 
+                    newRange: mainChart?.options.scales.x.max - mainChart?.options.scales.x.min 
+                });
             }
 
             function goToLatest() {
+                console.log('⏭️ Ir a último iniciado');
                 if (mainChart && currentData.candleData.length > 0) {
                     const candles = currentData.candleData;
                     const candleCount = candles.length;
                     
                     if (candleCount > 0) {
-                        // Mostrar las últimas 50 velas o todas si hay menos
-                        const visibleCount = Math.min(50, candleCount);
-                        const startIndex = Math.max(0, candleCount - visibleCount);
+                        // Detectar zoom actual para mantener la vista
+                        const currentRange = mainChart.scales.x.max - mainChart.scales.x.min;
+                        const totalRange = candles[candleCount - 1].x - candles[0].x;
+                        const isZoomedIn = currentRange < totalRange * 0.8; // Si está más del 80% zoom
                         
-                        const visibleCandles = candles.slice(startIndex);
+                        let visibleCount, startIndex, endIndex;
+                        
+                        if (isZoomedIn) {
+                            // Mantener nivel de zoom actual pero ir al final
+                            const currentCandleSpan = Math.max(10, Math.floor(currentRange / (1000 * 60))); // Minutos aproximados
+                            visibleCount = Math.min(currentCandleSpan, candleCount);
+                            startIndex = Math.max(0, candleCount - visibleCount);
+                            endIndex = candleCount;
+                        } else {
+                            // Vista completa de las últimas 50 velas
+                            visibleCount = Math.min(50, candleCount);
+                            startIndex = Math.max(0, candleCount - visibleCount);
+                            endIndex = candleCount;
+                        }
+                        
+                        const visibleCandles = candles.slice(startIndex, endIndex);
                         const firstTime = visibleCandles[0].x;
                         const lastTime = visibleCandles[visibleCandles.length - 1].x;
                         const timeRange = lastTime - firstTime;
-                        const timePadding = timeRange * 0.05; // 5% padding
+                        const timePadding = Math.max(timeRange * 0.02, 60000); // Al menos 1 minuto de padding
                         
                         mainChart.options.scales.x.min = firstTime - timePadding;
                         mainChart.options.scales.x.max = lastTime + timePadding;
                         
-                        // También ajustar el rango Y para las velas visibles
+                        // Ajustar el rango Y para las velas visibles con mejor padding
                         const visiblePrices = visibleCandles.flatMap(candle => [candle.h, candle.l]);
-                        const minPrice = Math.min(...visiblePrices);
-                        const maxPrice = Math.max(...visiblePrices);
-                        const priceRange = maxPrice - minPrice;
-                        const pricePadding = Math.max(priceRange * 0.1, 1);
+                        if (visiblePrices.length > 0) {
+                            const minPrice = Math.min(...visiblePrices);
+                            const maxPrice = Math.max(...visiblePrices);
+                            const priceRange = maxPrice - minPrice;
+                            const pricePadding = Math.max(priceRange * 0.08, maxPrice * 0.001); // 8% o 0.1% del precio
+                            
+                            mainChart.options.scales.y.min = Math.max(0, minPrice - pricePadding);
+                            mainChart.options.scales.y.max = maxPrice + pricePadding;
+                        }
                         
-                        mainChart.options.scales.y.min = Math.max(0, minPrice - pricePadding);
-                        mainChart.options.scales.y.max = maxPrice + pricePadding;
-                        
-                        mainChart.update('resize');
+                        mainChart.update('none');
+                        console.log(\`⏭️ Centrado en últimas \${visibleCount} velas (zoom: \${isZoomedIn ? 'mantenido' : 'ajustado'})\`);
                         
                         if (volumeChart && showVolumeChart) {
                             volumeChart.options.scales.x.min = firstTime - timePadding;
                             volumeChart.options.scales.x.max = lastTime + timePadding;
-                            volumeChart.update('resize');
+                            volumeChart.update('none');
                         }
+                        
+                        sendMessageToRN({ 
+                            type: 'GO_TO_LATEST', 
+                            candlesShown: visibleCount,
+                            zoomLevel: isZoomedIn ? 'maintained' : 'auto'
+                        });
+                    }
+                }
+            }
+
+            // Funciones adicionales de navegación
+            function panLeft() {
+                console.log('⬅️ Pan Left iniciado');
+                if (mainChart && currentData.candleData.length > 0) {
+                    const xScale = mainChart.scales.x;
+                    const currentRange = xScale.max - xScale.min;
+                    const panAmount = currentRange * 0.2; // Mover 20% del rango visible
+                    
+                    const newMin = xScale.min - panAmount;
+                    const newMax = xScale.max - panAmount;
+                    
+                    // Verificar límites
+                    const dataMin = currentData.candleData[0].x;
+                    const adjustedMin = Math.max(newMin, dataMin - currentRange * 0.1);
+                    const adjustedMax = adjustedMin + currentRange;
+                    
+                    mainChart.options.scales.x.min = adjustedMin;
+                    mainChart.options.scales.x.max = adjustedMax;
+                    mainChart.update('none');
+                    
+                    if (volumeChart) {
+                        volumeChart.options.scales.x.min = adjustedMin;
+                        volumeChart.options.scales.x.max = adjustedMax;
+                        volumeChart.update('none');
+                    }
+                    
+                    console.log('⬅️ Pan Left completado');
+                    sendMessageToRN({ type: 'PAN_LEFT', newCenter: (adjustedMin + adjustedMax) / 2 });
+                }
+            }
+
+            function panRight() {
+                console.log('➡️ Pan Right iniciado');
+                if (mainChart && currentData.candleData.length > 0) {
+                    const xScale = mainChart.scales.x;
+                    const currentRange = xScale.max - xScale.min;
+                    const panAmount = currentRange * 0.2; // Mover 20% del rango visible
+                    
+                    const newMin = xScale.min + panAmount;
+                    const newMax = xScale.max + panAmount;
+                    
+                    // Verificar límites
+                    const dataMax = currentData.candleData[currentData.candleData.length - 1].x;
+                    const adjustedMax = Math.min(newMax, dataMax + currentRange * 0.1);
+                    const adjustedMin = adjustedMax - currentRange;
+                    
+                    mainChart.options.scales.x.min = adjustedMin;
+                    mainChart.options.scales.x.max = adjustedMax;
+                    mainChart.update('none');
+                    
+                    if (volumeChart) {
+                        volumeChart.options.scales.x.min = adjustedMin;
+                        volumeChart.options.scales.x.max = adjustedMax;
+                        volumeChart.update('none');
+                    }
+                    
+                    console.log('➡️ Pan Right completado');
+                    sendMessageToRN({ type: 'PAN_RIGHT', newCenter: (adjustedMin + adjustedMax) / 2 });
+                }
+            }
                         
                         console.log(\`📍 Centrado en últimas \${visibleCount} velas\`);
                     }
@@ -787,6 +1028,12 @@ export const ChartJSFinancialChart: React.FC<ChartJSFinancialChartProps> = ({
                                 volumeChart.zoom(data.factor);
                             }
                             break;
+                        case 'ZOOM_IN':
+                            zoomIn();
+                            break;
+                        case 'ZOOM_OUT':
+                            zoomOut();
+                            break;
                         case 'RESET_ZOOM':
                             resetZoom();
                             break;
@@ -795,6 +1042,15 @@ export const ChartJSFinancialChart: React.FC<ChartJSFinancialChartProps> = ({
                             break;
                         case 'GO_TO_LATEST':
                             goToLatest();
+                            break;
+                        case 'PAN_LEFT':
+                            panLeft();
+                            break;
+                        case 'PAN_RIGHT':
+                            panRight();
+                            break;
+                        case 'TOGGLE_VOLUME':
+                            toggleVolume();
                             break;
                     }
                 } catch (error) {
@@ -854,15 +1110,20 @@ export const ChartJSFinancialChart: React.FC<ChartJSFinancialChartProps> = ({
           sendDataToChart();
           break;
         case 'ZOOM':
-          onZoom?.(message.zoomLevel);
+        case 'ZOOM_IN':
+        case 'ZOOM_OUT':
+          onZoom?.(message.zoomLevel || message.newRange);
           break;
         case 'PAN':
-          onPan?.(message.panX, 0);
+        case 'PAN_LEFT':
+        case 'PAN_RIGHT':
+          onPan?.(message.panX || message.newCenter, message.panY || 0);
           break;
         case 'RESET_ZOOM':
         case 'GO_TO_LATEST':
         case 'TOGGLE_VOLUME':
           // Estos eventos se manejan internamente en el WebView
+          console.log(`📊 Chart action: ${message.type}`, message);
           break;
       }
     } catch (error) {
@@ -873,16 +1134,28 @@ export const ChartJSFinancialChart: React.FC<ChartJSFinancialChartProps> = ({
   // Métodos públicos para controlar el chart desde fuera
   const chartControls = useMemo(() => ({
     zoomIn: () => {
-      webViewRef.current?.postMessage(JSON.stringify({ type: 'ZOOM', factor: 1.2 }));
+      webViewRef.current?.postMessage(JSON.stringify({ type: 'ZOOM_IN' }));
     },
     zoomOut: () => {
-      webViewRef.current?.postMessage(JSON.stringify({ type: 'ZOOM', factor: 0.8 }));
+      webViewRef.current?.postMessage(JSON.stringify({ type: 'ZOOM_OUT' }));
     },
     resetZoom: () => {
       webViewRef.current?.postMessage(JSON.stringify({ type: 'RESET_ZOOM' }));
     },
     goToLatest: () => {
       webViewRef.current?.postMessage(JSON.stringify({ type: 'GO_TO_LATEST' }));
+    },
+    panLeft: () => {
+      webViewRef.current?.postMessage(JSON.stringify({ type: 'PAN_LEFT' }));
+    },
+    panRight: () => {
+      webViewRef.current?.postMessage(JSON.stringify({ type: 'PAN_RIGHT' }));
+    },
+    autoFit: () => {
+      webViewRef.current?.postMessage(JSON.stringify({ type: 'AUTO_FIT' }));
+    },
+    toggleVolume: () => {
+      webViewRef.current?.postMessage(JSON.stringify({ type: 'TOGGLE_VOLUME' }));
     },
   }), []);
 

@@ -1,4 +1,42 @@
-import { EventEmitter } from 'events';
+// Implementación simple de EventEmitter compatible con React Native/Web
+class SimpleEventEmitter {
+  private events: { [key: string]: Function[] } = {};
+
+  on(event: string, listener: Function): void {
+    if (!this.events[event]) {
+      this.events[event] = [];
+    }
+    this.events[event].push(listener);
+  }
+
+  off(event: string, listener: Function): void {
+    if (!this.events[event]) return;
+    this.events[event] = this.events[event].filter(l => l !== listener);
+  }
+
+  emit(event: string, ...args: any[]): void {
+    if (!this.events[event]) return;
+    this.events[event].forEach(listener => {
+      try {
+        listener(...args);
+      } catch (error) {
+        console.error(`Error in event listener for '${event}':`, error);
+      }
+    });
+  }
+
+  removeAllListeners(event?: string): void {
+    if (event) {
+      delete this.events[event];
+    } else {
+      this.events = {};
+    }
+  }
+
+  setMaxListeners(n: number): void {
+    // No-op para compatibilidad
+  }
+}
 
 export interface CandleData {
   x: number;          // timestamp
@@ -24,7 +62,7 @@ export interface StreamingConfig {
   limit?: number;     // cantidad de velas históricas
 }
 
-class LiveStreamingService extends EventEmitter {
+class LiveStreamingService extends SimpleEventEmitter {
   private ws: WebSocket | null = null;
   private activeStreams = new Map<string, StreamingConfig>();
   private reconnectAttempts = 0;

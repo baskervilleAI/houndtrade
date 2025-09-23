@@ -65,7 +65,6 @@ const AdvancedCandlestickChart: React.FC<AdvancedCandlestickChartProps> = ({
       const Chart = ChartJS.default;
       const ChartFinancial = await import('chartjs-chart-financial');
       const zoomPlugin = await import('chartjs-plugin-zoom');
-      const annotationPlugin = await import('chartjs-plugin-annotation');
 
       // Importar adaptador de fechas
       try {
@@ -80,8 +79,7 @@ const AdvancedCandlestickChart: React.FC<AdvancedCandlestickChartProps> = ({
         ChartFinancial.CandlestickElement,
         ChartFinancial.OhlcController,
         ChartFinancial.OhlcElement,
-        zoomPlugin.default,
-        annotationPlugin.default
+        zoomPlugin.default
       );
 
       addLog('✅ Librerías cargadas correctamente');
@@ -336,9 +334,6 @@ const AdvancedCandlestickChart: React.FC<AdvancedCandlestickChartProps> = ({
                 enabled: true,
                 mode: 'x',
               }
-            },
-            annotation: {
-              annotations: {}
             }
           }
         }

@@ -62,7 +62,7 @@ const CandlestickChartNative: React.FC<CandlestickChartNativeProps> = ({
           addLog('⚠️ Adaptador de fechas no disponible, usando configuración básica');
         }
 
-        // Registrar componentes
+        // Registrar componentes (sin plugins problemáticos por ahora)
         Chart.register(
           ChartFinancial.CandlestickController,
           ChartFinancial.CandlestickElement,
@@ -91,7 +91,7 @@ const CandlestickChartNative: React.FC<CandlestickChartNativeProps> = ({
         // Limpiar canvas
         ctx.clearRect(0, 0, width, height);
 
-        // Crear gráfico
+        // Crear gráfico con configuración mejorada
         chartRef.current = new Chart(ctx, {
           type: 'candlestick',
           data: {
@@ -105,7 +105,7 @@ const CandlestickChartNative: React.FC<CandlestickChartNativeProps> = ({
                 c: candle.c
               })),
               borderColor: '#00ff88',
-              backgroundColor: 'rgba(0, 255, 136, 0.1)',
+              backgroundColor: 'rgba(0, 255, 136, 0.8)',
               borderWidth: 2,
             }]
           },
@@ -113,7 +113,11 @@ const CandlestickChartNative: React.FC<CandlestickChartNativeProps> = ({
             responsive: false,
             maintainAspectRatio: false,
             animation: {
-              duration: 300
+              duration: 0 // Sin animación para mejor performance
+            },
+            interaction: {
+              intersect: false,
+              mode: 'index'
             },
             scales: {
               x: {
@@ -121,43 +125,102 @@ const CandlestickChartNative: React.FC<CandlestickChartNativeProps> = ({
                 time: {
                   unit: 'hour',
                   displayFormats: {
-                    hour: 'HH:mm'
+                    hour: 'HH:mm',
+                    minute: 'HH:mm'
                   }
                 },
                 ticks: {
                   color: '#ffffff',
-                  maxTicksLimit: 8
+                  maxTicksLimit: 8,
+                  font: {
+                    size: 11
+                  }
                 },
                 grid: {
-                  color: 'rgba(255, 255, 255, 0.1)'
+                  color: 'rgba(255, 255, 255, 0.2)',
+                  lineWidth: 1
+                },
+                border: {
+                  color: '#444'
                 }
               },
               y: {
+                type: 'linear',
                 position: 'right',
+                beginAtZero: false,
                 ticks: {
                   color: '#ffffff',
+                  font: {
+                    size: 11
+                  },
                   callback: function(value: any) {
-                    return '$' + (value / 1000).toFixed(1) + 'k';
+                    const num = Number(value);
+                    if (num >= 100000) {
+                      return '$' + (num / 1000).toFixed(0) + 'K';
+                    } else if (num >= 10000) {
+                      return '$' + (num / 1000).toFixed(1) + 'K';
+                    } else {
+                      return '$' + num.toLocaleString();
+                    }
                   }
                 },
                 grid: {
-                  color: 'rgba(255, 255, 255, 0.1)'
+                  color: 'rgba(255, 255, 255, 0.2)',
+                  lineWidth: 1
+                },
+                border: {
+                  color: '#444'
                 }
               }
             },
             plugins: {
               title: {
                 display: true,
-                text: '🕯️ Velas Japonesas - React Native',
+                text: '🕯️ BTC/USDT - Candlestick Chart',
                 color: '#ffffff',
                 font: {
-                  size: 16
-                }
+                  size: 14,
+                  weight: 'bold'
+                },
+                padding: 20
               },
               legend: {
+                display: true,
                 labels: {
-                  color: '#ffffff'
+                  color: '#ffffff',
+                  font: {
+                    size: 12
+                  }
                 }
+              },
+              tooltip: {
+                mode: 'index',
+                intersect: false,
+                backgroundColor: 'rgba(0, 0, 0, 0.9)',
+                titleColor: '#fff',
+                bodyColor: '#fff',
+                borderColor: '#444',
+                borderWidth: 1,
+                displayColors: false,
+                callbacks: {
+                  title: function(context: any) {
+                    return new Date(context[0].parsed.x).toLocaleString();
+                  },
+                  label: function(context: any) {
+                    const data = context.raw;
+                    return [
+                      `Open: $${data.o.toLocaleString()}`,
+                      `High: $${data.h.toLocaleString()}`,
+                      `Low: $${data.l.toLocaleString()}`,
+                      `Close: $${data.c.toLocaleString()}`
+                    ];
+                  }
+                }
+              }
+            },
+            elements: {
+              point: {
+                radius: 0 // Sin puntos para mejor performance
               }
             }
           }
