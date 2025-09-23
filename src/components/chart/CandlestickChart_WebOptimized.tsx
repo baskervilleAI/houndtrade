@@ -109,7 +109,7 @@ export const CandlestickChartFinal: React.FC = () => {
     symbol: selectedPair,
     timeframe: selectedTimeframe.value,
     cycleDelay: selectedTimeframe.cycleDelay,
-    maxCandles: 1000,
+    maxCandles: 900,
     autoStart: true,
   });
 

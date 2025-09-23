@@ -58,7 +58,7 @@ export const LiveCandlestickChart: React.FC = () => {
   } = useLiveChart({
     symbol: selectedPair,
     interval: selectedTimeframe,
-    maxCandles: 100,
+    maxCandles: 900,
     enableUltraFast,
     cycleDelay: 10, // 10ms para ultra fast
   });

@@ -472,7 +472,7 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
       }
 
       // Cargar datos históricos para el nuevo intervalo
-      const historicalData = await liveStreamingService.loadHistoricalData(currentSymbol, newInterval, 100);
+      const historicalData = await liveStreamingService.loadHistoricalData(currentSymbol, newInterval, 900);
       setCandleData(historicalData);
 
       // Suscribirse al nuevo intervalo
@@ -526,7 +526,7 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
   useEffect(() => {
     const loadInitialData = async () => {
       try {
-        const historicalData = await liveStreamingService.loadHistoricalData(currentSymbol, currentInterval, 100);
+        const historicalData = await liveStreamingService.loadHistoricalData(currentSymbol, currentInterval, 900);
         setCandleData(historicalData);
       } catch (error) {
         console.error('Error cargando datos iniciales:', error);

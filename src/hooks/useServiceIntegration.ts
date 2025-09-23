@@ -42,7 +42,7 @@ export const useServiceIntegration = (options: ServiceIntegrationOptions = {}) =
   const loadHistoricalData = useCallback(async (
     symbol: string, 
     timeframe: string, 
-    limit: number = 100
+    limit: number = 900
   ) => {
     try {
       setLoading(true);

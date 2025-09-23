@@ -416,7 +416,7 @@ const AdvancedCandlestickChart: React.FC<AdvancedCandlestickChartProps> = ({
       }
 
       // Cargar datos históricos para el nuevo intervalo
-      const historicalData = await liveStreamingService.loadHistoricalData(currentSymbol, newInterval, 100);
+      const historicalData = await liveStreamingService.loadHistoricalData(currentSymbol, newInterval, 900);
       setCandleData(historicalData);
 
       // Suscribirse al nuevo intervalo
@@ -477,7 +477,7 @@ const AdvancedCandlestickChart: React.FC<AdvancedCandlestickChartProps> = ({
   useEffect(() => {
     const loadInitialData = async () => {
       try {
-        const historicalData = await liveStreamingService.loadHistoricalData(currentSymbol, currentInterval, 100);
+        const historicalData = await liveStreamingService.loadHistoricalData(currentSymbol, currentInterval, 900);
         setCandleData(historicalData);
       } catch (error) {
         addLog(`❌ Error cargando datos iniciales: ${error}`);

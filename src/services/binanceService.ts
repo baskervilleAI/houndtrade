@@ -249,7 +249,7 @@ class BinanceService {
       const params = new URLSearchParams({
         symbol: symbol.toUpperCase(),
         interval,
-        limit: Math.min(limit, 100).toString(),
+        limit: Math.min(limit, 1000).toString(),
       });
 
       // Use minimal logging for ultra-fast requests

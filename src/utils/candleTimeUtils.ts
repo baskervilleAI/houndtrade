@@ -125,7 +125,7 @@ export function updateCandlesArray(
   existingCandles: CandleData[],
   newCandle: CandleData,
   interval: string,
-  maxCandles: number = 100
+  maxCandles: number = 900
 ): {
   candles: CandleData[];
   action: 'updated' | 'appended' | 'ignored';

@@ -69,8 +69,8 @@ export const useMarketStore = create<MarketStore>((set, get) => ({
         // Add new candle
         updatedCandles.push(candle);
         
-        // Keep only last 1000 candles for performance
-        if (updatedCandles.length > 1000) {
+        // Keep only last 900 candles for performance
+        if (updatedCandles.length > 900) {
           updatedCandles.shift();
         }
       }
