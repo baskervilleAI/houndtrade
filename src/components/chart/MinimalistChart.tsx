@@ -44,9 +44,18 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
   const lastZoomTime = useRef<number>(0);
   const lastPanTime = useRef<number>(0);
   
-  // NUEVO: Debounce agresivo para evitar múltiples eventos de zoom/pan consecutivos
+  // NUEVO: Referencias para control avanzado de eventos
   const zoomDebounceRef = useRef<NodeJS.Timeout | null>(null);
   const panDebounceRef = useRef<NodeJS.Timeout | null>(null);
+  
+  // NUEVO: Control global para evitar cualquier solapamiento
+  const globalInteractionBlocked = useRef<boolean>(false);
+  
+  // CRÍTICO: Controles separados para zoom y pan + throttle reducido
+  const lastZoomProcessedTime = useRef<number>(0);
+  const lastPanProcessedTime = useRef<number>(0);
+  const isProcessingZoom = useRef<boolean>(false);
+  const isProcessingPan = useRef<boolean>(false);
 
   const { selectedPair } = useMarket();
   const currentSymbol = symbol || selectedPair;
@@ -87,12 +96,36 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
   // ============================================
   
   const debouncedZoomHandler = useCallback((chart: any, xScale: any) => {
+    const now = Date.now();
+    
+    // BLOQUEO GLOBAL: Evitar cualquier solapamiento entre zoom y pan
+    if (globalInteractionBlocked.current) {
+      console.log('🚫 [ZOOM] Evento ignorado - interacción global bloqueada');
+      return;
+    }
+    
+    // THROTTLE ESPECÍFICO PARA ZOOM: Solo 1 evento cada 150ms
+    if (now - lastZoomProcessedTime.current < 150) {
+      console.log('🚫 [ZOOM] Evento ignorado por throttle agresivo');
+      return;
+    }
+    
+    // BLOQUEO: Evitar procesamiento simultáneo
+    if (isProcessingZoom.current) {
+      console.log('🚫 [ZOOM] Evento ignorado - ya procesando zoom');
+      return;
+    }
+    
+    isProcessingZoom.current = true;
+    globalInteractionBlocked.current = true;
+    lastZoomProcessedTime.current = now;
+    
     // Cancelar debounce anterior
     if (zoomDebounceRef.current) {
       clearTimeout(zoomDebounceRef.current);
     }
     
-    // Solo el último evento en 200ms será procesado
+    // Debounce de 150ms
     zoomDebounceRef.current = setTimeout(() => {
       console.log('🔍 [ZOOM] Usuario inicia ZOOM - Datos del evento:', {
         min: xScale.min,
@@ -122,17 +155,49 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
           simpleCamera.onUserZoom(finalScale.min, finalScale.max, (finalScale.min + finalScale.max) / 2);
         }
         endUserInteraction();
-      }, 150);
-    }, 200); // 200ms de debounce
+        
+        // Liberar bloqueos después de completar
+        isProcessingZoom.current = false;
+        
+        // CRÍTICO: Liberar bloqueo global después de un delay
+        setTimeout(() => {
+          globalInteractionBlocked.current = false;
+        }, 100);
+      }, 100);
+    }, 150);
   }, [startUserInteraction, endUserInteraction, simpleCamera]);
 
   const debouncedPanHandler = useCallback((chart: any, xScale: any) => {
+    const now = Date.now();
+    
+    // BLOQUEO GLOBAL: Evitar cualquier solapamiento entre zoom y pan
+    if (globalInteractionBlocked.current) {
+      console.log('🚫 [PAN] Evento ignorado - interacción global bloqueada');
+      return;
+    }
+    
+    // THROTTLE ESPECÍFICO PARA PAN: Solo 1 evento cada 150ms
+    if (now - lastPanProcessedTime.current < 150) {
+      console.log('🚫 [PAN] Evento ignorado por throttle agresivo');
+      return;
+    }
+    
+    // BLOQUEO: Evitar procesamiento simultáneo
+    if (isProcessingPan.current) {
+      console.log('🚫 [PAN] Evento ignorado - ya procesando pan');
+      return;
+    }
+    
+    isProcessingPan.current = true;
+    globalInteractionBlocked.current = true;
+    lastPanProcessedTime.current = now;
+    
     // Cancelar debounce anterior
     if (panDebounceRef.current) {
       clearTimeout(panDebounceRef.current);
     }
     
-    // Solo el último evento en 200ms será procesado
+    // Debounce de 150ms
     panDebounceRef.current = setTimeout(() => {
       console.log('🔄 [PAN] Usuario inicia PAN - Datos del evento:', {
         min: xScale.min,
@@ -162,8 +227,16 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
           simpleCamera.onUserPan(finalScale.min, finalScale.max, (finalScale.min + finalScale.max) / 2);
         }
         endUserInteraction();
-      }, 150);
-    }, 200); // 200ms de debounce
+        
+        // Liberar bloqueos después de completar
+        isProcessingPan.current = false;
+        
+        // CRÍTICO: Liberar bloqueo global después de un delay
+        setTimeout(() => {
+          globalInteractionBlocked.current = false;
+        }, 100);
+      }, 100);
+    }, 150);
   }, [startUserInteraction, endUserInteraction, simpleCamera]);
 
   // ============================================
