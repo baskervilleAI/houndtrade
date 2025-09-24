@@ -42,7 +42,10 @@ import {
   logTiming,
   logSystemSnapshot,
   logInteractionCycle,
-  logError
+  logError,
+  logLastCandle,
+  logScale,
+  logCryptoChange
 } from '../../utils/debugLogger';
 
 interface MinimalistChartProps {
@@ -252,19 +255,24 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
 
   // NUEVO: Función específica para limpiar el chart en cambios de criptomoneda
   const clearChartForCryptoCurrencyChange = useCallback(() => {
-    logLifecycle('CLEARING_CHART_FOR_CRYPTOCURRENCY_CHANGE', 'MinimalistChart', {
+    logCryptoChange('CLEARING_CHART_FOR_CRYPTOCURRENCY_CHANGE', {
       reason: 'cryptocurrency_change_preparation',
       chartExists: !!chartRef.current,
       dataLength: candleData.length,
       currentSymbol,
-      isStreaming
+      previousSymbol: previousSymbolRef.current,
+      isStreaming,
+      timestamp: new Date().toLocaleTimeString(),
+      phase: 'start'
     });
 
     // 1. Detener streaming anterior inmediatamente y limpiar listeners
     if (isStreaming) {
-      logLifecycle('STOPPING_STREAM_FOR_CRYPTOCURRENCY_CHANGE', 'MinimalistChart', {
+      logCryptoChange('STOPPING_STREAM_FOR_CRYPTOCURRENCY_CHANGE', {
         symbol: currentSymbol,
-        interval: currentInterval
+        interval: currentInterval,
+        reason: 'preparing_for_new_crypto',
+        timestamp: new Date().toLocaleTimeString()
       });
       
       // Forzar desconexión completa del stream anterior
@@ -277,46 +285,84 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
     }
 
     // 2. Limpiar datos del estado de React
+    const previousDataLength = candleData.length;
     setCandleData([]);
+    
+    logCryptoChange('REACT_STATE_CLEARED', {
+      previousDataLength,
+      newDataLength: 0,
+      timestamp: new Date().toLocaleTimeString()
+    });
     
     // 3. Limpiar completamente el chart si existe
     if (chartRef.current) {
       try {
+        const chart = chartRef.current;
+        const previousScales = chart.scales?.x ? {
+          min: chart.scales.x.min,
+          max: chart.scales.x.max
+        } : null;
+        
         // Limpiar todos los datasets
-        if (chartRef.current.data?.datasets) {
-          chartRef.current.data.datasets.forEach((dataset: any) => {
+        if (chart.data?.datasets) {
+          const datasetCount = chart.data.datasets.length;
+          chart.data.datasets.forEach((dataset: any, index: number) => {
+            const previousLength = dataset.data?.length || 0;
             dataset.data = [];
+            logCryptoChange(`DATASET_${index}_CLEARED`, {
+              datasetLabel: dataset.label,
+              previousLength,
+              newLength: 0
+            });
           });
         }
         
         // Resetear escalas completamente
-        if (chartRef.current.options?.scales?.x) {
-          delete chartRef.current.options.scales.x.min;
-          delete chartRef.current.options.scales.x.max;
+        if (chart.options?.scales?.x) {
+          delete chart.options.scales.x.min;
+          delete chart.options.scales.x.max;
+          logScale('SCALE_X_RESET_FOR_CRYPTO_CHANGE', {
+            previousScales,
+            action: 'deleted_min_max_from_options'
+          });
         }
         
-        if (chartRef.current.options?.scales?.y) {
-          delete chartRef.current.options.scales.y.min;
-          delete chartRef.current.options.scales.y.max;
+        if (chart.options?.scales?.y) {
+          delete chart.options.scales.y.min;
+          delete chart.options.scales.y.max;
+          logScale('SCALE_Y_RESET_FOR_CRYPTO_CHANGE', {
+            action: 'deleted_min_max_from_options'
+          });
         }
         
         // Actualizar título del gráfico
-        if (chartRef.current.options?.plugins?.title) {
-          chartRef.current.options.plugins.title.text = `${currentSymbol} - ${currentInterval.toUpperCase()} ⏳ CARGANDO...`;
+        const previousTitle = chart.options?.plugins?.title?.text;
+        if (chart.options?.plugins?.title) {
+          chart.options.plugins.title.text = `${currentSymbol} - ${currentInterval.toUpperCase()} ⏳ CARGANDO...`;
+          logCryptoChange('CHART_TITLE_UPDATED', {
+            previousTitle,
+            newTitle: chart.options.plugins.title.text
+          });
         }
         
         // Actualizar sin animación para cambio inmediato
-        chartRef.current.update('none');
+        const updateStart = Date.now();
+        chart.update('none');
+        const updateDuration = Date.now() - updateStart;
         
-        logLifecycle('CHART_CLEARED_FOR_CRYPTOCURRENCY_SUCCESS', 'MinimalistChart', {
+        logCryptoChange('CHART_UPDATE_COMPLETE_FOR_CRYPTO_CHANGE', {
+          updateDuration,
+          updateMode: 'none',
           datasetsCleared: true,
           scalesReset: true,
-          titleUpdated: true
+          titleUpdated: true,
+          timestamp: new Date().toLocaleTimeString()
         });
         
       } catch (error) {
-        logError('Error clearing chart data for cryptocurrency change', {
-          error: error instanceof Error ? error.message : String(error)
+        logCryptoChange('ERROR_CLEARING_CHART_FOR_CRYPTO_CHANGE', {
+          error: error instanceof Error ? error.message : String(error),
+          stack: error instanceof Error ? error.stack : undefined
         });
       }
     }
@@ -329,21 +375,36 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
         ctx.fillStyle = '#000';
         ctx.fillRect(0, 0, canvasRef.current.width, canvasRef.current.height);
         
-        logLifecycle('CANVAS_CLEARED_FOR_CRYPTOCURRENCY_CHANGE', 'MinimalistChart', {
+        logCryptoChange('CANVAS_CLEARED_FOR_CRYPTOCURRENCY_CHANGE', {
           canvasWidth: canvasRef.current.width,
-          canvasHeight: canvasRef.current.height
+          canvasHeight: canvasRef.current.height,
+          fillColor: '#000',
+          timestamp: new Date().toLocaleTimeString()
         });
       }
     }
 
     // 5. Reset flags específicos para cambio de criptomoneda
+    const flagsBefore = {
+      initialViewportSet: initialViewportSet.current,
+      hasAppliedFullViewportAfterChange: hasAppliedFullViewportAfterChange.current
+    };
+    
     initialViewportSet.current = false;
     hasAppliedFullViewportAfterChange.current = false;
     
-    logLifecycle('CRYPTOCURRENCY_CHANGE_CLEANUP_COMPLETE', 'MinimalistChart', {
-      flagsReset: true,
+    logCryptoChange('CRYPTOCURRENCY_CHANGE_CLEANUP_COMPLETE', {
+      flagsBefore,
+      flagsAfter: {
+        initialViewportSet: initialViewportSet.current,
+        hasAppliedFullViewportAfterChange: hasAppliedFullViewportAfterChange.current
+      },
       streamingStopped: true,
-      chartCleared: true
+      chartCleared: true,
+      reactStateCleared: true,
+      canvasCleared: true,
+      phase: 'complete',
+      timestamp: new Date().toLocaleTimeString()
     });
     
   }, [candleData.length, currentSymbol, currentInterval, isStreaming]);
@@ -1087,11 +1148,13 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
     
     // PROTECCIÓN CRÍTICA: Bloquear actualizaciones durante cambios de criptomoneda
     if (isChangingCryptocurrency.current) {
-      logChart('UPDATE_CHART_BLOCKED_CRYPTOCURRENCY_CHANGE', {
+      logCryptoChange('UPDATE_CHART_BLOCKED_CRYPTOCURRENCY_CHANGE', {
         updateSequence: updateSequence.current,
         price: newCandle.c,
         reason: 'cryptocurrency_change_in_progress',
-        isChanging: isChangingCryptocurrency.current
+        isChanging: isChangingCryptocurrency.current,
+        currentSymbol,
+        timestamp: new Date().toLocaleTimeString()
       });
       return;
     }
@@ -1215,17 +1278,38 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
       
       if (existingIndex >= 0) {
         // Actualizar vela existente (mutación in-situ)
-        logTidalFlow('UPDATE_CHART_MUTATE_EXISTING', {
+        const oldCandle = (dataset.data as any)[existingIndex];
+        logLastCandle('UPDATE_EXISTING_CANDLE', {
           index: existingIndex,
-          oldPrice: (dataset.data as any)[existingIndex].c,
-          newPrice: candleData.c
+          symbol: currentSymbol,
+          interval: currentInterval,
+          oldPrice: oldCandle.c,
+          newPrice: candleData.c,
+          oldTimestamp: new Date(oldCandle.x).toLocaleTimeString(),
+          newTimestamp: new Date(candleData.x).toLocaleTimeString(),
+          priceChange: candleData.c - oldCandle.c,
+          percentChange: ((candleData.c - oldCandle.c) / oldCandle.c * 100).toFixed(4),
+          isFinal,
+          totalCandles: dataset.data.length,
+          updateSequence: updateSequence.current
         });
         (dataset.data as any)[existingIndex] = candleData;
       } else {
         // Agregar nueva vela (mutación in-situ)
-        logTidalFlow('UPDATE_CHART_MUTATE_ADD_NEW', {
+        logLastCandle('ADD_NEW_CANDLE', {
           newPrice: candleData.c,
-          totalCandles: dataset.data.length + 1
+          timestamp: new Date(candleData.x).toLocaleTimeString(),
+          symbol: currentSymbol,
+          interval: currentInterval,
+          isFinal,
+          totalCandles: dataset.data.length + 1,
+          updateSequence: updateSequence.current,
+          candleRange: {
+            open: candleData.o,
+            high: candleData.h,
+            low: candleData.l,
+            close: candleData.c
+          }
         });
         (dataset.data as any[]).push(candleData);
       }
@@ -1293,19 +1377,31 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
     
     try {
       // CRÍTICO: Log detallado antes de aplicar viewport
-      logTidalFlow('APPLYING_VIEWPORT_TO_CHART', {
+      logScale('APPLYING_VIEWPORT_TO_CHART', {
         updateSequence: updateSequence.current,
+        symbol: currentSymbol,
+        interval: currentInterval,
         desiredViewport,
         currentChartViewport: preUpdateViewport,
         viewportChange: preUpdateViewport ? {
           deltaMin: desiredViewport.min - preUpdateViewport.min,
-          deltaMax: desiredViewport.max - preUpdateViewport.max
+          deltaMax: desiredViewport.max - preUpdateViewport.max,
+          deltaMinPercent: ((desiredViewport.min - preUpdateViewport.min) / (preUpdateViewport.max - preUpdateViewport.min) * 100).toFixed(2),
+          deltaMaxPercent: ((desiredViewport.max - preUpdateViewport.max) / (preUpdateViewport.max - preUpdateViewport.min) * 100).toFixed(2)
         } : 'no_previous_viewport',
         cameraState: preUpdateCameraState.mode,
-        cameraLocked: preUpdateCameraState.isLocked
+        cameraLocked: preUpdateCameraState.isLocked,
+        candleTimestamp: new Date(newCandle.x).toLocaleTimeString(),
+        candlePrice: newCandle.c
       });
       
-      simpleCamera.applyViewportToChart(chart, desiredViewport);
+      const applySuccess = simpleCamera.applyViewportToChart(chart, desiredViewport);
+      
+      logScale('VIEWPORT_APPLICATION_RESULT', {
+        success: applySuccess,
+        desiredViewport,
+        updateSequence: updateSequence.current
+      });
       
       // CRÍTICO: Verificar si el viewport se aplicó correctamente (con tolerancia mejorada)
       const postApplyViewport = chart.scales?.x ? {
@@ -1321,6 +1417,23 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
         Math.abs(postApplyViewport.min - desiredViewport.min) < minTolerance &&
         Math.abs(postApplyViewport.max - desiredViewport.max) < minTolerance;
       
+      logScale('SCALE_VERIFICATION_AFTER_APPLY', {
+        symbol: currentSymbol,
+        desiredViewport,
+        actualViewport: postApplyViewport,
+        appliedCorrectly: viewportAppliedCorrectly,
+        tolerance: minTolerance,
+        differences: postApplyViewport ? {
+          minDiff: Math.abs(postApplyViewport.min - desiredViewport.min),
+          maxDiff: Math.abs(postApplyViewport.max - desiredViewport.max),
+          minDiffMs: Math.abs(postApplyViewport.min - desiredViewport.min),
+          maxDiffMs: Math.abs(postApplyViewport.max - desiredViewport.max)
+        } : null,
+        updateSequence: updateSequence.current,
+        candlePrice: newCandle.c,
+        timestamp: new Date().toLocaleTimeString()
+      });
+      
       if (!viewportAppliedCorrectly) {
         unexpectedViewportChanges.current++;
         
@@ -1331,8 +1444,9 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
         );
         
         if (significantError) {
-          logError('Viewport not applied correctly', {
+          logScale('SCALE_APPLICATION_ERROR', {
             updateSequence: updateSequence.current,
+            symbol: currentSymbol,
             desired: desiredViewport,
             actual: postApplyViewport,
             difference: postApplyViewport ? {
@@ -1340,14 +1454,8 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
               maxDiff: Math.abs(postApplyViewport.max - desiredViewport.max)
             } : 'no_scales',
             tolerance: minTolerance,
-            unexpectedChanges: unexpectedViewportChanges.current
-          });
-        } else {
-          // Solo log de debug para diferencias menores
-          console.log('🔧 [MinorViewportDiff]', {
-            minDiff: postApplyViewport ? Math.abs(postApplyViewport.min - desiredViewport.min) : 'no_scales',
-            maxDiff: postApplyViewport ? Math.abs(postApplyViewport.max - desiredViewport.max) : 'no_scales',
-            tolerance: minTolerance
+            unexpectedChanges: unexpectedViewportChanges.current,
+            reason: 'significant_scale_mismatch'
           });
         }
       }
@@ -2198,14 +2306,39 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
               clearTimeout(cryptocurrencyChangeTimeout.current);
             }
             
-            logLifecycle('RESETTING_CAMERA_FOR_CRYPTOCURRENCY_CHANGE', 'MinimalistChart', {
+            const preCameraState = simpleCamera.getCurrentState();
+            logCryptoChange('RESETTING_CAMERA_FOR_CRYPTOCURRENCY_CHANGE', {
               reason: 'cryptocurrency_change',
               previousSymbol: previousSymbolRef.current,
               newSymbol: currentSymbol,
               interval: currentInterval,
-              streamUpdatesBlocked: true
+              streamUpdatesBlocked: true,
+              preCameraState: {
+                mode: preCameraState.mode,
+                isLocked: preCameraState.isLocked,
+                viewport: preCameraState.viewport,
+                lastUserAction: preCameraState.lastUserAction ? new Date(preCameraState.lastUserAction).toLocaleTimeString() : null
+              },
+              timestamp: new Date().toLocaleTimeString()
             });
+            
             simpleCamera.resetForCryptoCurrencyChange();
+            
+            const postCameraState = simpleCamera.getCurrentState();
+            logCryptoChange('CAMERA_RESET_COMPLETE_FOR_CRYPTO_CHANGE', {
+              preCameraState: {
+                mode: preCameraState.mode,
+                isLocked: preCameraState.isLocked,
+                viewport: preCameraState.viewport
+              },
+              postCameraState: {
+                mode: postCameraState.mode,
+                isLocked: postCameraState.isLocked,
+                viewport: postCameraState.viewport
+              },
+              stateCleared: !postCameraState.isLocked && !postCameraState.lastUserAction,
+              timestamp: new Date().toLocaleTimeString()
+            });
           } else if (intervalChanged) {
             logLifecycle('RESETTING_CAMERA_FOR_TIMEFRAME_CHANGE', 'MinimalistChart', {
               reason: 'timeframe_change',
@@ -2240,13 +2373,24 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
             const viewportSet = simpleCamera.setViewportToLatestData(historicalData);
             
             if (symbolChanged) {
-              logLifecycle('VIEWPORT_CONFIGURED_FOR_CRYPTOCURRENCY_CHANGE', 'MinimalistChart', {
+              const currentCameraViewport = simpleCamera.getViewportFromCamera();
+              logCryptoChange('VIEWPORT_CONFIGURED_FOR_CRYPTOCURRENCY_CHANGE', {
                 previousSymbol: previousSymbolRef.current,
                 newSymbol: currentSymbol,
                 interval: currentInterval,
                 dataLength: historicalData.length,
                 viewportSet,
-                reason: 'show_all_data_full_graph_cryptocurrency_change'
+                reason: 'show_all_data_full_graph_cryptocurrency_change',
+                newViewport: currentCameraViewport,
+                dataRange: historicalData.length > 0 ? {
+                  firstCandle: new Date(historicalData[0].x).toLocaleTimeString(),
+                  lastCandle: new Date(historicalData[historicalData.length - 1].x).toLocaleTimeString(),
+                  priceRange: {
+                    min: Math.min(...historicalData.map(d => d.l)),
+                    max: Math.max(...historicalData.map(d => d.h))
+                  }
+                } : null,
+                timestamp: new Date().toLocaleTimeString()
               });
             } else {
               logLifecycle('VIEWPORT_CONFIGURED_FOR_TIMEFRAME_CHANGE', 'MinimalistChart', {
@@ -2266,19 +2410,40 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
                 simpleCamera.unlockCamera(); // Esto cambiará a modo AUTO
                 
                 const changeType = symbolChanged ? 'cryptocurrency' : 'timeframe';
-                logLifecycle(`CAMERA_MODE_CHANGED_TO_AUTO_AFTER_${changeType.toUpperCase()}_CHANGE`, 'MinimalistChart', {
-                  previousMode: 'FIRST_LOAD',
-                  newMode: 'AUTO',
-                  reason: `viewport_configured_successfully_${changeType}_change`
-                });
+                
+                if (symbolChanged) {
+                  const finalCameraState = simpleCamera.getCurrentState();
+                  logCryptoChange('CAMERA_MODE_CHANGED_TO_AUTO_AFTER_CRYPTOCURRENCY_CHANGE', {
+                    previousMode: 'FIRST_LOAD',
+                    newMode: 'AUTO',
+                    reason: 'viewport_configured_successfully_cryptocurrency_change',
+                    finalCameraState: {
+                      mode: finalCameraState.mode,
+                      isLocked: finalCameraState.isLocked,
+                      viewport: finalCameraState.viewport
+                    },
+                    newSymbol: currentSymbol,
+                    previousSymbol: previousSymbolRef.current,
+                    timestamp: new Date().toLocaleTimeString()
+                  });
+                } else {
+                  logLifecycle('CAMERA_MODE_CHANGED_TO_AUTO_AFTER_TIMEFRAME_CHANGE', 'MinimalistChart', {
+                    previousMode: 'FIRST_LOAD',
+                    newMode: 'AUTO',
+                    reason: 'viewport_configured_successfully_timeframe_change'
+                  });
+                }
                 
                 // DESACTIVAR PROTECCIÓN: Permitir actualizaciones después del cambio de criptomoneda
                 if (symbolChanged) {
                   cryptocurrencyChangeTimeout.current = setTimeout(() => {
                     isChangingCryptocurrency.current = false;
-                    logLifecycle('CRYPTOCURRENCY_CHANGE_PROTECTION_DISABLED', 'MinimalistChart', {
+                    logCryptoChange('CRYPTOCURRENCY_CHANGE_PROTECTION_DISABLED', {
                       reason: 'camera_and_viewport_configured_successfully',
-                      streamUpdatesEnabled: true
+                      streamUpdatesEnabled: true,
+                      newSymbol: currentSymbol,
+                      totalTransitionTime: Date.now(),
+                      timestamp: new Date().toLocaleTimeString()
                     });
                   }, 500); // Dar tiempo extra para que se estabilice todo
                 }
@@ -2348,21 +2513,32 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
   useEffect(() => {
     // Handler estable que usa referencias para evitar dependencias circulares
     const handleCandleUpdate = (update: StreamUpdate) => {
-      logChart('STREAM_UPDATE_RECEIVED', {
+      logLastCandle('STREAM_UPDATE_RECEIVED', {
         symbol: update.symbol,
+        currentSymbol: currentSymbol,
         interval: update.interval,
+        currentInterval: currentInterval,
         isFinal: update.isFinal,
         price: update.candle.c,
         timestamp: new Date().toLocaleTimeString(),
-        matchesCurrentChart: update.symbol === currentSymbol && update.interval === currentInterval
+        candleTimestamp: new Date(update.candle.x).toLocaleTimeString(),
+        matchesCurrentChart: update.symbol === currentSymbol && update.interval === currentInterval,
+        candleRange: {
+          open: update.candle.o,
+          high: update.candle.h,
+          low: update.candle.l,
+          close: update.candle.c
+        }
       });
       
       // PROTECCIÓN CRÍTICA: Bloquear updates durante cambios de criptomoneda
       if (isChangingCryptocurrency.current) {
-        logChart('STREAM_UPDATE_BLOCKED_CRYPTOCURRENCY_CHANGE', {
+        logCryptoChange('STREAM_UPDATE_BLOCKED_CRYPTOCURRENCY_CHANGE', {
           symbol: update.symbol,
           currentSymbol: currentSymbol,
-          reason: 'cryptocurrency_change_in_progress'
+          reason: 'cryptocurrency_change_in_progress',
+          price: update.candle.c,
+          timestamp: new Date().toLocaleTimeString()
         });
         return;
       }
@@ -2413,32 +2589,55 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
           
           if (existingIndex >= 0) {
             // Actualizar vela existente
-            const oldPrice = newData[existingIndex].c;
+            const oldCandle = newData[existingIndex];
+            const oldPrice = oldCandle.c;
             newData[existingIndex] = update.candle;
-            logChart('STREAM_STATE_UPDATE_EXISTING', {
+            
+            logLastCandle('STREAM_STATE_UPDATE_EXISTING', {
               index: existingIndex,
+              symbol: update.symbol,
               oldPrice: oldPrice.toFixed(4),
               newPrice: update.candle.c.toFixed(4),
-              isFinal: update.isFinal
+              priceChange: (update.candle.c - oldPrice).toFixed(4),
+              percentChange: ((update.candle.c - oldPrice) / oldPrice * 100).toFixed(2),
+              isFinal: update.isFinal,
+              oldTimestamp: new Date(oldCandle.x).toLocaleTimeString(),
+              newTimestamp: new Date(update.candle.x).toLocaleTimeString(),
+              totalCandles: newData.length,
+              lastCandleIndex: existingIndex
             });
           } else {
             // Agregar nueva vela
             newData.push(update.candle);
-            logChart('STREAM_STATE_ADD_NEW', {
+            
+            logLastCandle('STREAM_STATE_ADD_NEW', {
               price: update.candle.c.toFixed(4),
               timestamp: new Date(update.candle.x).toLocaleTimeString(),
+              symbol: update.symbol,
+              interval: update.interval,
               totalCandles: newData.length,
-              isFinal: update.isFinal
+              isFinal: update.isFinal,
+              newCandleIndex: newData.length - 1,
+              candleRange: {
+                open: update.candle.o,
+                high: update.candle.h,
+                low: update.candle.l,
+                close: update.candle.c
+              }
             });
             
             // Mantener solo las últimas velas según configuración de cámara
             const maxCandles = 1000;
             if (newData.length > maxCandles) {
               const removedCount = newData.length - maxCandles;
-              newData.splice(0, removedCount);
-              logChart('STREAM_STATE_TRIM', {
+              const removedCandles = newData.splice(0, removedCount);
+              logLastCandle('STREAM_STATE_TRIM', {
                 removedCount,
-                finalCount: newData.length
+                finalCount: newData.length,
+                removedCandlesTimeRange: removedCandles.length > 0 ? {
+                  from: new Date(removedCandles[0].x).toLocaleTimeString(),
+                  to: new Date(removedCandles[removedCandles.length - 1].x).toLocaleTimeString()
+                } : null
               });
             }
           }

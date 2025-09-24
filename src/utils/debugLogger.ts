@@ -4,22 +4,27 @@
  * CONFIGURADO PARA DEBUGGING DETALLADO DE CÁMARA Y VIEWPORT
  */
 
-// Configuración inline para timing y debug
+// Configuración inline para timing y debug - OPTIMIZADA PARA PRODUCCIÓN
 const DEBUG_CONFIG = {
   ENABLED: true,
-  DETAILED_LOGS: true,
-  LOG_PERFORMANCE: true,
-  ENABLE_CAMERA_LOGS: true,
-  ENABLE_VIEWPORT_LOGS: true,
-  ENABLE_INTERACTION_LOGS: true,
-  ENABLE_TIDAL_LOGS: true,
-  ENABLE_STATE_LOGS: true,
-  ENABLE_PERSISTENCE_LOGS: true,
-  ENABLE_CHART_LOGS: true,
-  ENABLE_STREAMING_LOGS: true,
-  ENABLE_PERFORMANCE_LOGS: true,
-  ENABLE_WEBVIEW_LOGS: true,
-  ENABLE_ANIMATION_LOGS: true
+  DETAILED_LOGS: false, // Reducido para mejor rendimiento
+  LOG_PERFORMANCE: false, // Solo para debugging específico
+  ENABLE_CAMERA_LOGS: false, // Solo para debugging de cámara
+  ENABLE_VIEWPORT_LOGS: false, // Solo para debugging de viewport
+  ENABLE_INTERACTION_LOGS: false, // Solo para debugging de interacciones
+  ENABLE_TIDAL_LOGS: false, // Solo para debugging de tidal flow
+  ENABLE_STATE_LOGS: false, // Solo para debugging de estado
+  ENABLE_PERSISTENCE_LOGS: false, // Solo para debugging de persistencia
+  ENABLE_CHART_LOGS: false, // Solo para debugging de chart
+  ENABLE_STREAMING_LOGS: false, // Solo para debugging de streaming
+  ENABLE_PERFORMANCE_LOGS: false, // Solo para debugging de performance
+  ENABLE_WEBVIEW_LOGS: false, // Solo para debugging de webview
+  ENABLE_ANIMATION_LOGS: false, // Solo para debugging de animaciones
+  
+  // NUEVOS: Logs específicos para debugging de escala y última vela
+  ENABLE_LAST_CANDLE_LOGS: true, // Para debugging de última vela
+  ENABLE_SCALE_LOGS: true, // Para debugging de escala
+  ENABLE_CRYPTO_CHANGE_LOGS: true // Para debugging de cambio de cripto
 };
 
 const CAMERA_TIMINGS = {
@@ -44,6 +49,9 @@ type LogCategory =
   | 'ANIMATION'    // Logs de animaciones
   | 'STATE'        // Logs de cambios de estado
   | 'PERSISTENCE'  // Logs de carga/guardado de sessionStorage
+  | 'LAST_CANDLE'  // Logs específicos para debugging de última vela
+  | 'SCALE'        // Logs específicos para debugging de escala
+  | 'CRYPTO_CHANGE' // Logs específicos para debugging de cambio de cripto
 
 interface LogConfig {
   enabled: boolean;
@@ -51,8 +59,7 @@ interface LogConfig {
   color?: string;
 }
 
-// Configuración de logs - habilitar solo las categorías necesarias
-// ✅ CONFIGURACIÓN PARA DEBUGGING INTENSIVO DE CÁMARA
+// Configuración de logs - optimizada para debugging específico
 const LOG_CONFIG: Record<LogCategory, LogConfig> = {
   CAMERA: { enabled: DEBUG_CONFIG.ENABLE_CAMERA_LOGS, emoji: '📷' },
   VIEWPORT: { enabled: DEBUG_CONFIG.ENABLE_VIEWPORT_LOGS, emoji: '🖼️' },
@@ -62,11 +69,16 @@ const LOG_CONFIG: Record<LogCategory, LogConfig> = {
   PERSISTENCE: { enabled: DEBUG_CONFIG.ENABLE_PERSISTENCE_LOGS, emoji: '💾' },
   CHART: { enabled: DEBUG_CONFIG.ENABLE_CHART_LOGS, emoji: '📊' },
   STREAMING: { enabled: DEBUG_CONFIG.ENABLE_STREAMING_LOGS, emoji: '📡' },
-  GESTURES: { enabled: true, emoji: '🤏' },
+  GESTURES: { enabled: false, emoji: '🤏' }, // Reducido para menor spam
   PERFORMANCE: { enabled: DEBUG_CONFIG.ENABLE_PERFORMANCE_LOGS, emoji: '⚡' },
-  ERROR: { enabled: true, emoji: '❌' },
+  ERROR: { enabled: true, emoji: '❌' }, // Siempre habilitado
   WEBVIEW: { enabled: DEBUG_CONFIG.ENABLE_WEBVIEW_LOGS, emoji: '📱' },
   ANIMATION: { enabled: DEBUG_CONFIG.ENABLE_ANIMATION_LOGS, emoji: '🎬' },
+  
+  // NUEVOS: Logs específicos para debugging crítico
+  LAST_CANDLE: { enabled: DEBUG_CONFIG.ENABLE_LAST_CANDLE_LOGS, emoji: '🕯️' },
+  SCALE: { enabled: DEBUG_CONFIG.ENABLE_SCALE_LOGS, emoji: '📏' },
+  CRYPTO_CHANGE: { enabled: DEBUG_CONFIG.ENABLE_CRYPTO_CHANGE_LOGS, emoji: '🔄' },
 };
 
 class DebugLogger {
@@ -354,7 +366,59 @@ export const logSystemSnapshot = (context: string, cameraState?: any, chartState
 export const logInteractionCycle = (phase: 'START' | 'MIDDLE' | 'END', type: string, data?: any) => 
   debugLogger.interactionCycle(phase, type, data);
 
-// Para habilitar logs de streaming si es necesario para debugging:
+// NUEVAS funciones para debugging específico
+export const logLastCandle = (message: string, data?: any) => debugLogger.log('LAST_CANDLE', message, data);
+export const logScale = (message: string, data?: any) => debugLogger.log('SCALE', message, data);
+export const logCryptoChange = (message: string, data?: any) => debugLogger.log('CRYPTO_CHANGE', message, data);
+
+// Para habilitar logs específicos desde consola del navegador:
 // debugLogger.setEnabled('STREAMING', true);
+// debugLogger.setEnabled('LAST_CANDLE', true);
+// debugLogger.setEnabled('SCALE', true);
+// debugLogger.setEnabled('CRYPTO_CHANGE', true);
+
+// Función global para habilitar debugging específico
+if (typeof window !== 'undefined') {
+  (window as any).enableHoundTradeDebug = (categories?: string[]) => {
+    const availableCategories = [
+      'CAMERA', 'VIEWPORT', 'INTERACTION', 'TIDAL', 'STATE', 'PERSISTENCE',
+      'CHART', 'STREAMING', 'GESTURES', 'PERFORMANCE', 'WEBVIEW', 'ANIMATION',
+      'LAST_CANDLE', 'SCALE', 'CRYPTO_CHANGE'
+    ];
+    
+    if (!categories) {
+      // Habilitar todas las categorías de debugging
+      availableCategories.forEach(cat => {
+        debugLogger.setEnabled(cat as LogCategory, true);
+      });
+      console.log('🔍 [HOUND_DEBUG] Todas las categorías de debugging habilitadas');
+    } else {
+      // Habilitar solo las categorías especificadas
+      categories.forEach(cat => {
+        if (availableCategories.includes(cat.toUpperCase())) {
+          debugLogger.setEnabled(cat.toUpperCase() as LogCategory, true);
+          console.log(`🔍 [HOUND_DEBUG] Debugging habilitado para: ${cat.toUpperCase()}`);
+        } else {
+          console.warn(`⚠️ [HOUND_DEBUG] Categoría desconocida: ${cat}`);
+        }
+      });
+    }
+    
+    console.log('📋 [HOUND_DEBUG] Estado actual:', debugLogger.getConfig());
+  };
+
+  (window as any).disableHoundTradeDebug = () => {
+    const categories = ['CAMERA', 'VIEWPORT', 'INTERACTION', 'TIDAL', 'STATE', 'PERSISTENCE', 'CHART', 'STREAMING', 'GESTURES', 'PERFORMANCE', 'WEBVIEW', 'ANIMATION'];
+    categories.forEach(cat => {
+      debugLogger.setEnabled(cat as LogCategory, false);
+    });
+    console.log('🔇 [HOUND_DEBUG] Debugging deshabilitado');
+  };
+
+  // Mantener habilitados por defecto solo los logs críticos
+  console.log('🔍 [HOUND_DEBUG] Para debugging específico, usa: enableHoundTradeDebug(["LAST_CANDLE", "SCALE", "CRYPTO_CHANGE"])');
+  console.log('🔍 [HOUND_DEBUG] Para habilitar todo: enableHoundTradeDebug()');
+  console.log('🔍 [HOUND_DEBUG] Para deshabilitar: disableHoundTradeDebug()');
+}
 
 export default debugLogger;
