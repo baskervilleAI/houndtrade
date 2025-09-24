@@ -20,7 +20,14 @@
     "web": {
       "favicon": "./assets/favicon.png",
       "bundler": "metro",
-      "output": "single"
+      "output": "single",
+      "name": "HoundTrade - Trading Platform",
+      "description": "Plataforma de trading con datos en tiempo real",
+      "lang": "es",
+      "display": "standalone",
+      "orientation": "portrait",
+      "themeColor": "#0a0a0a",
+      "backgroundColor": "#0a0a0a"
     },
     "plugins": [],
     "extra": {}

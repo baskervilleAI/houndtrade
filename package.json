@@ -20,11 +20,11 @@
     "build:lambdas": "cd backend && npm run build",
     "deploy:dev": "cd backend && ./scripts/deploy.sh dev",
     "deploy:prod": "cd backend && ./scripts/deploy.sh prod",
-    "build:web": "expo export --platform web --output-dir dist",
+    "build:web": "NODE_ENV=production expo export --platform web --output-dir dist",
     "build:android": "eas build --platform android --profile production",
     "build:ios": "eas build --platform ios --profile production",
     "build:all": "npm run build:web && npm run build:android && npm run build:ios",
-    "predeploy": "npm run build:web",
+    "predeploy": "npm run build:web && ./scripts/fix-github-pages.sh",
     "deploy:github": "gh-pages -d dist"
   },
   "dependencies": {
