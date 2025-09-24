@@ -111,6 +111,10 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
   // NUEVO: Control para aplicar viewport completo solo una vez tras cambio
   const hasAppliedFullViewportAfterChange = useRef<boolean>(false);
   
+  // CRÍTICO: Bandera para bloquear actualizaciones de vela durante cambios de criptomoneda
+  const isChangingCryptocurrency = useRef<boolean>(false);
+  const cryptocurrencyChangeTimeout = useRef<NodeJS.Timeout | null>(null);
+  
   const { selectedPair } = useMarket();
   const currentSymbol = symbol || selectedPair;
   
@@ -246,6 +250,104 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
     
   }, [candleData.length]);
 
+  // NUEVO: Función específica para limpiar el chart en cambios de criptomoneda
+  const clearChartForCryptoCurrencyChange = useCallback(() => {
+    logLifecycle('CLEARING_CHART_FOR_CRYPTOCURRENCY_CHANGE', 'MinimalistChart', {
+      reason: 'cryptocurrency_change_preparation',
+      chartExists: !!chartRef.current,
+      dataLength: candleData.length,
+      currentSymbol,
+      isStreaming
+    });
+
+    // 1. Detener streaming anterior inmediatamente y limpiar listeners
+    if (isStreaming) {
+      logLifecycle('STOPPING_STREAM_FOR_CRYPTOCURRENCY_CHANGE', 'MinimalistChart', {
+        symbol: currentSymbol,
+        interval: currentInterval
+      });
+      
+      // Forzar desconexión completa del stream anterior
+      liveStreamingService.unsubscribeFromStream(currentSymbol, currentInterval);
+      
+      // Esperar un momento para asegurar desconexión completa
+      liveStreamingService.disconnect();
+      
+      setIsStreaming(false);
+    }
+
+    // 2. Limpiar datos del estado de React
+    setCandleData([]);
+    
+    // 3. Limpiar completamente el chart si existe
+    if (chartRef.current) {
+      try {
+        // Limpiar todos los datasets
+        if (chartRef.current.data?.datasets) {
+          chartRef.current.data.datasets.forEach((dataset: any) => {
+            dataset.data = [];
+          });
+        }
+        
+        // Resetear escalas completamente
+        if (chartRef.current.options?.scales?.x) {
+          delete chartRef.current.options.scales.x.min;
+          delete chartRef.current.options.scales.x.max;
+        }
+        
+        if (chartRef.current.options?.scales?.y) {
+          delete chartRef.current.options.scales.y.min;
+          delete chartRef.current.options.scales.y.max;
+        }
+        
+        // Actualizar título del gráfico
+        if (chartRef.current.options?.plugins?.title) {
+          chartRef.current.options.plugins.title.text = `${currentSymbol} - ${currentInterval.toUpperCase()} ⏳ CARGANDO...`;
+        }
+        
+        // Actualizar sin animación para cambio inmediato
+        chartRef.current.update('none');
+        
+        logLifecycle('CHART_CLEARED_FOR_CRYPTOCURRENCY_SUCCESS', 'MinimalistChart', {
+          datasetsCleared: true,
+          scalesReset: true,
+          titleUpdated: true
+        });
+        
+      } catch (error) {
+        logError('Error clearing chart data for cryptocurrency change', {
+          error: error instanceof Error ? error.message : String(error)
+        });
+      }
+    }
+
+    // 4. Limpiar canvas directamente como backup
+    if (canvasRef.current) {
+      const ctx = canvasRef.current.getContext('2d');
+      if (ctx) {
+        ctx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
+        ctx.fillStyle = '#000';
+        ctx.fillRect(0, 0, canvasRef.current.width, canvasRef.current.height);
+        
+        logLifecycle('CANVAS_CLEARED_FOR_CRYPTOCURRENCY_CHANGE', 'MinimalistChart', {
+          canvasWidth: canvasRef.current.width,
+          canvasHeight: canvasRef.current.height
+        });
+      }
+    }
+
+    // 5. Reset flags específicos para cambio de criptomoneda
+    initialViewportSet.current = false;
+    hasAppliedFullViewportAfterChange.current = false;
+    
+    logLifecycle('CRYPTOCURRENCY_CHANGE_CLEANUP_COMPLETE', 'MinimalistChart', {
+      flagsReset: true,
+      streamingStopped: true,
+      chartCleared: true
+    });
+    
+  }, [candleData.length, currentSymbol, currentInterval, isStreaming]);
+
   const endUserInteraction = useCallback(() => {
     const timestamp = Date.now();
     const preCameraState = simpleCamera.getCurrentState();
@@ -306,6 +408,12 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
     // CRÍTICO: Ignorar eventos automáticos generados por actualizaciones de stream
     if (isApplyingAutomaticViewport.current) {
       logChart('ZOOM_EVENT_BLOCKED - automatic viewport update');
+      return;
+    }
+    
+    // PROTECCIÓN CRÍTICA: Bloquear eventos durante cambios de criptomoneda
+    if (isChangingCryptocurrency.current) {
+      logChart('ZOOM_EVENT_BLOCKED - cryptocurrency change in progress');
       return;
     }
     
@@ -424,6 +532,12 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
     // CRÍTICO: Ignorar eventos automáticos generados por actualizaciones de stream
     if (isApplyingAutomaticViewport.current) {
       logChart('PAN_EVENT_BLOCKED - automatic viewport update');
+      return;
+    }
+    
+    // PROTECCIÓN CRÍTICA: Bloquear eventos durante cambios de criptomoneda
+    if (isChangingCryptocurrency.current) {
+      logChart('PAN_EVENT_BLOCKED - cryptocurrency change in progress');
       return;
     }
     
@@ -971,6 +1085,17 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
     const startTime = Date.now();
     updateSequence.current++;
     
+    // PROTECCIÓN CRÍTICA: Bloquear actualizaciones durante cambios de criptomoneda
+    if (isChangingCryptocurrency.current) {
+      logChart('UPDATE_CHART_BLOCKED_CRYPTOCURRENCY_CHANGE', {
+        updateSequence: updateSequence.current,
+        price: newCandle.c,
+        reason: 'cryptocurrency_change_in_progress',
+        isChanging: isChangingCryptocurrency.current
+      });
+      return;
+    }
+
     // CRÍTICO: Capturar estado ANTES de cualquier modificación
     const preUpdateCameraState = simpleCamera.getCurrentState();
     const preUpdateChart = chartRef.current;
@@ -2062,19 +2187,42 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
           reason: 'user_initiated_change'
         });
 
-        // 1. RESETEAR LA CÁMARA solo para cambios intencionales (si no se hizo ya)
-        if (simpleCamera && (symbolChanged || intervalChanged) && isFirstLoad) {
-          logLifecycle('RESETTING_CAMERA_FOR_INTENTIONAL_CHANGE', 'MinimalistChart', {
-            reason: 'intentional_symbol_or_interval_change',
-            symbolChanged,
-            intervalChanged,
-            isFirstLoad
-          });
-          simpleCamera.resetForTimeframeChange();
+        // 1. RESETEAR LA CÁMARA específicamente según el tipo de cambio
+        if (simpleCamera && (symbolChanged || intervalChanged)) {
+          if (symbolChanged) {
+            // ACTIVAR PROTECCIÓN: Bloquear actualizaciones durante cambio de criptomoneda
+            isChangingCryptocurrency.current = true;
+            
+            // Limpiar timeout anterior si existe
+            if (cryptocurrencyChangeTimeout.current) {
+              clearTimeout(cryptocurrencyChangeTimeout.current);
+            }
+            
+            logLifecycle('RESETTING_CAMERA_FOR_CRYPTOCURRENCY_CHANGE', 'MinimalistChart', {
+              reason: 'cryptocurrency_change',
+              previousSymbol: previousSymbolRef.current,
+              newSymbol: currentSymbol,
+              interval: currentInterval,
+              streamUpdatesBlocked: true
+            });
+            simpleCamera.resetForCryptoCurrencyChange();
+          } else if (intervalChanged) {
+            logLifecycle('RESETTING_CAMERA_FOR_TIMEFRAME_CHANGE', 'MinimalistChart', {
+              reason: 'timeframe_change',
+              symbol: currentSymbol,
+              previousInterval: previousIntervalRef.current,
+              newInterval: currentInterval
+            });
+            simpleCamera.resetForTimeframeChange();
+          }
         }
 
-        // 2. LIMPIAR DATOS ANTERIORES COMPLETAMENTE solo si es cambio intencional
-        clearChartCompletely();
+        // 2. LIMPIAR DATOS ANTERIORES usando método específico según el tipo de cambio
+        if (symbolChanged) {
+          clearChartForCryptoCurrencyChange();
+        } else {
+          clearChartCompletely();
+        }
 
         // 3. Marcar que necesitamos reinicializar debido a cambio de símbolo/intervalo
         chartNeedsReinitializationRef.current = true;
@@ -2086,18 +2234,30 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
         const historicalData = await liveStreamingService.loadHistoricalData(currentSymbol, currentInterval, 1000);
         setCandleData(historicalData);
 
-        // 5. CONFIGURAR VIEWPORT PARA MOSTRAR TODAS LAS VELAS
+        // 5. CONFIGURAR VIEWPORT PARA MOSTRAR TODAS LAS VELAS (específico por tipo de cambio)
         if (simpleCamera && historicalData.length > 0) {
           setTimeout(() => {
             const viewportSet = simpleCamera.setViewportToLatestData(historicalData);
             
-            logLifecycle('VIEWPORT_CONFIGURED_FOR_SYMBOL_CHANGE', 'MinimalistChart', {
-              symbol: currentSymbol,
-              interval: currentInterval,
-              dataLength: historicalData.length,
-              viewportSet,
-              reason: 'show_all_data_full_graph_symbol_change'
-            });
+            if (symbolChanged) {
+              logLifecycle('VIEWPORT_CONFIGURED_FOR_CRYPTOCURRENCY_CHANGE', 'MinimalistChart', {
+                previousSymbol: previousSymbolRef.current,
+                newSymbol: currentSymbol,
+                interval: currentInterval,
+                dataLength: historicalData.length,
+                viewportSet,
+                reason: 'show_all_data_full_graph_cryptocurrency_change'
+              });
+            } else {
+              logLifecycle('VIEWPORT_CONFIGURED_FOR_TIMEFRAME_CHANGE', 'MinimalistChart', {
+                symbol: currentSymbol,
+                previousInterval: previousIntervalRef.current,
+                newInterval: currentInterval,
+                dataLength: historicalData.length,
+                viewportSet,
+                reason: 'show_all_data_full_graph_timeframe_change'
+              });
+            }
 
             // 6. CAMBIAR A MODO AUTO después de configurar viewport
             setTimeout(() => {
@@ -2105,11 +2265,23 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
               if (currentState.mode === 'FIRST_LOAD') {
                 simpleCamera.unlockCamera(); // Esto cambiará a modo AUTO
                 
-                logLifecycle('CAMERA_MODE_CHANGED_TO_AUTO_AFTER_SYMBOL_CHANGE', 'MinimalistChart', {
+                const changeType = symbolChanged ? 'cryptocurrency' : 'timeframe';
+                logLifecycle(`CAMERA_MODE_CHANGED_TO_AUTO_AFTER_${changeType.toUpperCase()}_CHANGE`, 'MinimalistChart', {
                   previousMode: 'FIRST_LOAD',
                   newMode: 'AUTO',
-                  reason: 'viewport_configured_successfully_symbol_change'
+                  reason: `viewport_configured_successfully_${changeType}_change`
                 });
+                
+                // DESACTIVAR PROTECCIÓN: Permitir actualizaciones después del cambio de criptomoneda
+                if (symbolChanged) {
+                  cryptocurrencyChangeTimeout.current = setTimeout(() => {
+                    isChangingCryptocurrency.current = false;
+                    logLifecycle('CRYPTOCURRENCY_CHANGE_PROTECTION_DISABLED', 'MinimalistChart', {
+                      reason: 'camera_and_viewport_configured_successfully',
+                      streamUpdatesEnabled: true
+                    });
+                  }, 500); // Dar tiempo extra para que se estabilice todo
+                }
               }
             }, 200);
           }, 100);
@@ -2128,7 +2300,7 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
     // Actualizar referencias para el próximo cambio
     previousSymbolRef.current = currentSymbol;
     previousIntervalRef.current = currentInterval;
-  }, [currentSymbol, currentInterval, simpleCamera, clearChartCompletely]);
+  }, [currentSymbol, currentInterval, simpleCamera, clearChartCompletely, clearChartForCryptoCurrencyChange]);
 
   // NUEVO: Solo reinicializar el gráfico cuando realmente sea necesario
   const lastCandleCountRef = useRef<number>(0);
@@ -2184,6 +2356,16 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
         timestamp: new Date().toLocaleTimeString(),
         matchesCurrentChart: update.symbol === currentSymbol && update.interval === currentInterval
       });
+      
+      // PROTECCIÓN CRÍTICA: Bloquear updates durante cambios de criptomoneda
+      if (isChangingCryptocurrency.current) {
+        logChart('STREAM_UPDATE_BLOCKED_CRYPTOCURRENCY_CHANGE', {
+          symbol: update.symbol,
+          currentSymbol: currentSymbol,
+          reason: 'cryptocurrency_change_in_progress'
+        });
+        return;
+      }
       
       if (update.symbol === currentSymbol && update.interval === currentInterval) {
         logChart('STREAM_UPDATE_PROCESSING', {
@@ -2323,6 +2505,26 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
       }
       if (chartRef.current) {
         chartRef.current.destroy();
+      }
+      
+      // Limpiar timeouts para evitar actualizaciones después del desmontaje
+      if (cryptocurrencyChangeTimeout.current) {
+        clearTimeout(cryptocurrencyChangeTimeout.current);
+      }
+      if (userInteractionTimeoutRef.current) {
+        clearTimeout(userInteractionTimeoutRef.current);
+      }
+      if (zoomTimeoutRef.current) {
+        clearTimeout(zoomTimeoutRef.current);
+      }
+      if (panTimeoutRef.current) {
+        clearTimeout(panTimeoutRef.current);
+      }
+      if (zoomDebounceRef.current) {
+        clearTimeout(zoomDebounceRef.current);
+      }
+      if (panDebounceRef.current) {
+        clearTimeout(panDebounceRef.current);
       }
       
       // Limpiar listeners

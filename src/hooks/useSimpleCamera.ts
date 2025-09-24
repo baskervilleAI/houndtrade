@@ -93,8 +93,9 @@ export interface SimpleCameraControls {
   setTide: (tide: number) => void;
   setCooldownMs: (cooldownMs: number) => void;
   
-    // NUEVOS métodos para cambios de temporalidad
+    // NUEVOS métodos para cambios de temporalidad y criptomoneda
   resetForTimeframeChange: () => void;
+  resetForCryptoCurrencyChange: () => void;
   setViewportToLatestData: (candleData: any[], visibleCandles?: number) => boolean;
 }
 
@@ -712,6 +713,55 @@ export const useSimpleCamera = ({
     }
   }, [atomic, onStateChange]);
 
+  // NUEVO: Reset específico para cambios de criptomoneda
+  const resetForCryptoCurrencyChange = useCallback(() => {
+    const preState = stateRef.current;
+    logUserInteractionDetailed('RESET_FOR_CRYPTOCURRENCY_CHANGE', {
+      reason: 'cryptocurrency_change_requested',
+      clearingSessionStorage: true,
+      forcingAutoMode: true,
+      showingFullGraph: true
+    }, preState);
+    
+    atomic(() => {
+      const newState: SimpleCameraState = {
+        mode: 'FIRST_LOAD', // FIRST_LOAD para permitir ajuste inicial automático
+        viewport: null,
+        tide: 1.0, // Máximo seguimiento para mostrar datos más recientes  
+        cooldownMs: 1000, // Cooldown reducido para cambios de criptomoneda
+        lastUserActionTs: null,
+        // Legacy para compatibilidad - completamente limpio
+        isLocked: false,
+        lastUserAction: null,
+        chartJsState: {
+          min: null,
+          max: null,
+          centerX: null
+        }
+      };
+      
+      logStateTransition(preState, newState, 'resetForCryptoCurrencyChange');
+      setState(newState);
+      stateRef.current = newState; // Actualizar ref inmediatamente
+      
+      logViewportState(newState, 'AFTER_CRYPTOCURRENCY_RESET');
+      
+      if (onStateChange) {
+        onStateChange(newState);
+      }
+    });
+    
+    // Limpiar sessionStorage para forzar estado completamente fresco
+    if (typeof window !== 'undefined') {
+      try {
+        sessionStorage.removeItem('simpleCamera_state');
+        logPersistenceOp('CLEAR_SESSIONSTORAGE_CRYPTOCURRENCY_CHANGE', null, true);
+      } catch (error) {
+        logPersistenceOp('CLEAR_SESSIONSTORAGE_CRYPTOCURRENCY_CHANGE', null, false);
+      }
+    }
+  }, [atomic, onStateChange]);
+
   // NUEVO: Configurar viewport para mostrar todo el gráfico (cambio de temporalidad)
   const setViewportToLatestData = useCallback((candleData: any[], visibleCandles?: number) => {
     if (!candleData || candleData.length === 0) {
@@ -1052,8 +1102,9 @@ export const useSimpleCamera = ({
     shouldFollowTail,
     setTide,
     setCooldownMs,
-    // NUEVOS métodos para cambios de temporalidad
+    // NUEVOS métodos para cambios de temporalidad y criptomoneda
     resetForTimeframeChange,
+    resetForCryptoCurrencyChange,
     setViewportToLatestData
   }), [
     state, 
@@ -1081,6 +1132,7 @@ export const useSimpleCamera = ({
     setTide,
     setCooldownMs,
     resetForTimeframeChange,
+    resetForCryptoCurrencyChange,
     setViewportToLatestData
   ]);
 
