@@ -239,8 +239,8 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
       return;
     }
     
-    // THROTTLE ESPECÍFICO PARA ZOOM: Solo 1 evento cada 100ms (reducido)
-    if (now - lastZoomProcessedTime.current < 100) {
+    // THROTTLE MEJORADO PARA ZOOM: Reducir bloqueos innecesarios
+    if (now - lastZoomProcessedTime.current < 50) { // Reducido de 100ms a 50ms
       logChart('ZOOM_EVENT_BLOCKED - throttle limit');
       return;
     }
@@ -260,22 +260,23 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
       clearTimeout(zoomDebounceRef.current);
     }
     
-    // Debounce de 150ms
+    // NUEVO: Procesar inmediatamente el inicio de la interacción para mejor responsividad
+    const preInteractionState = simpleCamera.getCurrentState();
+    logUserInteractionDetailed('ZOOM_PROCESSING_START', {
+      min: xScale.min,
+      max: xScale.max,
+      center: (xScale.min + xScale.max) / 2
+    }, preInteractionState);
+    
+    // Notificar inicio de interacción inmediatamente
+    startUserInteraction();
+    
+    // Log del estado después de notificar inicio
+    const postStartState = simpleCamera.getCurrentState();
+    logViewportState(postStartState, 'POST_START_INTERACTION_ZOOM');
+    
+    // Debounce reducido solo para el estado final
     zoomDebounceRef.current = setTimeout(() => {
-      const preInteractionState = simpleCamera.getCurrentState();
-      logUserInteractionDetailed('ZOOM_PROCESSING_START', {
-        min: xScale.min,
-        max: xScale.max,
-        center: (xScale.min + xScale.max) / 2
-      }, preInteractionState);
-      
-      // Notificar inicio de interacción inmediatamente
-      startUserInteraction();
-      
-      // Log del estado después de notificar inicio
-      const postStartState = simpleCamera.getCurrentState();
-      logViewportState(postStartState, 'POST_START_INTERACTION_ZOOM');
-      
       // Limpiar timeout anterior si existe
       if (zoomTimeoutRef.current) {
         clearTimeout(zoomTimeoutRef.current);
@@ -291,8 +292,20 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
             finalCenter: (finalScale.min + finalScale.max) / 2
           });
           
-          // NUEVO: Usar sistema de persistencia mejorado
-          simpleCamera.onUserZoom(finalScale.min, finalScale.max, (finalScale.min + finalScale.max) / 2);
+          // MEJORADO: Usar datos del evento actual, no del chart que puede haber cambiado
+          const eventMin = xScale.min;
+          const eventMax = xScale.max;
+          const eventCenter = (eventMin + eventMax) / 2;
+          
+          logUserInteractionDetailed('USER_ZOOM', {
+            eventMin,
+            eventMax,
+            eventCenter,
+            finalScaleMin: finalScale.min,
+            finalScaleMax: finalScale.max
+          }, preInteractionState);
+          
+          simpleCamera.onUserZoom(eventMin, eventMax, eventCenter);
           simpleCamera.lockCamera(); // Bloquear la cámara en la nueva posición
           
           // Log del estado después del zoom completo
@@ -309,13 +322,13 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
         // Liberar bloqueos después de completar
         isProcessingZoom.current = false;
         
-        // CRÍTICO: Liberar bloqueo global después de un delay más corto
+        // CRÍTICO: Liberar bloqueo global inmediatamente para mejor respuesta
         setTimeout(() => {
           globalInteractionBlocked.current = false;
           logChart('ZOOM_GLOBAL_BLOCK_RELEASED');
-        }, 50); // Reducido de 100ms a 50ms para mejor respuesta
-      }, 50); // Reducido de 100ms a 50ms
-    }, 100); // Reducido de 150ms a 100ms
+        }, 25); // Reducido de 50ms a 25ms para mejor respuesta
+      }, 25); // Reducido de 50ms a 25ms para mejor respuesta
+    }, 50); // Reducido de 100ms a 50ms para mejor respuesta
   }, [startUserInteraction, endUserInteraction, simpleCamera]);
 
   const debouncedPanHandler = useCallback((chart: any, xScale: any) => {
@@ -344,8 +357,8 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
       return;
     }
     
-    // THROTTLE ESPECÍFICO PARA PAN: Solo 1 evento cada 100ms (reducido)
-    if (now - lastPanProcessedTime.current < 100) {
+    // THROTTLE MEJORADO PARA PAN: Reducir bloqueos innecesarios
+    if (now - lastPanProcessedTime.current < 50) { // Reducido de 100ms a 50ms
       logChart('PAN_EVENT_BLOCKED - throttle limit');
       return;
     }
@@ -365,18 +378,19 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
       clearTimeout(panDebounceRef.current);
     }
     
-    // Debounce de 150ms
+    // NUEVO: Procesar inmediatamente el inicio de la interacción para mejor responsividad
+    const preInteractionState = simpleCamera.getCurrentState();
+    logUserInteractionDetailed('PAN_PROCESSING_START', {
+      min: xScale.min,
+      max: xScale.max,
+      center: (xScale.min + xScale.max) / 2
+    }, preInteractionState);
+    
+    // Notificar inicio de interacción inmediatamente
+    startUserInteraction();
+    
+    // Debounce reducido solo para el estado final
     panDebounceRef.current = setTimeout(() => {
-      const preInteractionState = simpleCamera.getCurrentState();
-      logUserInteractionDetailed('PAN_PROCESSING_START', {
-        min: xScale.min,
-        max: xScale.max,
-        center: (xScale.min + xScale.max) / 2
-      }, preInteractionState);
-      
-      // Notificar inicio de interacción inmediatamente
-      startUserInteraction();
-      
       // Limpiar timeout anterior si existe
       if (panTimeoutRef.current) {
         clearTimeout(panTimeoutRef.current);
@@ -392,8 +406,20 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
             finalCenter: (finalScale.min + finalScale.max) / 2
           });
           
-          // NUEVO: Usar sistema de persistencia mejorado
-          simpleCamera.onUserPan(finalScale.min, finalScale.max, (finalScale.min + finalScale.max) / 2);
+          // MEJORADO: Usar datos del evento actual, no del chart que puede haber cambiado
+          const eventMin = xScale.min;
+          const eventMax = xScale.max;
+          const eventCenter = (eventMin + eventMax) / 2;
+          
+          logUserInteractionDetailed('USER_PAN', {
+            eventMin,
+            eventMax,
+            eventCenter,
+            finalScaleMin: finalScale.min,
+            finalScaleMax: finalScale.max
+          }, preInteractionState);
+          
+          simpleCamera.onUserPan(eventMin, eventMax, eventCenter);
           simpleCamera.lockCamera(); // Bloquear la cámara en la nueva posición
         }
         endUserInteraction();
@@ -401,13 +427,13 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
         // Liberar bloqueos después de completar
         isProcessingPan.current = false;
         
-        // CRÍTICO: Liberar bloqueo global después de un delay más corto
+        // CRÍTICO: Liberar bloqueo global inmediatamente para mejor respuesta
         setTimeout(() => {
           globalInteractionBlocked.current = false;
           logChart('PAN_GLOBAL_BLOCK_RELEASED');
-        }, 50); // Reducido de 100ms a 50ms para mejor respuesta
-      }, 50); // Reducido de 100ms a 50ms
-    }, 100); // Reducido de 150ms a 100ms
+        }, 25); // Reducido de 50ms a 25ms para mejor respuesta
+      }, 25); // Reducido de 50ms a 25ms para mejor respuesta
+    }, 50); // Reducido de 100ms a 50ms para mejor respuesta
   }, [startUserInteraction, endUserInteraction, simpleCamera]);
 
   // ============================================
@@ -1615,6 +1641,9 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
   useEffect(() => {
     const loadInitialData = async () => {
       try {
+        // Marcar que necesitamos reinicializar debido a cambio de símbolo/intervalo
+        chartNeedsReinitializationRef.current = true;
+        
         const historicalData = await liveStreamingService.loadHistoricalData(currentSymbol, currentInterval, 900);
         setCandleData(historicalData);
       } catch (error) {
@@ -1625,11 +1654,44 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
     loadInitialData();
   }, [currentSymbol, currentInterval]);
 
+  // NUEVO: Solo reinicializar el gráfico cuando realmente sea necesario
+  const lastCandleCountRef = useRef<number>(0);
+  const chartNeedsReinitializationRef = useRef<boolean>(false);
+  
   useEffect(() => {
-    if (candleData.length > 0) {
+    // Solo inicializar si:
+    // 1. Tenemos datos de velas
+    // 2. No existe un gráfico actualmente
+    // 3. El número de velas cambió significativamente (nuevo símbolo/intervalo)
+    // 4. Se marcó explícitamente para reinicialización
+    
+    const shouldInitialize = candleData.length > 0 && (
+      !chartRef.current || 
+      Math.abs(candleData.length - lastCandleCountRef.current) > 50 ||
+      chartNeedsReinitializationRef.current
+    );
+    
+    if (shouldInitialize) {
+      logLifecycle('CHART_REINITIALIZE_DECISION', 'MinimalistChart', {
+        candleDataLength: candleData.length,
+        lastCandleCount: lastCandleCountRef.current,
+        chartExists: !!chartRef.current,
+        forceReinit: chartNeedsReinitializationRef.current,
+        sizeDelta: Math.abs(candleData.length - lastCandleCountRef.current)
+      });
+      
+      lastCandleCountRef.current = candleData.length;
+      chartNeedsReinitializationRef.current = false;
       initializeChart();
+    } else {
+      logLifecycle('CHART_REINITIALIZE_SKIPPED', 'MinimalistChart', {
+        candleDataLength: candleData.length,
+        lastCandleCount: lastCandleCountRef.current,
+        chartExists: !!chartRef.current,
+        sizeDelta: Math.abs(candleData.length - lastCandleCountRef.current)
+      });
     }
-  }, [candleData, initializeChart]);
+  }, [candleData.length, currentSymbol, currentInterval, initializeChart]); // Solo depender de longitud, no de los datos completos
 
   // ❌ HOOK ELIMINADO: Este hook causaba loops de viewport forzado redundante
   // Ya no necesitamos forzar el viewport aquí porque updateChart ya lo maneja correctamente

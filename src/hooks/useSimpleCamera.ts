@@ -225,7 +225,7 @@ export const useSimpleCamera = ({
         mode: 'FIRST_LOAD',
         viewport: null,
         tide: 0.8,
-        cooldownMs: 1500, // Reducido de 3000ms a 1500ms para mayor responsividad
+        cooldownMs: 3500, // Incrementado para mejor debounce
         lastUserActionTs: null,
         // Legacy para compatibilidad
         isLocked: false,
@@ -246,7 +246,7 @@ export const useSimpleCamera = ({
           mode: parsed.mode || 'FIRST_LOAD',
           viewport: parsed.viewport || null,
           tide: parsed.tide ?? 0.8,
-          cooldownMs: parsed.cooldownMs ?? 1500, // Reducido de 3000ms a 1500ms
+          cooldownMs: parsed.cooldownMs ?? 3500, // Incrementado para mejor debounce
           lastUserActionTs: parsed.lastUserActionTs || null,
           // Legacy para compatibilidad
           isLocked: parsed.isLocked || false,
@@ -266,7 +266,7 @@ export const useSimpleCamera = ({
       mode: 'FIRST_LOAD',
       viewport: null,
       tide: 0.8,
-      cooldownMs: 1500, // Reducido de 3000ms a 1500ms para mayor responsividad
+      cooldownMs: 3500, // Incrementado para mejor debounce
       lastUserActionTs: null,
       // Legacy para compatibilidad
       isLocked: false,
@@ -281,6 +281,7 @@ export const useSimpleCamera = ({
   // Use a ref to maintain current state accessible from callbacks
   const stateRef = useRef(state);
   const interactionTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const interactionDebounceRef = useRef<NodeJS.Timeout | null>(null);
 
   // Función atómica para evitar reentradas
   const atomic = useCallback((fn: () => void) => {
@@ -485,26 +486,36 @@ export const useSimpleCamera = ({
       });
     });
     
-    // Clear any existing timeout
+    // Clear any existing timeouts
     if (interactionTimeoutRef.current) {
       logCamera('START_INTERACTION - clearing existing timeout');
       clearTimeout(interactionTimeoutRef.current);
     }
+    if (interactionDebounceRef.current) {
+      logCamera('START_INTERACTION - clearing existing debounce timeout');
+      clearTimeout(interactionDebounceRef.current);
+    }
   }, [atomic]);
 
-  // End user interaction (con protección atómica)
+  // End user interaction (con protección atómica y debounce mejorado)
   const onUserEndInteraction = useCallback(() => {
     const timestamp = Date.now();
     const preState = stateRef.current;
     
     logUserInteractionDetailed('END_INTERACTION', {
       timestamp: new Date(timestamp).toLocaleTimeString(),
-      timeoutDelay: 50
+      debounceDelay: 750 // Incrementado para mejor debounce
     }, preState);
     
-    // Small delay to ensure we capture the final state - REDUCIDO para mejor respuesta
-    interactionTimeoutRef.current = setTimeout(() => {
-      logCamera('END_INTERACTION - applying final state after timeout');
+    // Clear existing debounce timeout
+    if (interactionDebounceRef.current) {
+      logCamera('END_INTERACTION - clearing existing debounce timeout');
+      clearTimeout(interactionDebounceRef.current);
+    }
+    
+    // NUEVO: Debounce mejorado que espera a que el usuario termine completamente
+    interactionDebounceRef.current = setTimeout(() => {
+      logCamera('END_INTERACTION - applying final state after debounce');
       atomic(() => {
         setState(prev => {
           const newState = {
@@ -515,12 +526,12 @@ export const useSimpleCamera = ({
             mode: 'USER_LOCKED' as const
           };
           
-          logStateTransition(prev, newState, 'onUserEndInteraction_timeout');
+          logStateTransition(prev, newState, 'onUserEndInteraction_debounced');
           logViewportState(newState, 'FINAL_INTERACTION_STATE');
           return shallowEqual(prev, newState) ? prev : newState;
         });
       });
-    }, 25); // Reducido de 50ms a 25ms para respuesta más rápida
+    }, 750); // Incrementado a 750ms para evitar cambios prematuros
   }, [atomic]);
 
   // Handle user zoom - con protección atómica contra reentradas
@@ -607,7 +618,7 @@ export const useSimpleCamera = ({
       mode: 'FIRST_LOAD',
       viewport: null,
       tide: 0.8,
-      cooldownMs: 1500, // Reducido de 3000ms a 1500ms para mayor responsividad
+      cooldownMs: 3500, // Incrementado para mejor debounce
       lastUserActionTs: null,
       // Legacy para compatibilidad
       isLocked: false,
