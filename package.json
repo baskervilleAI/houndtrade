@@ -29,7 +29,7 @@
     "build:ios": "eas build --platform ios --profile production",
     "build:all": "npm run build:web && npm run build:android && npm run build:ios",
 
-    "predeploy": "npm run build:web && cp dist/index.html dist/404.html || true",
+    "predeploy": "npm run build:web && cp dist/index.html dist/404.html || true && touch dist/.nojekyll",
     "deploy": "gh-pages -d dist"
   },
   "dependencies": {
