@@ -4,7 +4,31 @@
  * CONFIGURADO PARA DEBUGGING DETALLADO DE CÁMARA Y VIEWPORT
  */
 
-import { DEBUG_CONFIG, CAMERA_TIMINGS } from '../config/timing';
+// Configuración inline para timing y debug
+const DEBUG_CONFIG = {
+  ENABLED: true,
+  DETAILED_LOGS: true,
+  LOG_PERFORMANCE: true,
+  ENABLE_CAMERA_LOGS: true,
+  ENABLE_VIEWPORT_LOGS: true,
+  ENABLE_INTERACTION_LOGS: true,
+  ENABLE_TIDAL_LOGS: true,
+  ENABLE_STATE_LOGS: true,
+  ENABLE_PERSISTENCE_LOGS: true,
+  ENABLE_CHART_LOGS: true,
+  ENABLE_STREAMING_LOGS: true,
+  ENABLE_PERFORMANCE_LOGS: true,
+  ENABLE_WEBVIEW_LOGS: true,
+  ENABLE_ANIMATION_LOGS: true
+};
+
+const CAMERA_TIMINGS = {
+  USER_INTERACTION_DELAY: 300,
+  INTERACTION_TIMEOUT: 500,
+  PAN_DEBOUNCE: 50,
+  ZOOM_DEBOUNCE: 50,
+  LOG_DEDUP_WINDOW: 100
+};
 
 type LogCategory = 
   | 'CAMERA'       // Logs de control de cámara
