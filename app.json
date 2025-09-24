@@ -30,6 +30,9 @@
       "backgroundColor": "#0a0a0a"
     },
     "plugins": [],
-    "extra": {}
+    "extra": {},
+    "experiments": {
+      "baseUrl": "/houndtrade/"
+    }
   }
 }
