@@ -743,106 +743,7 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
         }
       ];
 
-      // Agregar indicadores técnicos
-      if (activeIndicators.has('sma20')) {
-        datasets.push({
-          label: 'SMA 20',
-          type: 'line',
-          data: candleData.map((candle, i) => ({
-            x: candle.x,
-            y: technicalIndicators.sma20[i]
-          })).filter(point => !isNaN(point.y)),
-          borderColor: '#ffaa00',
-          backgroundColor: 'transparent',
-          borderWidth: 2,
-          pointRadius: 0,
-          tension: 0.1,
-          yAxisID: 'y'
-        });
-      }
-
-      if (activeIndicators.has('sma50')) {
-        datasets.push({
-          label: 'SMA 50',
-          type: 'line',
-          data: candleData.map((candle, i) => ({
-            x: candle.x,
-            y: technicalIndicators.sma50[i]
-          })).filter(point => !isNaN(point.y)),
-          borderColor: '#ff6600',
-          backgroundColor: 'transparent',
-          borderWidth: 2,
-          pointRadius: 0,
-          tension: 0.1,
-          yAxisID: 'y'
-        });
-      }
-
-      if (activeIndicators.has('ema20')) {
-        datasets.push({
-          label: 'EMA 20',
-          type: 'line',
-          data: candleData.map((candle, i) => ({
-            x: candle.x,
-            y: technicalIndicators.ema20[i]
-          })).filter(point => !isNaN(point.y)),
-          borderColor: '#00aaff',
-          backgroundColor: 'transparent',
-          borderWidth: 2,
-          pointRadius: 0,
-          tension: 0.1,
-          yAxisID: 'y'
-        });
-      }
-
-      if (activeIndicators.has('bollinger')) {
-        // Banda superior
-        datasets.push({
-          label: 'BB Upper',
-          type: 'line',
-          data: candleData.map((candle, i) => ({
-            x: candle.x,
-            y: technicalIndicators.bollinger.upper[i]
-          })).filter(point => !isNaN(point.y)),
-          borderColor: 'rgba(255, 255, 255, 0.5)',
-          backgroundColor: 'transparent',
-          borderWidth: 1,
-          pointRadius: 0,
-          borderDash: [5, 5],
-          yAxisID: 'y'
-        });
-
-        // Banda media
-        datasets.push({
-          label: 'BB Middle',
-          type: 'line',
-          data: candleData.map((candle, i) => ({
-            x: candle.x,
-            y: technicalIndicators.bollinger.middle[i]
-          })).filter(point => !isNaN(point.y)),
-          borderColor: '#ffffff',
-          backgroundColor: 'transparent',
-          borderWidth: 1,
-          pointRadius: 0,
-          yAxisID: 'y'
-        });
-
-        // Banda inferior
-        datasets.push({
-          label: 'BB Lower',
-          type: 'line',
-          data: candleData.map((candle, i) => ({
-            x: candle.x,
-            y: technicalIndicators.bollinger.lower[i]
-          })).filter(point => !isNaN(point.y)),
-          borderColor: 'rgba(255, 255, 255, 0.5)',
-          backgroundColor: 'transparent',
-          borderWidth: 1,
-          pointRadius: 0,
-          borderDash: [5, 5],
-          yAxisID: 'y'
-        });
-      }
+      // Los indicadores técnicos se agregan dinámicamente después de la creación inicial
 
       // Crear gráfico con opciones memoizadas
       const chartCreationStart = Date.now();
@@ -880,6 +781,15 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
 
       setStatus(`✅ Gráfico listo (${candleData.length} velas)`);
 
+      // Re-aplicar indicadores activos después de inicialización exitosa
+      if (chartRef.current && activeIndicators.size > 0) {
+        setTimeout(() => {
+          activeIndicators.forEach(indicator => {
+            addIndicatorToChart(chartRef.current, indicator);
+          });
+        }, 50); // Pequeño delay para asegurar que el gráfico esté completamente inicializado
+      }
+
     } catch (error: any) {
       const initDuration = Date.now() - initStartTime;
       logError('Chart initialization failed', {
@@ -892,7 +802,7 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
       setStatus(`Error: ${error.message}`);
       console.error('Error creando gráfico:', error);
     }
-  }, [candleData, currentSymbol, currentInterval, isStreaming, activeIndicators, technicalIndicators, chartOptions, debouncedZoomHandler, debouncedPanHandler]);
+  }, [candleData, currentSymbol, currentInterval, isStreaming, technicalIndicators, chartOptions, debouncedZoomHandler, debouncedPanHandler]);
 
   const updateChart = useCallback((newCandle: CandleData, isFinal: boolean) => {
     const startTime = Date.now();
@@ -1625,17 +1535,239 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
     }
   }, [getSystemStateSnapshot, logSystemStateSnapshot, startSystemMonitoring, diagnoseCameraReset, simpleCamera, persistentViewport]);
 
+  // Funciones para manejar indicadores dinámicamente
+  const addIndicatorToChart = useCallback((chart: any, indicator: string) => {
+    if (!chart?.data?.datasets || !technicalIndicators) return;
+
+    const candleDataForIndicators = candleData;
+    
+    switch (indicator) {
+      case 'sma20':
+        chart.data.datasets.push({
+          label: 'SMA 20',
+          type: 'line',
+          data: candleDataForIndicators.map((candle, i) => ({
+            x: candle.x,
+            y: technicalIndicators.sma20[i]
+          })).filter(point => !isNaN(point.y)),
+          borderColor: '#ffaa00',
+          backgroundColor: 'transparent',
+          borderWidth: 2,
+          pointRadius: 0,
+          tension: 0.1,
+          yAxisID: 'y'
+        });
+        break;
+        
+      case 'sma50':
+        chart.data.datasets.push({
+          label: 'SMA 50',
+          type: 'line',
+          data: candleDataForIndicators.map((candle, i) => ({
+            x: candle.x,
+            y: technicalIndicators.sma50[i]
+          })).filter(point => !isNaN(point.y)),
+          borderColor: '#ff6600',
+          backgroundColor: 'transparent',
+          borderWidth: 2,
+          pointRadius: 0,
+          tension: 0.1,
+          yAxisID: 'y'
+        });
+        break;
+        
+      case 'ema20':
+        chart.data.datasets.push({
+          label: 'EMA 20',
+          type: 'line',
+          data: candleDataForIndicators.map((candle, i) => ({
+            x: candle.x,
+            y: technicalIndicators.ema20[i]
+          })).filter(point => !isNaN(point.y)),
+          borderColor: '#00aaff',
+          backgroundColor: 'transparent',
+          borderWidth: 2,
+          pointRadius: 0,
+          tension: 0.1,
+          yAxisID: 'y'
+        });
+        break;
+        
+      case 'bollinger':
+        // Banda superior
+        chart.data.datasets.push({
+          label: 'BB Upper',
+          type: 'line',
+          data: candleDataForIndicators.map((candle, i) => ({
+            x: candle.x,
+            y: technicalIndicators.bollinger.upper[i]
+          })).filter(point => !isNaN(point.y)),
+          borderColor: 'rgba(255, 255, 255, 0.5)',
+          backgroundColor: 'transparent',
+          borderWidth: 1,
+          pointRadius: 0,
+          borderDash: [5, 5],
+          yAxisID: 'y'
+        });
+        
+        // Banda media
+        chart.data.datasets.push({
+          label: 'BB Middle',
+          type: 'line',
+          data: candleDataForIndicators.map((candle, i) => ({
+            x: candle.x,
+            y: technicalIndicators.bollinger.middle[i]
+          })).filter(point => !isNaN(point.y)),
+          borderColor: '#ffffff',
+          backgroundColor: 'transparent',
+          borderWidth: 1,
+          pointRadius: 0,
+          yAxisID: 'y'
+        });
+        
+        // Banda inferior
+        chart.data.datasets.push({
+          label: 'BB Lower',
+          type: 'line',
+          data: candleDataForIndicators.map((candle, i) => ({
+            x: candle.x,
+            y: technicalIndicators.bollinger.lower[i]
+          })).filter(point => !isNaN(point.y)),
+          borderColor: 'rgba(255, 255, 255, 0.5)',
+          backgroundColor: 'transparent',
+          borderWidth: 1,
+          pointRadius: 0,
+          borderDash: [5, 5],
+          yAxisID: 'y'
+        });
+        break;
+    }
+    
+    // Actualizar con animación
+    chart.update('default');
+  }, [candleData, technicalIndicators]);
+
+  const removeIndicatorFromChart = useCallback((chart: any, indicator: string) => {
+    if (!chart?.data?.datasets) return;
+
+    const labelsToRemove: string[] = [];
+    switch (indicator) {
+      case 'sma20':
+        labelsToRemove.push('SMA 20');
+        break;
+      case 'sma50':
+        labelsToRemove.push('SMA 50');
+        break;
+      case 'ema20':
+        labelsToRemove.push('EMA 20');
+        break;
+      case 'bollinger':
+        labelsToRemove.push('BB Upper', 'BB Middle', 'BB Lower');
+        break;
+    }
+    
+    // Eliminar datasets por label
+    chart.data.datasets = chart.data.datasets.filter((dataset: any) => 
+      !labelsToRemove.includes(dataset.label)
+    );
+    
+    // Actualizar con animación
+    chart.update('default');
+  }, []);
+
   const toggleIndicator = useCallback((indicator: string) => {
+    const chart = chartRef.current;
+    if (!chart) return;
+
     setActiveIndicators(prev => {
       const newSet = new Set(prev);
-      if (newSet.has(indicator)) {
+      const isRemoving = newSet.has(indicator);
+      
+      if (isRemoving) {
         newSet.delete(indicator);
+        removeIndicatorFromChart(chart, indicator);
       } else {
         newSet.add(indicator);
+        addIndicatorToChart(chart, indicator);
       }
+      
       return newSet;
     });
-  }, []);
+  }, [addIndicatorToChart, removeIndicatorFromChart]);
+
+  // useEffect separado para manejar indicadores cuando se actualicen los datos técnicos
+  useEffect(() => {
+    const chart = chartRef.current;
+    if (!chart || !technicalIndicators || candleData.length === 0) return;
+
+    // Actualizar solo los datasets de indicadores existentes sin triggear reinicialización
+    activeIndicators.forEach(indicator => {
+      const existingDatasets = chart.data.datasets;
+      
+      switch (indicator) {
+        case 'sma20': {
+          const smaDataset = existingDatasets.find((ds: any) => ds.label === 'SMA 20');
+          if (smaDataset) {
+            smaDataset.data = candleData.map((candle, i) => ({
+              x: candle.x,
+              y: technicalIndicators.sma20[i]
+            })).filter(point => !isNaN(point.y));
+          }
+          break;
+        }
+        case 'sma50': {
+          const smaDataset = existingDatasets.find((ds: any) => ds.label === 'SMA 50');
+          if (smaDataset) {
+            smaDataset.data = candleData.map((candle, i) => ({
+              x: candle.x,
+              y: technicalIndicators.sma50[i]
+            })).filter(point => !isNaN(point.y));
+          }
+          break;
+        }
+        case 'ema20': {
+          const emaDataset = existingDatasets.find((ds: any) => ds.label === 'EMA 20');
+          if (emaDataset) {
+            emaDataset.data = candleData.map((candle, i) => ({
+              x: candle.x,
+              y: technicalIndicators.ema20[i]
+            })).filter(point => !isNaN(point.y));
+          }
+          break;
+        }
+        case 'bollinger': {
+          const upperDataset = existingDatasets.find((ds: any) => ds.label === 'BB Upper');
+          const middleDataset = existingDatasets.find((ds: any) => ds.label === 'BB Middle');
+          const lowerDataset = existingDatasets.find((ds: any) => ds.label === 'BB Lower');
+          
+          if (upperDataset) {
+            upperDataset.data = candleData.map((candle, i) => ({
+              x: candle.x,
+              y: technicalIndicators.bollinger.upper[i]
+            })).filter(point => !isNaN(point.y));
+          }
+          if (middleDataset) {
+            middleDataset.data = candleData.map((candle, i) => ({
+              x: candle.x,
+              y: technicalIndicators.bollinger.middle[i]
+            })).filter(point => !isNaN(point.y));
+          }
+          if (lowerDataset) {
+            lowerDataset.data = candleData.map((candle, i) => ({
+              x: candle.x,
+              y: technicalIndicators.bollinger.lower[i]
+            })).filter(point => !isNaN(point.y));
+          }
+          break;
+        }
+      }
+    });
+    
+    // Solo actualizar si hay indicadores activos
+    if (activeIndicators.size > 0) {
+      chart.update('none'); // Usar 'none' para evitar animaciones durante actualizaciones de datos
+    }
+  }, [technicalIndicators, candleData, activeIndicators]);
 
   // Efectos
   useEffect(() => {
