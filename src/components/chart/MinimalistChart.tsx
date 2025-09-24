@@ -95,6 +95,9 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
   const lastPanProcessedTime = useRef<number>(0);
   const isProcessingZoom = useRef<boolean>(false);
   const isProcessingPan = useRef<boolean>(false);
+  
+  // NUEVO: Flag para distinguir entre eventos automáticos y del usuario
+  const isApplyingAutomaticViewport = useRef<boolean>(false);
 
   const { selectedPair } = useMarket();
   const currentSymbol = symbol || selectedPair;
@@ -165,8 +168,15 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
       timestamp: new Date().toLocaleTimeString(),
       globalBlocked: globalInteractionBlocked.current,
       lastZoomTime: lastZoomProcessedTime.current,
-      timeSinceLastZoom: now - lastZoomProcessedTime.current
+      timeSinceLastZoom: now - lastZoomProcessedTime.current,
+      isAutomaticViewport: isApplyingAutomaticViewport.current
     });
+    
+    // CRÍTICO: Ignorar eventos automáticos generados por actualizaciones de stream
+    if (isApplyingAutomaticViewport.current) {
+      logChart('ZOOM_EVENT_BLOCKED - automatic viewport update');
+      return;
+    }
     
     // BLOQUEO GLOBAL: Evitar cualquier solapamiento entre zoom y pan
     if (globalInteractionBlocked.current) {
@@ -263,8 +273,15 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
       timestamp: new Date().toLocaleTimeString(),
       globalBlocked: globalInteractionBlocked.current,
       lastPanTime: lastPanProcessedTime.current,
-      timeSinceLastPan: now - lastPanProcessedTime.current
+      timeSinceLastPan: now - lastPanProcessedTime.current,
+      isAutomaticViewport: isApplyingAutomaticViewport.current
     });
+    
+    // CRÍTICO: Ignorar eventos automáticos generados por actualizaciones de stream
+    if (isApplyingAutomaticViewport.current) {
+      logChart('PAN_EVENT_BLOCKED - automatic viewport update');
+      return;
+    }
     
     // BLOQUEO GLOBAL: Evitar cualquier solapamiento entre zoom y pan
     if (globalInteractionBlocked.current) {
@@ -845,14 +862,24 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
     });
 
     // D) APLICAR viewport objetivo (no preguntar al chart) - SIN setState
-    simpleCamera.applyViewportToChart(chart, desiredViewport);
-
-    // E) chart.update('none') - sin animación para evitar saltos
-    logTidalFlow('UPDATE_CHART_EXECUTE_UPDATE', {
-      updateMode: 'none',
-      chartUpdateStart: Date.now()
-    });
-    chart.update('none');
+    // CRÍTICO: Marcar que estamos aplicando viewport automático para evitar eventos de user
+    isApplyingAutomaticViewport.current = true;
+    
+    try {
+      simpleCamera.applyViewportToChart(chart, desiredViewport);
+      
+      // E) chart.update('none') - sin animación para evitar saltos
+      logTidalFlow('UPDATE_CHART_EXECUTE_UPDATE', {
+        updateMode: 'none',
+        chartUpdateStart: Date.now()
+      });
+      chart.update('none');
+    } finally {
+      // Limpiar flag después de aplicar, con delay para capturar eventos tardíos
+      setTimeout(() => {
+        isApplyingAutomaticViewport.current = false;
+      }, 50);
+    }
 
     const endTime = Date.now();
     const duration = endTime - startTime;
@@ -1145,12 +1172,21 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
           viewport: { min: userState.min, max: userState.max }
         });
         
-        chart.scales.x.min = userState.min;
-        chart.scales.x.max = userState.max;
-        chart.update('none');
-        initialViewportSet.current = true;
+        // Marcar como aplicación automática para evitar eventos de usuario
+        isApplyingAutomaticViewport.current = true;
         
-        logViewportState({ min: userState.min, max: userState.max }, 'USER_CONFIG_APPLIED');
+        try {
+          chart.scales.x.min = userState.min;
+          chart.scales.x.max = userState.max;
+          chart.update('none');
+          initialViewportSet.current = true;
+          
+          logViewportState({ min: userState.min, max: userState.max }, 'USER_CONFIG_APPLIED');
+        } finally {
+          setTimeout(() => {
+            isApplyingAutomaticViewport.current = false;
+          }, 50);
+        }
         return;
       }
     }
@@ -1167,12 +1203,21 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
           viewport
         });
         
-        chart.scales.x.min = viewport.min;
-        chart.scales.x.max = viewport.max;
-        chart.update('none');
-        initialViewportSet.current = true;
+        // Marcar como aplicación automática para evitar eventos de usuario
+        isApplyingAutomaticViewport.current = true;
         
-        logViewportState(viewport, 'INITIAL_VIEW_APPLIED');
+        try {
+          chart.scales.x.min = viewport.min;
+          chart.scales.x.max = viewport.max;
+          chart.update('none');
+          initialViewportSet.current = true;
+          
+          logViewportState(viewport, 'INITIAL_VIEW_APPLIED');
+        } finally {
+          setTimeout(() => {
+            isApplyingAutomaticViewport.current = false;
+          }, 50);
+        }
       } else {
         logLifecycle('VIEWPORT_INITIAL_SETUP_FAILED', 'MinimalistChart', {
           reason: 'invalid_viewport_data',

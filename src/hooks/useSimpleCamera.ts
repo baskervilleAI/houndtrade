@@ -131,11 +131,13 @@ function computeTidalViewport({
   const interacting = camera.mode === 'USER_INTERACTING'
     || (camera.lastUserActionTs && (Date.now() - camera.lastUserActionTs) < camera.cooldownMs);
 
-  if (interacting || camera.mode === 'USER_LOCKED' || camera.tide === 0) {
+  // CRÍTICO: Cualquier estado bloqueado (incluyendo legacy isLocked) debe mantener posición fija
+  if (interacting || camera.mode === 'USER_LOCKED' || camera.isLocked || camera.tide === 0) {
     const fixedViewport = getViewportFromCameraState(camera) ?? snap;
     console.log('🌊 [TidalViewport] Modo FIJO:', { 
       mode: camera.mode, 
       interacting, 
+      isLocked: camera.isLocked,
       viewport: fixedViewport 
     });
     return fixedViewport;
@@ -162,26 +164,19 @@ function computeTidalViewport({
 }
 
 /**
- * Aplica viewport al chart de forma robusta (plugin primero, fallback a scales)
+ * Aplica viewport al chart de forma robusta (SOLO fallback para evitar eventos automáticos)
  */
 function applyViewportToChart(chart: Chart, viewport: { min: number; max: number }): void {
-  try {
-    // Método preferido: usar API del plugin chartjs-plugin-zoom
-    if (typeof (chart as any).zoomScale === 'function') {
-      (chart as any).zoomScale('x', viewport, 'none');
-      console.log('🎯 [ApplyViewport] Plugin usado:', viewport);
-      return;
-    }
-  } catch (error) {
-    console.warn('🎯 [ApplyViewport] Plugin no disponible, usando fallback');
-  }
-
-  // Fallback: mutar options directamente
+  // CRÍTICO: Solo usar fallback directo para evitar disparar eventos onZoom/onPan
+  // El plugin de zoom dispara eventos que se interpretan como interacción del usuario
   if (chart.options.scales?.x) {
     chart.options.scales.x.min = viewport.min;
     chart.options.scales.x.max = viewport.max;
-    console.log('🎯 [ApplyViewport] Fallback usado:', viewport);
+    console.log('🎯 [ApplyViewport] Fallback directo (evita eventos):', viewport);
+    return;
   }
+  
+  console.warn('🎯 [ApplyViewport] No se pudo aplicar viewport - sin escalas X');
 }
 
 /**
@@ -793,7 +788,7 @@ export const useSimpleCamera = ({
     return result;
   }, []);
 
-  // Aplicar viewport al chart de forma robusta (SIN RECURSIÓN)
+  // Aplicar viewport al chart de forma robusta (SOLO FALLBACK para evitar eventos automáticos)
   const applyViewportToChart = useCallback((chart: Chart, viewport: { min: number; max: number }) => {
     logTidalFlow('APPLY_VIEWPORT_TO_CHART', {
       viewport,
@@ -802,19 +797,8 @@ export const useSimpleCamera = ({
       hasScales: !!chart.options?.scales?.x
     });
     
-    // Esta función NO debe llamarse a sí misma - arreglando la recursión
-    try {
-      // Método preferido: usar API del plugin chartjs-plugin-zoom
-      if (typeof (chart as any).zoomScale === 'function') {
-        (chart as any).zoomScale('x', viewport, 'none');
-        logTidalFlow('VIEWPORT_APPLIED_VIA_PLUGIN', { viewport });
-        return;
-      }
-    } catch (error) {
-      logTidalFlow('PLUGIN_FALLBACK_NEEDED', { error: error?.toString() });
-    }
-
-    // Fallback: mutar options directamente
+    // CRÍTICO: Solo usar fallback directo para evitar disparar eventos onZoom/onPan
+    // El plugin de zoom dispara eventos que se interpretan como interacción del usuario
     if (chart.options.scales?.x) {
       chart.options.scales.x.min = viewport.min;
       chart.options.scales.x.max = viewport.max;
@@ -832,7 +816,8 @@ export const useSimpleCamera = ({
     const interacting = currentState.mode === 'USER_INTERACTING'
       || (currentState.lastUserActionTs && (Date.now() - currentState.lastUserActionTs) < currentState.cooldownMs);
 
-    if (interacting || currentState.mode === 'USER_LOCKED') {
+    // CRÍTICO: Respetar CUALQUIER estado bloqueado (incluyendo legacy isLocked)
+    if (interacting || currentState.mode === 'USER_LOCKED' || currentState.isLocked) {
       return false;
     }
 
@@ -877,7 +862,12 @@ export const useSimpleCamera = ({
         atomic(() => {
           setState(prev => {
             if (prev.mode === 'USER_INTERACTING') {
-              const newState = { ...prev, mode: 'USER_LOCKED' as const };
+              const newState = { 
+                ...prev, 
+                mode: 'USER_LOCKED' as const,
+                // CRÍTICO: Asegurar que permanezca bloqueado permanentemente
+                isLocked: true
+              };
               logStateTransition(prev, newState, 'cooldown_timeout');
               return shallowEqual(prev, newState) ? prev : newState;
             }
