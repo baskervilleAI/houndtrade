@@ -41,7 +41,8 @@ import {
   logViewportState,
   logTiming,
   logSystemSnapshot,
-  logInteractionCycle
+  logInteractionCycle,
+  logError
 } from '../../utils/debugLogger';
 
 interface MinimalistChartProps {
@@ -83,6 +84,13 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
   const lastZoomTime = useRef<number>(0);
   const lastPanTime = useRef<number>(0);
   
+  // NUEVOS: Métricas detalladas para debugging del sistema
+  const chartInitializationCount = useRef<number>(0);
+  const cameraResetCount = useRef<number>(0);
+  const unexpectedViewportChanges = useRef<number>(0);
+  const lastChartUpdate = useRef<number>(0);
+  const updateSequence = useRef<number>(0);
+  
   // NUEVO: Referencias para control avanzado de eventos
   const zoomDebounceRef = useRef<NodeJS.Timeout | null>(null);
   const panDebounceRef = useRef<NodeJS.Timeout | null>(null);
@@ -120,37 +128,84 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
   // Helper functions para manejo de interacciones
   const startUserInteraction = useCallback(() => {
     const timestamp = Date.now();
+    const preCameraState = simpleCamera.getCurrentState();
+    
     logUserInteractionDetailed('START_USER_INTERACTION_CHART', {
       timestamp: new Date(timestamp).toLocaleTimeString(),
-      component: 'MinimalistChart'
-    });
+      component: 'MinimalistChart',
+      preCameraMode: preCameraState.mode,
+      preCameraLocked: preCameraState.isLocked,
+      chartExists: !!chartRef.current,
+      isStreamingActive: isStreaming,
+      totalInteractions: 'starting_new_interaction'
+    }, preCameraState);
+    
+    // Monitor for unexpected state changes
+    const beforeInteraction = {
+      cameraMode: preCameraState.mode,
+      cameraLocked: preCameraState.isLocked,
+      viewport: preCameraState.viewport
+    };
     
     setIsUserInteracting(true);
     simpleCamera.onUserStartInteraction();
     
+    // Log state after camera notification
+    const postCameraState = simpleCamera.getCurrentState();
+    logUserInteractionDetailed('CAMERA_NOTIFIED_OF_INTERACTION_START', {
+      beforeInteraction,
+      afterNotification: {
+        cameraMode: postCameraState.mode,
+        cameraLocked: postCameraState.isLocked,
+        viewport: postCameraState.viewport
+      },
+      stateChanged: beforeInteraction.cameraMode !== postCameraState.mode || 
+                    beforeInteraction.cameraLocked !== postCameraState.isLocked
+    });
+    
     // Limpiar timeout existente
     if (userInteractionTimeoutRef.current) {
       clearTimeout(userInteractionTimeoutRef.current);
+      logChart('START_INTERACTION - cleared existing timeout');
     }
   }, [simpleCamera]);
 
   const endUserInteraction = useCallback(() => {
     const timestamp = Date.now();
+    const preCameraState = simpleCamera.getCurrentState();
+    
     logUserInteractionDetailed('END_USER_INTERACTION_CHART', {
       timestamp: new Date(timestamp).toLocaleTimeString(),
       component: 'MinimalistChart',
-      delay: 300
-    });
+      delay: 300,
+      preCameraMode: preCameraState.mode,
+      preCameraLocked: preCameraState.isLocked,
+      hasViewport: !!preCameraState.viewport
+    }, preCameraState);
     
     // Delay para capturar estado final
     userInteractionTimeoutRef.current = setTimeout(() => {
+      const preEndState = simpleCamera.getCurrentState();
+      
       logUserInteractionDetailed('END_USER_INTERACTION_DELAYED', {
         timestamp: new Date().toLocaleTimeString(),
-        component: 'MinimalistChart'
+        component: 'MinimalistChart',
+        preEndCameraMode: preEndState.mode,
+        preEndCameraLocked: preEndState.isLocked
       });
       
       setIsUserInteracting(false);
       simpleCamera.onUserEndInteraction();
+      
+      // Log final state after end interaction
+      const finalState = simpleCamera.getCurrentState();
+      logUserInteractionDetailed('INTERACTION_SEQUENCE_COMPLETE', {
+        finalCameraMode: finalState.mode,
+        finalCameraLocked: finalState.isLocked,
+        finalViewport: finalState.viewport,
+        interactionDuration: timestamp - (preCameraState.lastUserAction || timestamp),
+        unexpectedChanges: unexpectedViewportChanges.current
+      }, finalState);
     }, 300); // 300ms delay para capturar estado final
   }, [simpleCamera]);
 
@@ -533,23 +588,61 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
   }, [activeIndicators]);
 
   const initializeChart = useCallback(async () => {
+    const initStartTime = Date.now();
+    chartInitializationCount.current++;
+    
+    logLifecycle('CHART_INITIALIZATION_START', 'MinimalistChart', {
+      initializationNumber: chartInitializationCount.current,
+      platform: Platform.OS,
+      candleDataLength: candleData.length,
+      currentSymbol,
+      currentInterval,
+      activeIndicators: Array.from(activeIndicators),
+      existingChart: !!chartRef.current,
+      canvasRef: !!canvasRef.current
+    });
+    
     if (Platform.OS !== 'web') {
       setStatus('Solo disponible en plataforma web');
+      logError('Chart initialization failed - not web platform', {
+        platform: Platform.OS,
+        initializationNumber: chartInitializationCount.current
+      });
       return;
     }
 
     try {
       setStatus('Cargando Chart.js...');
+      
+      logLifecycle('LOADING_CHARTJS_DEPENDENCIES', 'MinimalistChart', {
+        initializationNumber: chartInitializationCount.current
+      });
 
       // Importar Chart.js y plugins
+      const importStartTime = Date.now();
       const ChartJS = await import('chart.js/auto');
       const Chart = ChartJS.default;
       const ChartFinancial = await import('chartjs-chart-financial');
       const zoomPlugin = await import('chartjs-plugin-zoom');
+      const importDuration = Date.now() - importStartTime;
+
+      logTiming('Chart.js dependencies loaded', importDuration, {
+        initializationNumber: chartInitializationCount.current,
+        chartJSVersion: Chart.version || 'unknown',
+        hasFinancialPlugin: !!ChartFinancial,
+        hasZoomPlugin: !!zoomPlugin
+      });
 
       try {
         await import('chartjs-adapter-date-fns');
+        logLifecycle('DATE_ADAPTER_LOADED', 'MinimalistChart', {
+          adapter: 'date-fns'
+        });
       } catch (e) {
+        logError('Date adapter not available', {
+          error: e instanceof Error ? e.message : String(e),
+          initializationNumber: chartInitializationCount.current
+        });
         addLog('Adaptador de fechas no disponible');
       }
 
@@ -561,22 +654,46 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
         ChartFinancial.OhlcElement,
         zoomPlugin.default
       );
+      
+      logLifecycle('PLUGINS_REGISTERED', 'MinimalistChart', {
+        initializationNumber: chartInitializationCount.current,
+        registeredPlugins: ['CandlestickController', 'CandlestickElement', 'OhlcController', 'OhlcElement', 'zoomPlugin']
+      });
 
       if (!canvasRef.current) {
         setStatus('Error: Canvas no disponible');
+        logError('Canvas not available for chart initialization', {
+          canvasRef: !!canvasRef.current,
+          initializationNumber: chartInitializationCount.current
+        });
         return;
       }
 
       const ctx = canvasRef.current.getContext('2d');
       if (!ctx) {
         setStatus('Error: Context 2D no disponible');
+        logError('2D context not available', {
+          canvasRef: !!canvasRef.current,
+          initializationNumber: chartInitializationCount.current
+        });
         return;
       }
+
+      logLifecycle('CANVAS_CONTEXT_ACQUIRED', 'MinimalistChart', {
+        initializationNumber: chartInitializationCount.current,
+        canvasWidth: canvasRef.current.width,
+        canvasHeight: canvasRef.current.height
+      });
 
       setStatus('Creando gráfico...');
 
       // Destruir gráfico anterior si existe
       if (chartRef.current) {
+        const oldChartId = chartRef.current.id || 'unknown';
+        logLifecycle('DESTROYING_EXISTING_CHART', 'MinimalistChart', {
+          initializationNumber: chartInitializationCount.current,
+          existingChartId: oldChartId
+        });
         chartRef.current.destroy();
         chartRef.current = null;
       }
@@ -702,15 +819,50 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
       }
 
       // Crear gráfico con opciones memoizadas
+      const chartCreationStart = Date.now();
+      
+      logLifecycle('CREATING_CHART_INSTANCE', 'MinimalistChart', {
+        initializationNumber: chartInitializationCount.current,
+        datasetsCount: datasets.length,
+        candleDataLength: candleData.length,
+        activeIndicators: Array.from(activeIndicators),
+        hasChartOptions: !!chartOptions
+      });
+
       chartRef.current = new Chart(ctx, {
         type: 'candlestick',
         data: { datasets },
         options: chartOptions
       });
 
+      const chartCreationDuration = Date.now() - chartCreationStart;
+      const totalInitDuration = Date.now() - initStartTime;
+
+      logLifecycle('CHART_INITIALIZATION_SUCCESS', 'MinimalistChart', {
+        initializationNumber: chartInitializationCount.current,
+        chartId: chartRef.current.id || 'unknown',
+        chartCreationDuration,
+        totalInitDuration,
+        finalCandleCount: candleData.length,
+        datasetsCreated: datasets.length
+      });
+
+      logTiming('Chart initialization completed', totalInitDuration, {
+        initializationNumber: chartInitializationCount.current,
+        success: true
+      });
+
       setStatus(`✅ Gráfico listo (${candleData.length} velas)`);
 
     } catch (error: any) {
+      const initDuration = Date.now() - initStartTime;
+      logError('Chart initialization failed', {
+        error: error instanceof Error ? error.message : String(error),
+        initializationNumber: chartInitializationCount.current,
+        initDuration,
+        candleDataLength: candleData.length,
+        stackTrace: error.stack
+      });
       setStatus(`Error: ${error.message}`);
       console.error('Error creando gráfico:', error);
     }
@@ -718,18 +870,38 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
 
   const updateChart = useCallback((newCandle: CandleData, isFinal: boolean) => {
     const startTime = Date.now();
+    updateSequence.current++;
+    
+    // CRÍTICO: Capturar estado ANTES de cualquier modificación
+    const preUpdateCameraState = simpleCamera.getCurrentState();
+    const preUpdateChart = chartRef.current;
+    const preUpdateViewport = preUpdateChart?.scales?.x ? {
+      min: preUpdateChart.scales.x.min,
+      max: preUpdateChart.scales.x.max
+    } : null;
     
     logTidalFlow('UPDATE_CHART_START', {
+      updateSequence: updateSequence.current,
       newCandle: {
         timestamp: new Date(newCandle.x).toLocaleTimeString(),
         price: newCandle.c,
         isFinal
       },
-      chartExists: !!chartRef.current
+      chartExists: !!chartRef.current,
+      preUpdateCameraState: {
+        mode: preUpdateCameraState.mode,
+        isLocked: preUpdateCameraState.isLocked,
+        viewport: preUpdateCameraState.viewport
+      },
+      preUpdateChartViewport: preUpdateViewport,
+      isUserCurrentlyInteracting: isUserInteracting,
+      timeSinceLastUpdate: lastChartUpdate.current ? Date.now() - lastChartUpdate.current : 0
     });
     
     if (!chartRef.current) {
-      logChart('UPDATE_CHART_ABORT - no chart reference');
+      logChart('UPDATE_CHART_ABORT - no chart reference', {
+        updateSequence: updateSequence.current
+      });
       return;
     }
 
@@ -737,8 +909,10 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
     const now = Date.now();
     if (!isFinal && now - lastUpdateTime < updateThrottleMs) {
       logChart('UPDATE_CHART_THROTTLED', { 
+        updateSequence: updateSequence.current,
         timeSinceLastUpdate: now - lastUpdateTime,
-        threshold: updateThrottleMs 
+        threshold: updateThrottleMs,
+        price: newCandle.c
       });
       return;
     }
@@ -866,18 +1040,109 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
     isApplyingAutomaticViewport.current = true;
     
     try {
+      // CRÍTICO: Log detallado antes de aplicar viewport
+      logTidalFlow('APPLYING_VIEWPORT_TO_CHART', {
+        updateSequence: updateSequence.current,
+        desiredViewport,
+        currentChartViewport: preUpdateViewport,
+        viewportChange: preUpdateViewport ? {
+          deltaMin: desiredViewport.min - preUpdateViewport.min,
+          deltaMax: desiredViewport.max - preUpdateViewport.max
+        } : 'no_previous_viewport',
+        cameraState: preUpdateCameraState.mode,
+        cameraLocked: preUpdateCameraState.isLocked
+      });
+      
       simpleCamera.applyViewportToChart(chart, desiredViewport);
+      
+      // CRÍTICO: Verificar si el viewport se aplicó correctamente
+      const postApplyViewport = chart.scales?.x ? {
+        min: chart.scales.x.min,
+        max: chart.scales.x.max
+      } : null;
+      
+      const viewportAppliedCorrectly = postApplyViewport && 
+        Math.abs(postApplyViewport.min - desiredViewport.min) < 1 &&
+        Math.abs(postApplyViewport.max - desiredViewport.max) < 1;
+      
+      if (!viewportAppliedCorrectly) {
+        unexpectedViewportChanges.current++;
+        logError('Viewport not applied correctly', {
+          updateSequence: updateSequence.current,
+          desired: desiredViewport,
+          actual: postApplyViewport,
+          difference: postApplyViewport ? {
+            minDiff: Math.abs(postApplyViewport.min - desiredViewport.min),
+            maxDiff: Math.abs(postApplyViewport.max - desiredViewport.max)
+          } : 'no_scales',
+          unexpectedChanges: unexpectedViewportChanges.current
+        });
+      }
       
       // E) chart.update('none') - sin animación para evitar saltos
       logTidalFlow('UPDATE_CHART_EXECUTE_UPDATE', {
+        updateSequence: updateSequence.current,
         updateMode: 'none',
-        chartUpdateStart: Date.now()
+        chartUpdateStart: Date.now(),
+        viewportCorrectlyApplied: viewportAppliedCorrectly
       });
+      
+      const updateStartTime = Date.now();
       chart.update('none');
+      const updateDuration = Date.now() - updateStartTime;
+      
+      logTidalFlow('CHART_UPDATE_COMPLETED', {
+        updateSequence: updateSequence.current,
+        updateDuration,
+        finalViewport: chart.scales?.x ? {
+          min: chart.scales.x.min,
+          max: chart.scales.x.max
+        } : null
+      });
+      
     } finally {
       // Limpiar flag después de aplicar, con delay para capturar eventos tardíos
       setTimeout(() => {
         isApplyingAutomaticViewport.current = false;
+        
+        // CRÍTICO: Verificar estado final después de la actualización
+        const finalCameraState = simpleCamera.getCurrentState();
+        const finalChartViewport = chart.scales?.x ? {
+          min: chart.scales.x.min,
+          max: chart.scales.x.max
+        } : null;
+        
+        // Detectar cambios inesperados en el estado de la cámara
+        if (finalCameraState.mode !== preUpdateCameraState.mode || 
+            finalCameraState.isLocked !== preUpdateCameraState.isLocked) {
+          
+          unexpectedViewportChanges.current++;
+          
+          logError('UNEXPECTED CAMERA STATE CHANGE during chart update', {
+            updateSequence: updateSequence.current,
+            before: {
+              mode: preUpdateCameraState.mode,
+              isLocked: preUpdateCameraState.isLocked,
+              viewport: preUpdateCameraState.viewport
+            },
+            after: {
+              mode: finalCameraState.mode,
+              isLocked: finalCameraState.isLocked,
+              viewport: finalCameraState.viewport
+            },
+            chartViewportBefore: preUpdateViewport,
+            chartViewportAfter: finalChartViewport,
+            unexpectedChanges: unexpectedViewportChanges.current,
+            possibleCause: 'chart_update_triggered_camera_reset'
+          });
+        }
+        
+        logTidalFlow('UPDATE_CHART_FINALIZATION_COMPLETE', {
+          updateSequence: updateSequence.current,
+          flagCleared: true,
+          finalCameraMode: finalCameraState.mode,
+          finalViewport: finalChartViewport
+        });
       }, 50);
     }
 
@@ -892,53 +1157,447 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
   }, [currentInterval, simpleCamera, persistentViewport, lastUpdateTime, updateThrottleMs]);
 
   const changeTimeInterval = useCallback(async (newInterval: TimeInterval) => {
+    const intervalChangeStart = Date.now();
+    
+    // CRÍTICO: Capturar estado de cámara ANTES del cambio de intervalo
+    const preChangeState = {
+      currentInterval,
+      newInterval,
+      isStreaming,
+      candleDataLength: candleData.length,
+      cameraState: simpleCamera ? {
+        viewport: simpleCamera.getViewportFromCamera(),
+        currentState: simpleCamera.getCurrentState(),
+        isLocked: simpleCamera.isLocked(),
+        isActivelyInteracting: simpleCamera.isActivelyInteracting(),
+        shouldForceViewport: simpleCamera.shouldForceViewport(),
+        forcedViewport: simpleCamera.getForcedViewport()
+      } : null,
+      chartExists: !!chartRef.current,
+      chartId: chartRef.current?.id || null
+    };
+
+    logLifecycle('INTERVAL_CHANGE_START', 'MinimalistChart', preChangeState);
+
     setCurrentInterval(newInterval);
     setStatus('Cambiando intervalo...');
 
     try {
       // Desuscribirse del intervalo anterior
       if (isStreaming) {
+        logLifecycle('UNSUBSCRIBING_FROM_STREAM', 'MinimalistChart', {
+          symbol: currentSymbol,
+          oldInterval: currentInterval,
+          newInterval
+        });
         liveStreamingService.unsubscribeFromStream(currentSymbol, currentInterval);
       }
 
       // Cargar datos históricos para el nuevo intervalo
+      logLifecycle('LOADING_HISTORICAL_DATA', 'MinimalistChart', {
+        symbol: currentSymbol,
+        interval: newInterval,
+        candleCount: 900
+      });
+      
+      const historicalStart = Date.now();
       const historicalData = await liveStreamingService.loadHistoricalData(currentSymbol, newInterval, 900);
+      const historicalDuration = Date.now() - historicalStart;
+      
+      logTiming('Historical data loaded for interval change', historicalDuration, {
+        symbol: currentSymbol,
+        interval: newInterval,
+        candlesReceived: historicalData.length,
+        oldCandleCount: candleData.length,
+        newCandleCount: historicalData.length
+      });
+
       setCandleData(historicalData);
+
+      // CRÍTICO: Verificar si el cambio de datos afectó la cámara
+      setTimeout(() => {
+        const postDataChangeState = {
+          cameraState: simpleCamera ? {
+            viewport: simpleCamera.getViewportFromCamera(),
+            currentState: simpleCamera.getCurrentState(),
+            isLocked: simpleCamera.isLocked(),
+            isActivelyInteracting: simpleCamera.isActivelyInteracting(),
+            shouldForceViewport: simpleCamera.shouldForceViewport(),
+            forcedViewport: simpleCamera.getForcedViewport()
+          } : null,
+          chartExists: !!chartRef.current,
+          chartId: chartRef.current?.id || null
+        };
+
+        logLifecycle('POST_DATA_CHANGE_CAMERA_STATE', 'MinimalistChart', {
+          preChangeState: preChangeState.cameraState,
+          postChangeState: postDataChangeState.cameraState,
+          cameraStateChanged: JSON.stringify(preChangeState.cameraState) !== JSON.stringify(postDataChangeState.cameraState)
+        });
+      }, 100);
 
       // Suscribirse al nuevo intervalo
       if (isStreaming) {
+        logLifecycle('SUBSCRIBING_TO_NEW_STREAM', 'MinimalistChart', {
+          symbol: currentSymbol,
+          interval: newInterval
+        });
         await liveStreamingService.subscribeToStream(currentSymbol, newInterval);
       }
 
+      const totalChangeDuration = Date.now() - intervalChangeStart;
+      logTiming('Interval change completed', totalChangeDuration, {
+        oldInterval: preChangeState.currentInterval,
+        newInterval,
+        success: true,
+        historicalDataDuration: historicalDuration,
+        newCandleCount: historicalData.length
+      });
+
     } catch (error: any) {
+      const changeDuration = Date.now() - intervalChangeStart;
+      logError('Interval change failed', {
+        error: error instanceof Error ? error.message : String(error),
+        oldInterval: preChangeState.currentInterval,
+        newInterval,
+        changeDuration,
+        stackTrace: error.stack
+      });
       console.error('Error cambiando intervalo:', error);
     }
-  }, [currentSymbol, currentInterval, isStreaming]);
+  }, [currentSymbol, currentInterval, isStreaming, candleData.length, simpleCamera]);
 
   const startStreaming = useCallback(async () => {
+    const streamingStart = Date.now();
+
     if (isStreaming) {
+      logLifecycle('STREAMING_ALREADY_ACTIVE', 'MinimalistChart', {
+        symbol: currentSymbol,
+        interval: currentInterval
+      });
       console.log('📊 Streaming ya está activo');
       return;
     }
 
+    // Capturar estado antes de iniciar streaming
+    const preStreamingState = {
+      symbol: currentSymbol,
+      interval: currentInterval,
+      candleDataLength: candleData.length,
+      cameraState: simpleCamera ? {
+        viewport: simpleCamera.getViewportFromCamera(),
+        currentState: simpleCamera.getCurrentState(),
+        isLocked: simpleCamera.isLocked()
+      } : null,
+      chartExists: !!chartRef.current
+    };
+
+    logLifecycle('STREAMING_START_ATTEMPT', 'MinimalistChart', preStreamingState);
+
     try {
       setStatus('Conectando streaming...');
 
+      logLifecycle('SUBSCRIBING_TO_STREAM', 'MinimalistChart', {
+        symbol: currentSymbol,
+        interval: currentInterval
+      });
+
+      const subscriptionStart = Date.now();
       await liveStreamingService.subscribeToStream(currentSymbol, currentInterval);
+      const subscriptionDuration = Date.now() - subscriptionStart;
+
+      logTiming('Stream subscription completed', subscriptionDuration, {
+        symbol: currentSymbol,
+        interval: currentInterval,
+        success: true
+      });
       
       setIsStreaming(true);
       setStatus('✅ Streaming conectado');
+
+      const totalStartDuration = Date.now() - streamingStart;
+      logLifecycle('STREAMING_START_SUCCESS', 'MinimalistChart', {
+        symbol: currentSymbol,
+        interval: currentInterval,
+        totalStartDuration,
+        subscriptionDuration
+      });
+
     } catch (error: any) {
+      const startDuration = Date.now() - streamingStart;
+      
+      logError('Streaming start failed, falling back to polling', {
+        error: error instanceof Error ? error.message : String(error),
+        symbol: currentSymbol,
+        interval: currentInterval,
+        startDuration,
+        stackTrace: error.stack
+      });
+
       console.error('Error iniciando streaming:', error);
       setStatus(`⚠️ Streaming en modo polling (WebSocket falló)`);
       setIsStreaming(true); // Aún funciona con polling
+
+      logLifecycle('STREAMING_FALLBACK_TO_POLLING', 'MinimalistChart', {
+        symbol: currentSymbol,
+        interval: currentInterval,
+        error: error.message,
+        startDuration
+      });
+    }
+  }, [currentSymbol, currentInterval, isStreaming, candleData.length, simpleCamera]);
+
+  const stopStreaming = useCallback(() => {
+    logLifecycle('STREAMING_STOP_ATTEMPT', 'MinimalistChart', {
+      symbol: currentSymbol,
+      interval: currentInterval,
+      wasStreaming: isStreaming
+    });
+
+    if (!isStreaming) {
+      logLifecycle('STREAMING_ALREADY_STOPPED', 'MinimalistChart', {
+        symbol: currentSymbol,
+        interval: currentInterval
+      });
+      return;
+    }
+
+    const stopStart = Date.now();
+    
+    try {
+      liveStreamingService.unsubscribeFromStream(currentSymbol, currentInterval);
+      setIsStreaming(false);
+      
+      const stopDuration = Date.now() - stopStart;
+      logTiming('Streaming stopped', stopDuration, {
+        symbol: currentSymbol,
+        interval: currentInterval,
+        success: true
+      });
+
+      logLifecycle('STREAMING_STOP_SUCCESS', 'MinimalistChart', {
+        symbol: currentSymbol,
+        interval: currentInterval,
+        stopDuration
+      });
+
+    } catch (error: any) {
+      const stopDuration = Date.now() - stopStart;
+      logError('Error stopping streaming', {
+        error: error instanceof Error ? error.message : String(error),
+        symbol: currentSymbol,
+        interval: currentInterval,
+        stopDuration,
+        stackTrace: error.stack
+      });
     }
   }, [currentSymbol, currentInterval, isStreaming]);
 
-  const stopStreaming = useCallback(() => {
-    liveStreamingService.unsubscribeFromStream(currentSymbol, currentInterval);
-    setIsStreaming(false);
-  }, [currentSymbol, currentInterval]);
+  // ===== FUNCIONES DE DEBUGGING AVANZADAS =====
+  
+  const getSystemStateSnapshot = useCallback(() => {
+    const snapshot = {
+      timestamp: Date.now(),
+      dateTime: new Date().toISOString(),
+      
+      // Estado del componente
+      component: {
+        currentSymbol,
+        currentInterval,
+        isStreaming,
+        status,
+        candleDataLength: candleData.length,
+        activeIndicators: Array.from(activeIndicators),
+        updateSequence: updateSequence.current,
+        chartInitializationCount: chartInitializationCount.current
+      },
+
+      // Estado del gráfico
+      chart: {
+        exists: !!chartRef.current,
+        id: chartRef.current?.id || null,
+        canvas: {
+          exists: !!canvasRef.current,
+          width: canvasRef.current?.width || null,
+          height: canvasRef.current?.height || null
+        },
+        scales: chartRef.current?.scales ? {
+          x: {
+            min: chartRef.current.scales.x?.min || null,
+            max: chartRef.current.scales.x?.max || null
+          },
+          y: {
+            min: chartRef.current.scales.y?.min || null,
+            max: chartRef.current.scales.y?.max || null
+          }
+        } : null
+      },
+
+      // Estado de la cámara
+      camera: simpleCamera ? {
+        viewport: simpleCamera.getViewportFromCamera(),
+        currentState: simpleCamera.getCurrentState(),
+        isLocked: simpleCamera.isLocked(),
+        isActivelyInteracting: simpleCamera.isActivelyInteracting(),
+        shouldForceViewport: simpleCamera.shouldForceViewport(),
+        shouldAutoAdjust: simpleCamera.shouldAutoAdjust(),
+        forcedViewport: simpleCamera.getForcedViewport(),
+        recommendedViewport: simpleCamera.getRecommendedViewport(candleData.length, candleData)
+      } : null,
+
+      // Estado del viewport persistente
+      persistentViewport: persistentViewport ? {
+        hasSnapshot: persistentViewport.hasSnapshot(),
+        currentViewport: persistentViewport.getCurrentViewport()
+      } : null,
+
+      // Estado de los datos
+      data: {
+        candleDataLength: candleData.length,
+        firstCandle: candleData.length > 0 ? {
+          timestamp: candleData[0].x,
+          date: new Date(candleData[0].x).toISOString()
+        } : null,
+        lastCandle: candleData.length > 0 ? {
+          timestamp: candleData[candleData.length - 1].x,
+          date: new Date(candleData[candleData.length - 1].x).toISOString()
+        } : null
+      },
+
+      // Rendimiento
+      performance: {
+        lastUpdateTime,
+        updateThrottleMs,
+        memoryUsage: (performance as any).memory ? {
+          usedJSHeapSize: (performance as any).memory.usedJSHeapSize,
+          totalJSHeapSize: (performance as any).memory.totalJSHeapSize,
+          jsHeapSizeLimit: (performance as any).memory.jsHeapSizeLimit
+        } : null
+      }
+    };
+
+    return snapshot;
+  }, [
+    currentSymbol, currentInterval, isStreaming, status, candleData, activeIndicators,
+    simpleCamera, persistentViewport, updateThrottleMs
+  ]);
+
+  const logSystemStateSnapshot = useCallback(() => {
+    const snapshot = getSystemStateSnapshot();
+    logLifecycle('SYSTEM_STATE_SNAPSHOT', 'MinimalistChart', snapshot);
+    return snapshot;
+  }, [getSystemStateSnapshot]);
+
+  const startSystemMonitoring = useCallback((intervalMs: number = 5000) => {
+    logLifecycle('SYSTEM_MONITORING_START', 'MinimalistChart', {
+      intervalMs,
+      timestamp: Date.now()
+    });
+
+    const monitoringInterval = setInterval(() => {
+      const snapshot = getSystemStateSnapshot();
+      
+      // Detectar cambios críticos
+      const criticalChanges = [];
+      
+      if (snapshot.camera?.viewport && snapshot.chart?.scales?.x) {
+        const chartViewport = {
+          min: snapshot.chart.scales.x.min,
+          max: snapshot.chart.scales.x.max
+        };
+        const cameraViewport = snapshot.camera.viewport;
+        
+        if (Math.abs((chartViewport.min || 0) - (cameraViewport.min || 0)) > 1 ||
+            Math.abs((chartViewport.max || 0) - (cameraViewport.max || 0)) > 1) {
+          criticalChanges.push('CAMERA_CHART_VIEWPORT_MISMATCH');
+        }
+      }
+
+      if (!snapshot.chart.exists && snapshot.component.candleDataLength > 0) {
+        criticalChanges.push('CHART_MISSING_WITH_DATA');
+      }
+
+      if (snapshot.camera?.shouldForceViewport && !snapshot.camera?.isLocked) {
+        criticalChanges.push('FORCE_VIEWPORT_WITHOUT_LOCK');
+      }
+
+      logLifecycle('SYSTEM_MONITORING_SNAPSHOT', 'MinimalistChart', {
+        ...snapshot,
+        criticalChanges,
+        hasCriticalIssues: criticalChanges.length > 0
+      });
+
+      if (criticalChanges.length > 0) {
+        logError('Critical system state issues detected', {
+          issues: criticalChanges,
+          snapshot
+        });
+      }
+    }, intervalMs);
+
+    // Retornar función de cleanup
+    return () => {
+      clearInterval(monitoringInterval);
+      logLifecycle('SYSTEM_MONITORING_STOP', 'MinimalistChart', {
+        timestamp: Date.now()
+      });
+    };
+  }, [getSystemStateSnapshot]);
+
+  const diagnoseCameraReset = useCallback(() => {
+    const snapshot = getSystemStateSnapshot();
+    
+    const diagnosis = {
+      timestamp: Date.now(),
+      potentialCauses: [] as string[],
+      recommendations: [] as string[],
+      snapshot
+    };
+
+    // Analizar posibles causas del reset de cámara
+    if (!snapshot.camera?.isLocked && snapshot.camera?.shouldAutoAdjust) {
+      diagnosis.potentialCauses.push('CAMERA_NOT_LOCKED_AUTO_ADJUST_ACTIVE');
+      diagnosis.recommendations.push('Lock camera during user interactions');
+    }
+
+    if (snapshot.chart?.scales?.x?.min !== snapshot.camera?.viewport?.min ||
+        snapshot.chart?.scales?.x?.max !== snapshot.camera?.viewport?.max) {
+      diagnosis.potentialCauses.push('CHART_CAMERA_VIEWPORT_MISMATCH');
+      diagnosis.recommendations.push('Sync chart viewport with camera state');
+    }
+
+    if (snapshot.component.updateSequence > 100 && snapshot.performance.lastUpdateTime > 0) {
+      const timeSinceLastUpdate = Date.now() - snapshot.performance.lastUpdateTime;
+      if (timeSinceLastUpdate < 100) {
+        diagnosis.potentialCauses.push('HIGH_FREQUENCY_UPDATES');
+        diagnosis.recommendations.push('Increase update throttling');
+      }
+    }
+
+    if (!snapshot.persistentViewport?.hasSnapshot && snapshot.camera?.currentState?.mode === 'USER_LOCKED') {
+      diagnosis.potentialCauses.push('NO_VIEWPORT_PERSISTENCE');
+      diagnosis.recommendations.push('Ensure viewport persistence is working');
+    }
+
+    logLifecycle('CAMERA_RESET_DIAGNOSIS', 'MinimalistChart', diagnosis);
+    
+    return diagnosis;
+  }, [getSystemStateSnapshot]);
+
+  // Exponer funciones de debugging globalmente para uso en consola
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      (window as any).houndTradeDebug = {
+        getSystemStateSnapshot,
+        logSystemStateSnapshot,
+        startSystemMonitoring,
+        diagnoseCameraReset,
+        chart: chartRef.current,
+        camera: simpleCamera,
+        persistentViewport
+      };
+    }
+  }, [getSystemStateSnapshot, logSystemStateSnapshot, startSystemMonitoring, diagnoseCameraReset, simpleCamera, persistentViewport]);
 
   const toggleIndicator = useCallback((indicator: string) => {
     setActiveIndicators(prev => {
