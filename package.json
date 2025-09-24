@@ -7,25 +7,30 @@
     "android": "expo start --android",
     "ios": "expo start --ios",
     "web": "expo start --web",
+
     "proxy": "node scripts/cors-proxy.js",
     "ws-proxy": "node scripts/websocket-proxy.js",
     "dev:web": "concurrently \"npm run proxy\" \"npm run web\"",
     "dev:web-ws": "concurrently \"npm run ws-proxy\" \"npm run web\"",
+
     "test": "jest",
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",
     "lint": "eslint . --ext .ts,.tsx",
     "lint:fix": "eslint . --ext .ts,.tsx --fix",
     "type-check": "tsc --noEmit",
+
     "build:lambdas": "cd backend && npm run build",
     "deploy:dev": "cd backend && ./scripts/deploy.sh dev",
     "deploy:prod": "cd backend && ./scripts/deploy.sh prod",
-    "build:web": "NODE_ENV=production expo export --platform web --output-dir dist",
+
+    "build:web": "expo export -p web",
     "build:android": "eas build --platform android --profile production",
     "build:ios": "eas build --platform ios --profile production",
     "build:all": "npm run build:web && npm run build:android && npm run build:ios",
-    "predeploy": "npm run build:web && ./scripts/fix-github-pages.sh",
-    "deploy:github": "./scripts/deploy-gh-pages-clean.sh"
+
+    "predeploy": "npm run build:web && cp dist/index.html dist/404.html || true",
+    "deploy": "gh-pages -d dist"
   },
   "dependencies": {
     "@react-native-async-storage/async-storage": "2.2.0",
@@ -54,7 +59,7 @@
     "react-native-worklets": "0.5.1",
     "zustand": "^4.4.7"
   },
-  "homepage": "https://baskervilleAI.github.io/houndtrade",
+  "homepage": "https://baskervilleai.github.io/houndtrade",
   "devDependencies": {
     "@babel/core": "^7.23.7",
     "@expo/cli": "^54.0.7",
