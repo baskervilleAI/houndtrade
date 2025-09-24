@@ -5,37 +5,37 @@
 
 export const CAMERA_TIMINGS = {
   // Timeouts para debounce de interacciones
-  ZOOM_DEBOUNCE: 100,        // Reducido de 150ms
-  PAN_DEBOUNCE: 100,         // Reducido de 150ms
+  ZOOM_DEBOUNCE: 150,        // Incrementado para más suavidad
+  PAN_DEBOUNCE: 150,         // Incrementado para más suavidad
   
   // Timeouts para procesar estado final
-  ZOOM_FINAL_CAPTURE: 50,    // Reducido de 100ms
-  PAN_FINAL_CAPTURE: 50,     // Reducido de 100ms
+  ZOOM_FINAL_CAPTURE: 100,   // Incrementado para mejor captura
+  PAN_FINAL_CAPTURE: 100,    // Incrementado para mejor captura
   
   // Timeouts para liberar bloqueos globales
-  ZOOM_GLOBAL_RELEASE: 50,   // Reducido de 100ms
-  PAN_GLOBAL_RELEASE: 50,    // Reducido de 100ms
+  ZOOM_GLOBAL_RELEASE: 100,  // Incrementado para evitar conflictos
+  PAN_GLOBAL_RELEASE: 100,   // Incrementado para evitar conflictos
   
   // Throttling de eventos
-  ZOOM_THROTTLE: 100,        // Reducido de 150ms
-  PAN_THROTTLE: 100,         // Reducido de 150ms
+  ZOOM_THROTTLE: 150,        // Incrementado para menos ajustes
+  PAN_THROTTLE: 150,         // Incrementado para menos ajustes
   
   // Camera state management
-  INTERACTION_END_DELAY: 25, // Reducido de 50ms
-  COOLDOWN_DURATION: 1500,   // Reducido de 3000ms
+  INTERACTION_END_DELAY: 50, // Incrementado para mejor control
+  COOLDOWN_DURATION: 2000,   // Incrementado para evitar resets frecuentes
   
   // Chart update throttling
-  CHART_UPDATE_THROTTLE: 100, // Para evitar updates muy frecuentes
+  CHART_UPDATE_THROTTLE: 150, // Incrementado para menos actualizaciones
   
   // Log deduplication
-  LOG_DEDUP_WINDOW: 10       // Prevenir logs duplicados en 10ms
+  LOG_DEDUP_WINDOW: 20       // Incrementado para reducir spam de logs
 } as const;
 
 export const VIEWPORT_DEFAULTS = {
   DEFAULT_TIDE: 0.8,
   MIN_VISIBLE_CANDLES: 20,
-  MAX_VISIBLE_CANDLES: 200,
-  PREFERRED_VISIBLE_CANDLES: 50
+  MAX_VISIBLE_CANDLES: 1000,
+  PREFERRED_VISIBLE_CANDLES: 1000
 } as const;
 
 /**
@@ -43,12 +43,12 @@ export const VIEWPORT_DEFAULTS = {
  */
 export const DEBUG_CONFIG = {
   ENABLE_CAMERA_LOGS: true,
-  ENABLE_VIEWPORT_LOGS: true,
-  ENABLE_INTERACTION_LOGS: true,
-  ENABLE_TIDAL_LOGS: true,
+  ENABLE_VIEWPORT_LOGS: false,  // Deshabilitado para reducir spam
+  ENABLE_INTERACTION_LOGS: false, // Deshabilitado para reducir spam
+  ENABLE_TIDAL_LOGS: false,     // Deshabilitado para reducir spam
   ENABLE_STATE_LOGS: true,
-  ENABLE_PERSISTENCE_LOGS: true,
-  ENABLE_CHART_LOGS: true,
+  ENABLE_PERSISTENCE_LOGS: false, // Deshabilitado para reducir spam
+  ENABLE_CHART_LOGS: false,     // Deshabilitado para reducir spam
   
   // Deshabilitados para reducir ruido
   ENABLE_STREAMING_LOGS: false,

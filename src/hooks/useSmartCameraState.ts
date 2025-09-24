@@ -53,7 +53,7 @@ interface UseSmartCameraStateProps {
 }
 
 export const useSmartCameraState = ({
-  defaultVisibleCandles = 100,
+  defaultVisibleCandles = 1000,
   autoResetAfterMs = 300000, // 5 minutos (mucho más tiempo para explorar)
   onStateChange
 }: UseSmartCameraStateProps = {}): SmartCameraControls => {

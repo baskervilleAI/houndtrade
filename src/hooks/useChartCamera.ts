@@ -29,7 +29,7 @@ export interface CameraState {
   };
   // Force show latest candles flag
   followLatest: boolean;
-  // Maximum candles to display (default 900)
+  // Maximum candles to display (default 1000)
   maxVisibleCandles: number;
   // User interaction state
   isUserInteracting: boolean;
@@ -142,7 +142,7 @@ export const useChartCamera = ({
     centerX: null,
   });
   const [followLatest, setFollowLatest] = useState(true);
-  const [maxVisibleCandles, setMaxVisibleCandles] = useState(900);
+  const [maxVisibleCandles, setMaxVisibleCandles] = useState(1000);
   
   // Calculate derived values
   const candleWidth = useMemo(() => {
@@ -457,7 +457,7 @@ export const useChartCamera = ({
   }, []);
 
   const setMaxVisibleCandlesCount = useCallback((count: number) => {
-    setMaxVisibleCandles(Math.max(100, Math.min(2000, count)));
+    setMaxVisibleCandles(Math.max(1000, Math.min(2000, count)));
     logCameraAction(`Max visible candles set to: ${count}`);
     notifyChange();
   }, [notifyChange]);  // User interaction controls

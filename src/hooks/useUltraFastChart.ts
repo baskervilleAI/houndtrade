@@ -22,7 +22,7 @@ export const useUltraFastChart = (options: UseUltraFastChartOptions) => {
     symbol, 
     timeframe, 
     cycleDelay = 10, 
-    maxCandles = 500,
+    maxCandles = 1000,
     autoStart = true 
   } = options;
 
@@ -235,7 +235,7 @@ export const useUltraFastChart = (options: UseUltraFastChartOptions) => {
       const { binanceService } = await import('../services/binanceService');
       
       const interval = binanceService.getIntervalFromTimeframe(timeframe);
-      const historicalCandles = await binanceService.getKlines(symbol, interval, 100);
+      const historicalCandles = await binanceService.getKlines(symbol, interval, 1000);
       
       if (historicalCandles && historicalCandles.length > 0) {
         console.log(`✅ Cargados ${historicalCandles.length} datos históricos para ${symbol}`);

@@ -1,5 +1,6 @@
 import { useState, useCallback, useRef, useMemo, useEffect } from 'react';
 import { Chart } from 'chart.js';
+import { CandleData } from '../services/binanceService';
 import { 
   logViewportState, 
   logStateTransition, 
@@ -73,7 +74,7 @@ export interface SimpleCameraControls {
   onUserZoom: (min: number, max: number, centerX: number) => void;
   onUserPan: (min: number, max: number, centerX: number) => void;
   resetToLatest: () => void;
-  getRecommendedViewport: (totalCandles: number, candleData?: any[]) => { min?: number; max?: number };
+  getRecommendedViewport: (totalCandles: number, candleData?: any[], showAllCandles?: boolean) => { min?: number; max?: number };
   
   // NUEVOS métodos para compatibilidad con Chart.js oficial
   updateFromChartViewport: (min: number | null, max: number | null) => void;
@@ -87,10 +88,14 @@ export interface SimpleCameraControls {
     snap: { min: number; max: number };
     lastCandleTime: number;
   }) => { min: number; max: number };
-  applyViewportToChart: (chart: Chart, viewport: { min: number; max: number }) => void;
+  applyViewportToChart: (chart: Chart, viewport: { min: number; max: number }) => boolean;
   shouldFollowTail: () => boolean;
   setTide: (tide: number) => void;
   setCooldownMs: (cooldownMs: number) => void;
+  
+    // NUEVOS métodos para cambios de temporalidad
+  resetForTimeframeChange: () => void;
+  setViewportToLatestData: (candleData: any[], visibleCandles?: number) => boolean;
 }
 
 /**
@@ -134,12 +139,6 @@ function computeTidalViewport({
   // CRÍTICO: Cualquier estado bloqueado (incluyendo legacy isLocked) debe mantener posición fija
   if (interacting || camera.mode === 'USER_LOCKED' || camera.isLocked || camera.tide === 0) {
     const fixedViewport = getViewportFromCameraState(camera) ?? snap;
-    console.log('🌊 [TidalViewport] Modo FIJO:', { 
-      mode: camera.mode, 
-      interacting, 
-      isLocked: camera.isLocked,
-      viewport: fixedViewport 
-    });
     return fixedViewport;
   }
 
@@ -152,31 +151,42 @@ function computeTidalViewport({
   const min = snap.min * (1 - tideFactor) + leftTarget * tideFactor;
   const max = snap.max * (1 - tideFactor) + rightTarget * tideFactor;
   
-  console.log('🌊 [TidalViewport] Modo TIDAL:', { 
-    mode: camera.mode, 
-    tide: camera.tide,
-    snap: { min: snap.min, max: snap.max },
-    target: { min: leftTarget, max: rightTarget },
-    result: { min, max }
-  });
-  
   return { min, max };
 }
 
 /**
- * Aplica viewport al chart de forma robusta (SOLO fallback para evitar eventos automáticos)
+ * Aplica viewport al chart de forma robusta (con múltiples métodos de fallback)
  */
-function applyViewportToChart(chart: Chart, viewport: { min: number; max: number }): void {
-  // CRÍTICO: Solo usar fallback directo para evitar disparar eventos onZoom/onPan
-  // El plugin de zoom dispara eventos que se interpretan como interacción del usuario
-  if (chart.options.scales?.x) {
-    chart.options.scales.x.min = viewport.min;
-    chart.options.scales.x.max = viewport.max;
-    console.log('🎯 [ApplyViewport] Fallback directo (evita eventos):', viewport);
-    return;
+function applyViewportToChart(chart: Chart, viewport: { min: number; max: number }): boolean {
+  try {
+    // Método 1: Usar API de zoom si está disponible (más confiable)
+    if (typeof (chart as any).zoomScale === 'function') {
+      try {
+        (chart as any).zoomScale('x', { min: viewport.min, max: viewport.max }, 'none');
+        return true;
+      } catch (error) {
+        // zoomScale API failed, continue to fallback methods
+      }
+    }
+
+    // Método 2: Modificar opciones directamente (fallback)
+    if (chart.options.scales?.x) {
+      chart.options.scales.x.min = viewport.min;
+      chart.options.scales.x.max = viewport.max;
+      return true;
+    }
+
+    // Método 3: Modificar escalas directamente (último recurso)
+    if (chart.scales?.x) {
+      chart.scales.x.min = viewport.min;
+      chart.scales.x.max = viewport.max;
+      return true;
+    }
+
+    return false;
+  } catch (error) {
+    return false;
   }
-  
-  console.warn('🎯 [ApplyViewport] No se pudo aplicar viewport - sin escalas X');
 }
 
 /**
@@ -208,7 +218,7 @@ interface UseSimpleCameraProps {
 }
 
 export const useSimpleCamera = ({
-  defaultVisibleCandles = 100,
+  defaultVisibleCandles = 1000,
   onStateChange
 }: UseSimpleCameraProps = {}): SimpleCameraControls => {
   
@@ -259,7 +269,7 @@ export const useSimpleCamera = ({
       }
     } catch (error) {
       logPersistenceOp('LOAD_FROM_SESSIONSTORAGE', null, false);
-      console.warn('📷 [SimpleCamera] Error cargando estado desde sessionStorage:', error);
+      // Error loading from sessionStorage, continue with default state
     }
     
     const defaultState = {
@@ -286,7 +296,7 @@ export const useSimpleCamera = ({
   // Función atómica para evitar reentradas
   const atomic = useCallback((fn: () => void) => {
     if (inMutationRef.current) {
-      console.warn('📷 [SimpleCamera] Reentrancia detectada - ignorando actualización');
+      // Reentrancy detected - ignoring update
       return;
     }
     inMutationRef.current = true;
@@ -320,7 +330,7 @@ export const useSimpleCamera = ({
         }, true);
       } catch (error) {
         logPersistenceOp('SAVE_TO_SESSIONSTORAGE', null, false);
-        console.warn('📷 [SimpleCamera] Error guardando estado en sessionStorage:', error);
+        // Error saving to sessionStorage
       }
     }
     
@@ -614,24 +624,33 @@ export const useSimpleCamera = ({
       clearingSessionStorage: true
     }, preState);
     
-    const newState: SimpleCameraState = {
-      mode: 'FIRST_LOAD',
-      viewport: null,
-      tide: 0.8,
-      cooldownMs: 3500, // Incrementado para mejor debounce
-      lastUserActionTs: null,
-      // Legacy para compatibilidad
-      isLocked: false,
-      lastUserAction: null,
-      chartJsState: {
-        min: null,
-        max: null,
-        centerX: null
+    atomic(() => {
+      const newState: SimpleCameraState = {
+        mode: 'AUTO', // Cambiar a AUTO en lugar de FIRST_LOAD para seguimiento inmediato
+        viewport: null,
+        tide: 0.8,
+        cooldownMs: 3500, // Incrementado para mejor debounce
+        lastUserActionTs: null,
+        // Legacy para compatibilidad
+        isLocked: false,
+        lastUserAction: null,
+        chartJsState: {
+          min: null,
+          max: null,
+          centerX: null
+        }
+      };
+      
+      logStateTransition(preState, newState, 'resetToLatest');
+      setState(newState);
+      stateRef.current = newState; // Actualizar ref inmediatamente
+      
+      logViewportState(newState, 'AFTER_RESET');
+      
+      if (onStateChange) {
+        onStateChange(newState);
       }
-    };
-    
-    logStateTransition(preState, newState, 'resetToLatest');
-    setState(newState);
+    });
     
     // Limpiar sessionStorage inmediatamente (sin debounce para reset)
     if (typeof window !== 'undefined') {
@@ -640,25 +659,147 @@ export const useSimpleCamera = ({
         logPersistenceOp('CLEAR_SESSIONSTORAGE', null, true);
       } catch (error) {
         logPersistenceOp('CLEAR_SESSIONSTORAGE', null, false);
-        console.warn('📷 [SimpleCamera] Error limpiando sessionStorage:', error);
+        // Error clearing sessionStorage
       }
     }
+  }, [atomic, onStateChange]);
+
+  // NUEVO: Reset específico para cambios de temporalidad
+  const resetForTimeframeChange = useCallback(() => {
+    const preState = stateRef.current;
+    logUserInteractionDetailed('RESET_FOR_TIMEFRAME_CHANGE', {
+      reason: 'timeframe_change_requested',
+      clearingSessionStorage: true,
+      forcingAutoMode: true
+    }, preState);
     
-    logViewportState(newState, 'AFTER_RESET');
+    atomic(() => {
+      const newState: SimpleCameraState = {
+        mode: 'FIRST_LOAD', // FIRST_LOAD para permitir ajuste inicial automático
+        viewport: null,
+        tide: 1.0, // Máximo seguimiento para mostrar datos más recientes
+        cooldownMs: 1000, // Cooldown reducido para cambios de temporalidad
+        lastUserActionTs: null,
+        // Legacy para compatibilidad - completamente limpio
+        isLocked: false,
+        lastUserAction: null,
+        chartJsState: {
+          min: null,
+          max: null,
+          centerX: null
+        }
+      };
+      
+      logStateTransition(preState, newState, 'resetForTimeframeChange');
+      setState(newState);
+      stateRef.current = newState; // Actualizar ref inmediatamente
+      
+      logViewportState(newState, 'AFTER_TIMEFRAME_RESET');
+      
+      if (onStateChange) {
+        onStateChange(newState);
+      }
+    });
     
-    if (onStateChange) {
-      onStateChange(newState);
+    // Limpiar sessionStorage para forzar estado completamente fresco
+    if (typeof window !== 'undefined') {
+      try {
+        sessionStorage.removeItem('simpleCamera_state');
+        logPersistenceOp('CLEAR_SESSIONSTORAGE_TIMEFRAME_CHANGE', null, true);
+      } catch (error) {
+        logPersistenceOp('CLEAR_SESSIONSTORAGE_TIMEFRAME_CHANGE', null, false);
+      }
     }
-  }, [onStateChange]);
+  }, [atomic, onStateChange]);
+
+  // NUEVO: Configurar viewport para mostrar todo el gráfico (cambio de temporalidad)
+  const setViewportToLatestData = useCallback((candleData: any[], visibleCandles?: number) => {
+    if (!candleData || candleData.length === 0) {
+      logCamera('SET_VIEWPORT_TO_LATEST - no data available');
+      return false;
+    }
+
+    const dataLength = candleData.length;
+    // Si no se especifica visibleCandles, mostrar todo el gráfico
+    const startIndex = visibleCandles ? Math.max(0, dataLength - visibleCandles) : 0;
+    const endIndex = dataLength - 1;
+
+    if (startIndex >= dataLength || endIndex >= dataLength) {
+      logCamera('SET_VIEWPORT_TO_LATEST - invalid indices', { startIndex, endIndex, dataLength });
+      return false;
+    }
+
+    // Detectar el tipo de estructura de datos y extraer timestamp
+    let minTimestamp: number;
+    let maxTimestamp: number;
+
+    if (candleData[startIndex]?.x !== undefined) {
+      // Formato liveStreamingService: { x: timestamp, o, h, l, c, v }
+      minTimestamp = candleData[startIndex].x;
+      maxTimestamp = candleData[endIndex].x;
+    } else if (candleData[startIndex]?.timestamp !== undefined) {
+      // Formato binanceService: { timestamp: string, open, high, low, close, volume }
+      minTimestamp = new Date(candleData[startIndex].timestamp).getTime();
+      maxTimestamp = new Date(candleData[endIndex].timestamp).getTime();
+    } else {
+      logCamera('SET_VIEWPORT_TO_LATEST - unsupported data format');
+      return false;
+    }
+
+    if (isNaN(minTimestamp) || isNaN(maxTimestamp)) {
+      logCamera('SET_VIEWPORT_TO_LATEST - invalid timestamps');
+      return false;
+    }
+
+    // Agregar padding del 2%
+    const timeRange = maxTimestamp - minTimestamp;
+    const padding = timeRange * 0.02;
+
+    const newViewport = {
+      min: minTimestamp - padding,
+      max: maxTimestamp + padding
+    };
+
+    atomic(() => {
+      setState(prev => {
+        const newState = {
+          ...prev,
+          viewport: newViewport,
+          // NO cambiar el modo aquí - mantener el modo actual (FIRST_LOAD para cambios de temporalidad)
+          chartJsState: {
+            min: newViewport.min,
+            max: newViewport.max,
+            centerX: (newViewport.min + newViewport.max) / 2
+          }
+        };
+        
+        logCamera('SET_VIEWPORT_TO_LATEST_DATA', {
+          viewport: newViewport,
+          dataLength,
+          visibleCandles: visibleCandles || 'all_data',
+          showingFullGraph: !visibleCandles,
+          timeRange,
+          padding
+        });
+        
+        return shallowEqual(prev, newState) ? prev : newState;
+      });
+    });
+
+    return true;
+  }, [atomic]);
 
   // Get recommended viewport for initial setup
-  const getRecommendedViewport = useCallback((totalCandles: number, candleData?: any[]) => {
+  const getRecommendedViewport = useCallback((totalCandles: number, candleData?: any[], showAllCandles?: boolean) => {
     if (!candleData || candleData.length === 0) {
       return { min: undefined, max: undefined };
     }
 
-    // Show last defaultVisibleCandles candles
-    const visibleCandles = Math.min(defaultVisibleCandles, candleData.length);
+    // Si showAllCandles es true o estamos en modo FIRST_LOAD, mostrar todas las velas
+    const currentState = stateRef.current;
+    const shouldShowAll = showAllCandles || currentState.mode === 'FIRST_LOAD';
+    
+    const visibleCandles = shouldShowAll ? candleData.length : Math.min(defaultVisibleCandles, candleData.length);
     const startIndex = Math.max(0, candleData.length - visibleCandles);
     const endIndex = candleData.length - 1;
 
@@ -689,7 +830,6 @@ export const useSimpleCamera = ({
   const updateFromChartViewport = useCallback((min: number | null, max: number | null) => {
     if (min !== null && max !== null) {
       const centerX = (min + max) / 2;
-      console.log(`📷 [SimpleCamera] updateFromChartViewport - {min: ${min}, max: ${max}, centerX: ${centerX}}`);
       
       setState(prev => {
         const newState = {
@@ -701,11 +841,8 @@ export const useSimpleCamera = ({
             centerX
           }
         };
-        console.log(`📷 [SimpleCamera] updateFromChartViewport - Estado actualizado: {mode: ${newState.mode}, isLocked: ${newState.isLocked}}`);
         return newState;
       });
-    } else {
-      console.log(`📷 [SimpleCamera] updateFromChartViewport - Valores inválidos: {min: ${min}, max: ${max}}`);
     }
   }, []);
 
@@ -716,14 +853,11 @@ export const useSimpleCamera = ({
            currentState.chartJsState.min !== null && 
            currentState.chartJsState.max !== null;
     
-    console.log(`🎯 [SimpleCamera] shouldPersistViewport: ${shouldPersist} - {isLocked: ${currentState.isLocked}, hasViewport: ${currentState.chartJsState.min !== null && currentState.chartJsState.max !== null}}`);
-    
     return shouldPersist;
   }, []);
 
   // Bloquear la cámara en su posición actual (con protección atómica)
   const lockCamera = useCallback((viewport?: { min: number; max: number }) => {
-    console.log('🔒 [SimpleCamera] lockCamera llamado');
     atomic(() => {
       setState(prev => {
         const newState = {
@@ -741,7 +875,6 @@ export const useSimpleCamera = ({
 
   // Desbloquear la cámara para seguimiento automático (con protección atómica)
   const unlockCamera = useCallback(() => {
-    console.log('🔓 [SimpleCamera] Desbloqueando cámara para auto-seguimiento');
     atomic(() => {
       setState(prev => {
         const newState = {
@@ -799,8 +932,8 @@ export const useSimpleCamera = ({
     return result;
   }, []);
 
-  // Aplicar viewport al chart de forma robusta (SOLO FALLBACK para evitar eventos automáticos)
-  const applyViewportToChart = useCallback((chart: Chart, viewport: { min: number; max: number }) => {
+  // Aplicar viewport al chart de forma robusta (con múltiples métodos de fallback)
+  const applyViewportToChartMethod = useCallback((chart: Chart, viewport: { min: number; max: number }): boolean => {
     logTidalFlow('APPLY_VIEWPORT_TO_CHART', {
       viewport,
       chartExists: !!chart,
@@ -808,15 +941,15 @@ export const useSimpleCamera = ({
       hasScales: !!chart.options?.scales?.x
     });
     
-    // CRÍTICO: Solo usar fallback directo para evitar disparar eventos onZoom/onPan
-    // El plugin de zoom dispara eventos que se interpretan como interacción del usuario
-    if (chart.options.scales?.x) {
-      chart.options.scales.x.min = viewport.min;
-      chart.options.scales.x.max = viewport.max;
-      logTidalFlow('VIEWPORT_APPLIED_VIA_FALLBACK', { viewport });
+    const success: boolean = applyViewportToChart(chart, viewport);
+    
+    if (success) {
+      logTidalFlow('VIEWPORT_APPLIED_SUCCESSFULLY', { viewport, method: 'multiple_fallbacks' });
     } else {
-      logTidalFlow('VIEWPORT_APPLICATION_FAILED', { viewport, reason: 'no_x_scale' });
+      logTidalFlow('VIEWPORT_APPLICATION_FAILED', { viewport, reason: 'all_methods_failed' });
     }
+    
+    return success;
   }, []);
 
   // Determinar si debe seguir la cola basado en tide y modo
@@ -839,7 +972,6 @@ export const useSimpleCamera = ({
   // Configurar factor de marea (0..1)
   const setTide = useCallback((tide: number) => {
     const clampedTide = Math.max(0, Math.min(1, tide));
-    console.log(`🌊 [SimpleCamera] Configurando tide: ${clampedTide}`);
     setState(prev => ({
       ...prev,
       tide: clampedTide
@@ -849,7 +981,6 @@ export const useSimpleCamera = ({
   // Configurar tiempo de cooldown
   const setCooldownMs = useCallback((cooldownMs: number) => {
     const clampedCooldown = Math.max(1000, Math.min(30000, cooldownMs)); // Entre 1s y 30s
-    console.log(`⏱️ [SimpleCamera] Configurando cooldown: ${clampedCooldown}ms`);
     setState(prev => ({
       ...prev,
       cooldownMs: clampedCooldown
@@ -917,10 +1048,13 @@ export const useSimpleCamera = ({
     // NUEVOS métodos para gobernanza tidal
     getViewportFromCamera,
     computeTidalViewport: computeTidalViewportMethod,
-    applyViewportToChart,
+    applyViewportToChart: applyViewportToChartMethod,
     shouldFollowTail,
     setTide,
-    setCooldownMs
+    setCooldownMs,
+    // NUEVOS métodos para cambios de temporalidad
+    resetForTimeframeChange,
+    setViewportToLatestData
   }), [
     state, 
     isLocked, 
@@ -942,10 +1076,12 @@ export const useSimpleCamera = ({
     unlockCamera,
     getViewportFromCamera,
     computeTidalViewportMethod,
-    applyViewportToChart,
+    applyViewportToChartMethod,
     shouldFollowTail,
     setTide,
-    setCooldownMs
+    setCooldownMs,
+    resetForTimeframeChange,
+    setViewportToLatestData
   ]);
 
   return controls;

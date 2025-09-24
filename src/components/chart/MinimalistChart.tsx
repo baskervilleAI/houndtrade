@@ -90,6 +90,7 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
   const unexpectedViewportChanges = useRef<number>(0);
   const lastChartUpdate = useRef<number>(0);
   const updateSequence = useRef<number>(0);
+  const isInitializing = useRef<boolean>(false);
   
   // NUEVO: Referencias para control avanzado de eventos
   const zoomDebounceRef = useRef<NodeJS.Timeout | null>(null);
@@ -106,9 +107,17 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
   
   // NUEVO: Flag para distinguir entre eventos automáticos y del usuario
   const isApplyingAutomaticViewport = useRef<boolean>(false);
-
+  
+  // NUEVO: Control para aplicar viewport completo solo una vez tras cambio
+  const hasAppliedFullViewportAfterChange = useRef<boolean>(false);
+  
   const { selectedPair } = useMarket();
   const currentSymbol = symbol || selectedPair;
+  
+  // NUEVO: Referencias para rastrear cambios intencionales de símbolo/intervalo
+  const previousSymbolRef = useRef<string>('');
+  const previousIntervalRef = useRef<TimeInterval | ''>('');
+  const hasLoadedOnceRef = useRef<boolean>(false);
 
   // Callback estable para cambios de estado de cámara
   const onCameraStateChange = useCallback((cameraState: any) => {
@@ -117,7 +126,7 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
 
   // Sistema de cámara simple y predecible
   const simpleCamera = useSimpleCamera({
-    defaultVisibleCandles: 100,
+    defaultVisibleCandles: 1000, // Permitir ver todas las velas por defecto
     // autoResetTimeMs eliminado - la cámara mantiene posición del usuario permanentemente
     onStateChange: onCameraStateChange,
   });
@@ -169,6 +178,73 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
       logChart('START_INTERACTION - cleared existing timeout');
     }
   }, [simpleCamera]);
+
+  // NUEVO: Función para limpiar completamente el chart y datos
+  const clearChartCompletely = useCallback(() => {
+    logLifecycle('CLEARING_CHART_COMPLETELY', 'MinimalistChart', {
+      reason: 'timeframe_change_preparation',
+      chartExists: !!chartRef.current,
+      dataLength: candleData.length
+    });
+
+    // 1. Limpiar datos del estado de React
+    setCandleData([]);
+    
+    // 2. Limpiar completamente el chart si existe
+    if (chartRef.current) {
+      try {
+        // Limpiar todos los datasets
+        if (chartRef.current.data?.datasets) {
+          chartRef.current.data.datasets.forEach((dataset: any) => {
+            dataset.data = [];
+          });
+        }
+        
+        // Resetear escalas
+        if (chartRef.current.options?.scales?.x) {
+          delete chartRef.current.options.scales.x.min;
+          delete chartRef.current.options.scales.x.max;
+        }
+        
+        if (chartRef.current.options?.scales?.y) {
+          delete chartRef.current.options.scales.y.min;
+          delete chartRef.current.options.scales.y.max;
+        }
+        
+        // Actualizar sin animación para cambio inmediato
+        chartRef.current.update('none');
+        
+        logLifecycle('CHART_CLEARED_SUCCESSFULLY', 'MinimalistChart', {
+          datasetsCleared: true,
+          scalesReset: true
+        });
+        
+      } catch (error) {
+        logError('Error clearing chart data', {
+          error: error instanceof Error ? error.message : String(error)
+        });
+      }
+    }
+
+    // 3. Limpiar canvas directamente como backup
+    if (canvasRef.current) {
+      const ctx = canvasRef.current.getContext('2d');
+      if (ctx) {
+        ctx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
+        ctx.fillStyle = '#000';
+        ctx.fillRect(0, 0, canvasRef.current.width, canvasRef.current.height);
+        
+        logLifecycle('CANVAS_CLEARED_MANUALLY', 'MinimalistChart', {
+          canvasWidth: canvasRef.current.width,
+          canvasHeight: canvasRef.current.height
+        });
+      }
+    }
+
+    // 4. Reset flags
+    initialViewportSet.current = false;
+    
+  }, [candleData.length]);
 
   const endUserInteraction = useCallback(() => {
     const timestamp = Date.now();
@@ -614,6 +690,17 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
   }, [activeIndicators]);
 
   const initializeChart = useCallback(async () => {
+    // CRÍTICO: Prevenir inicializaciones múltiples simultáneas
+    if (isInitializing.current) {
+      logLifecycle('CHART_INITIALIZATION_BLOCKED', 'MinimalistChart', {
+        reason: 'already_initializing',
+        candleDataLength: candleData.length
+      });
+      return;
+    }
+
+    isInitializing.current = true;
+
     const initStartTime = Date.now();
     chartInitializationCount.current++;
     
@@ -634,6 +721,7 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
         platform: Platform.OS,
         initializationNumber: chartInitializationCount.current
       });
+      isInitializing.current = false;
       return;
     }
 
@@ -713,23 +801,92 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
 
       setStatus('Creando gráfico...');
 
-      // Destruir gráfico anterior si existe
+      // CRÍTICO: Destruir gráfico anterior completamente
       if (chartRef.current) {
         const oldChartId = chartRef.current.id || 'unknown';
         logLifecycle('DESTROYING_EXISTING_CHART', 'MinimalistChart', {
           initializationNumber: chartInitializationCount.current,
           existingChartId: oldChartId
         });
-        chartRef.current.destroy();
+        
+        try {
+          chartRef.current.destroy();
+        } catch (destroyError) {
+          logError('Error destroying existing chart', {
+            error: destroyError instanceof Error ? destroyError.message : String(destroyError),
+            oldChartId
+          });
+        }
+        
         chartRef.current = null;
+        
+        // Esperar un frame para asegurar limpieza completa del canvas
+        await new Promise(resolve => requestAnimationFrame(resolve));
       }
 
-      // Configurar datasets
+      // CRÍTICO: Validar datos antes de crear datasets
+      if (candleData.length === 0) {
+        setStatus('Error: No hay datos de velas disponibles');
+        logError('No candle data available for chart creation', {
+          candleDataLength: candleData.length,
+          initializationNumber: chartInitializationCount.current
+        });
+        isInitializing.current = false;
+        return;
+      }
+
+      // Validar que los timestamps estén en orden y no haya saltos excesivos
+      const sortedData = [...candleData].sort((a, b) => a.x - b.x);
+      const timeRange = sortedData[sortedData.length - 1].x - sortedData[0].x;
+      const averageInterval = timeRange / (sortedData.length - 1);
+      
+      // Para 15m, el intervalo promedio debería ser ~900000ms (15min)
+      // Para 1d, el intervalo promedio debería ser ~86400000ms (24h)
+      const expectedIntervals: Record<string, number> = {
+        '1m': 60000,
+        '3m': 180000,
+        '5m': 300000,
+        '15m': 900000,
+        '30m': 1800000,
+        '1h': 3600000,
+        '2h': 7200000,
+        '4h': 14400000,
+        '6h': 21600000,
+        '8h': 28800000,
+        '12h': 43200000,
+        '1d': 86400000
+      };
+      
+      const expectedInterval = expectedIntervals[currentInterval] || 60000;
+      const intervalTolerance = expectedInterval * 2; // Tolerancia del 200%
+      
+      if (Math.abs(averageInterval - expectedInterval) > intervalTolerance) {
+        logError('Invalid time range detected - data inconsistent with interval', {
+          currentInterval,
+          expectedInterval,
+          averageInterval,
+          timeRange,
+          firstTimestamp: new Date(sortedData[0].x).toISOString(),
+          lastTimestamp: new Date(sortedData[sortedData.length - 1].x).toISOString(),
+          candleCount: sortedData.length
+        });
+        
+        // Filtrar datos para mantener solo los más recientes y consistentes
+        const maxCandles = Math.min(1000, sortedData.length);
+        const recentData = sortedData.slice(-maxCandles);
+        setCandleData(recentData);
+        
+        setStatus(`⚠️ Datos ajustados (${recentData.length} velas)`);
+        isInitializing.current = false;
+        return;
+      }
+
+      // Configurar datasets con datos validados
       const datasets: any[] = [
         {
           label: `${currentSymbol}`,
           type: 'candlestick',
-          data: candleData.map(candle => ({
+          data: sortedData.map(candle => ({
             x: candle.x,
             o: candle.o,
             h: candle.h,
@@ -790,6 +947,9 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
         }, 50); // Pequeño delay para asegurar que el gráfico esté completamente inicializado
       }
 
+      // CRÍTICO: Liberar bandera de inicialización después del éxito
+      isInitializing.current = false;
+
     } catch (error: any) {
       const initDuration = Date.now() - initStartTime;
       logError('Chart initialization failed', {
@@ -801,6 +961,9 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
       });
       setStatus(`Error: ${error.message}`);
       console.error('Error creando gráfico:', error);
+      
+      // CRÍTICO: Liberar bandera de inicialización después del error
+      isInitializing.current = false;
     }
   }, [candleData, currentSymbol, currentInterval, isStreaming, technicalIndicators, chartOptions, debouncedZoomHandler, debouncedPanHandler]);
 
@@ -943,7 +1106,7 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
       }
 
       // Mantener límite de velas (mutación in-situ)
-      const maxCandles = 900;
+      const maxCandles = 1000;
       if (dataset.data.length > maxCandles) {
         const removedCount = dataset.data.length - maxCandles;
         logTidalFlow('UPDATE_CHART_MUTATE_TRIM', {
@@ -956,10 +1119,38 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
 
     // C) COMPUTAR "viewport objetivo" según la marea tidal (SIN setState)
     const lastCandleTime = newCandle.x;
-    const desiredViewport = simpleCamera.computeTidalViewport({
-      snap,
-      lastCandleTime
-    });
+    const currentCameraState = simpleCamera.getCurrentState();
+    
+    // NUEVO: Si estamos en modo AUTO después de un reset (cambio de temporalidad),
+    // forzar viewport a mostrar TODAS las velas disponibles (solo una vez)
+    let desiredViewport;
+    if (currentCameraState.mode === 'AUTO' && !currentCameraState.isLocked && !hasAppliedFullViewportAfterChange.current) {
+      // Calcular viewport para mostrar TODAS las velas (no solo las últimas)
+      const recommendedViewport = simpleCamera.getRecommendedViewport(dataset.data.length, dataset.data, true);
+      if (recommendedViewport.min !== undefined && recommendedViewport.max !== undefined) {
+        desiredViewport = {
+          min: recommendedViewport.min,
+          max: recommendedViewport.max
+        };
+        hasAppliedFullViewportAfterChange.current = true; // Marcar como aplicado
+        logTidalFlow('UPDATE_CHART_AUTO_MODE_ALL_DATA', {
+          reason: 'auto_mode_show_all_data_after_timeframe_change',
+          recommendedViewport: desiredViewport,
+          dataLength: dataset.data.length,
+          showingAllCandles: true
+        });
+      } else {
+        desiredViewport = simpleCamera.computeTidalViewport({
+          snap,
+          lastCandleTime
+        });
+      }
+    } else {
+      desiredViewport = simpleCamera.computeTidalViewport({
+        snap,
+        lastCandleTime
+      });
+    }
     
     logTidalFlow('UPDATE_CHART_TIDAL_COMPUTE', {
       lastCandleTime: new Date(lastCandleTime).toLocaleTimeString(),
@@ -991,28 +1182,49 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
       
       simpleCamera.applyViewportToChart(chart, desiredViewport);
       
-      // CRÍTICO: Verificar si el viewport se aplicó correctamente
+      // CRÍTICO: Verificar si el viewport se aplicó correctamente (con tolerancia mejorada)
       const postApplyViewport = chart.scales?.x ? {
         min: chart.scales.x.min,
         max: chart.scales.x.max
       } : null;
       
+      // Tolerancia más permisiva para evitar falsos positivos
+      const tolerance = Math.abs(desiredViewport.max - desiredViewport.min) * 0.001; // 0.1% del rango
+      const minTolerance = Math.max(tolerance, 100); // Mínimo 100ms de tolerancia
+      
       const viewportAppliedCorrectly = postApplyViewport && 
-        Math.abs(postApplyViewport.min - desiredViewport.min) < 1 &&
-        Math.abs(postApplyViewport.max - desiredViewport.max) < 1;
+        Math.abs(postApplyViewport.min - desiredViewport.min) < minTolerance &&
+        Math.abs(postApplyViewport.max - desiredViewport.max) < minTolerance;
       
       if (!viewportAppliedCorrectly) {
         unexpectedViewportChanges.current++;
-        logError('Viewport not applied correctly', {
-          updateSequence: updateSequence.current,
-          desired: desiredViewport,
-          actual: postApplyViewport,
-          difference: postApplyViewport ? {
-            minDiff: Math.abs(postApplyViewport.min - desiredViewport.min),
-            maxDiff: Math.abs(postApplyViewport.max - desiredViewport.max)
-          } : 'no_scales',
-          unexpectedChanges: unexpectedViewportChanges.current
-        });
+        
+        // Solo reportar como error si la diferencia es significativa
+        const significantError = postApplyViewport && (
+          Math.abs(postApplyViewport.min - desiredViewport.min) > minTolerance * 10 ||
+          Math.abs(postApplyViewport.max - desiredViewport.max) > minTolerance * 10
+        );
+        
+        if (significantError) {
+          logError('Viewport not applied correctly', {
+            updateSequence: updateSequence.current,
+            desired: desiredViewport,
+            actual: postApplyViewport,
+            difference: postApplyViewport ? {
+              minDiff: Math.abs(postApplyViewport.min - desiredViewport.min),
+              maxDiff: Math.abs(postApplyViewport.max - desiredViewport.max)
+            } : 'no_scales',
+            tolerance: minTolerance,
+            unexpectedChanges: unexpectedViewportChanges.current
+          });
+        } else {
+          // Solo log de debug para diferencias menores
+          console.log('🔧 [MinorViewportDiff]', {
+            minDiff: postApplyViewport ? Math.abs(postApplyViewport.min - desiredViewport.min) : 'no_scales',
+            maxDiff: postApplyViewport ? Math.abs(postApplyViewport.max - desiredViewport.max) : 'no_scales',
+            tolerance: minTolerance
+          });
+        }
       }
       
       // E) chart.update('none') - sin animación para evitar saltos
@@ -1093,9 +1305,19 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
   }, [currentInterval, simpleCamera, persistentViewport, lastUpdateTime, updateThrottleMs]);
 
   const changeTimeInterval = useCallback(async (newInterval: TimeInterval) => {
+    // CRÍTICO: Prevenir cambios de intervalo simultáneos
+    if (isInitializing.current) {
+      logLifecycle('INTERVAL_CHANGE_BLOCKED', 'MinimalistChart', {
+        currentInterval,
+        newInterval,
+        reason: 'chart_initializing'
+      });
+      return;
+    }
+
     const intervalChangeStart = Date.now();
     
-    // CRÍTICO: Capturar estado de cámara ANTES del cambio de intervalo
+    // CRÍTICO: Capturar estado ANTES del cambio
     const preChangeState = {
       currentInterval,
       newInterval,
@@ -1104,22 +1326,34 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
       cameraState: simpleCamera ? {
         viewport: simpleCamera.getViewportFromCamera(),
         currentState: simpleCamera.getCurrentState(),
-        isLocked: simpleCamera.isLocked(),
-        isActivelyInteracting: simpleCamera.isActivelyInteracting(),
-        shouldForceViewport: simpleCamera.shouldForceViewport(),
-        forcedViewport: simpleCamera.getForcedViewport()
+        isLocked: simpleCamera.isLocked()
       } : null,
-      chartExists: !!chartRef.current,
-      chartId: chartRef.current?.id || null
+      chartExists: !!chartRef.current
     };
 
     logLifecycle('INTERVAL_CHANGE_START', 'MinimalistChart', preChangeState);
+    
+    // 1. RESETEAR LA CÁMARA suavemente para cambios de temporalidad
+    if (simpleCamera && newInterval !== currentInterval) {
+      logLifecycle('RESETTING_CAMERA_FOR_TIMEFRAME_CHANGE', 'MinimalistChart', {
+        reason: 'timeframe_change_pre_data_load',
+        oldInterval: currentInterval,
+        newInterval: newInterval
+      });
+      // Solo resetear si realmente cambió el intervalo
+      simpleCamera.resetForTimeframeChange();
+    }
 
+    // 2. LIMPIAR COMPLETAMENTE DATOS Y CHART ANTERIORES
+    clearChartCompletely();
     setCurrentInterval(newInterval);
     setStatus('Cambiando intervalo...');
+    
+    // Resetear bandera para permitir nuevo viewport completo
+    hasAppliedFullViewportAfterChange.current = false;
 
     try {
-      // Desuscribirse del intervalo anterior
+      // 3. DETENER STREAMING ANTERIOR
       if (isStreaming) {
         logLifecycle('UNSUBSCRIBING_FROM_STREAM', 'MinimalistChart', {
           symbol: currentSymbol,
@@ -1129,15 +1363,15 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
         liveStreamingService.unsubscribeFromStream(currentSymbol, currentInterval);
       }
 
-      // Cargar datos históricos para el nuevo intervalo
+      // 5. CARGAR DATOS HISTÓRICOS PARA EL NUEVO INTERVALO
       logLifecycle('LOADING_HISTORICAL_DATA', 'MinimalistChart', {
         symbol: currentSymbol,
         interval: newInterval,
-        candleCount: 900
+        candleCount: 1000
       });
       
       const historicalStart = Date.now();
-      const historicalData = await liveStreamingService.loadHistoricalData(currentSymbol, newInterval, 900);
+      const historicalData = await liveStreamingService.loadHistoricalData(currentSymbol, newInterval, 1000);
       const historicalDuration = Date.now() - historicalStart;
       
       logTiming('Historical data loaded for interval change', historicalDuration, {
@@ -1148,31 +1382,53 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
         newCandleCount: historicalData.length
       });
 
+      // 6. CONFIGURAR NUEVOS DATOS 
       setCandleData(historicalData);
+      
+      // 7. MARCAR PARA REINICIALIZACIÓN COMPLETA DEL CHART
+      // Esto asegura que el chart se reconstruya completamente con los nuevos datos
+      if (historicalData.length > 0) {
+        // Marcar que necesitamos reinicializar el chart
+        lastCandleCountRef.current = -1; // Forzar diferencia significativa
+        chartNeedsReinitializationRef.current = true;
+        
+        // 8. CONFIGURAR VIEWPORT PARA MOSTRAR DATOS MÁS RECIENTES
+        if (simpleCamera) {
+          // Usar timeout más largo para asegurar que React procese los datos primero
+          setTimeout(() => {
+            const viewportSet = simpleCamera.setViewportToLatestData(historicalData);
+            
+            logLifecycle('VIEWPORT_CONFIGURED_FOR_NEW_TIMEFRAME', 'MinimalistChart', {
+              newInterval,
+              dataLength: historicalData.length,
+              viewportSet,
+              reason: 'show_all_data_full_graph',
+              chartWillReinitialize: true
+            });
+            
+            // Cambiar a modo AUTO después de configurar viewport para permitir seguimiento normal
+            setTimeout(() => {
+              const currentState = simpleCamera.getCurrentState();
+              if (currentState.mode === 'FIRST_LOAD') {
+                // Cambiar a AUTO para permitir seguimiento normal pero sin bloquear el usuario
+                simpleCamera.unlockCamera(); // Esto cambiará a modo AUTO
+                
+                logLifecycle('CAMERA_MODE_CHANGED_TO_AUTO_AFTER_TIMEFRAME', 'MinimalistChart', {
+                  previousMode: 'FIRST_LOAD',
+                  newMode: 'AUTO',
+                  reason: 'viewport_configured_successfully'
+                });
+              }
+            }, 200); // Esperar que el chart se reinicialice
+            
+            // El viewport se aplicará automáticamente cuando el chart se reinicialice
+            // por el useEffect que detecta cambios en candleData.length
+            
+          }, 100); // Dar tiempo para que React procese setCandleData
+        }
+      }
 
-      // CRÍTICO: Verificar si el cambio de datos afectó la cámara
-      setTimeout(() => {
-        const postDataChangeState = {
-          cameraState: simpleCamera ? {
-            viewport: simpleCamera.getViewportFromCamera(),
-            currentState: simpleCamera.getCurrentState(),
-            isLocked: simpleCamera.isLocked(),
-            isActivelyInteracting: simpleCamera.isActivelyInteracting(),
-            shouldForceViewport: simpleCamera.shouldForceViewport(),
-            forcedViewport: simpleCamera.getForcedViewport()
-          } : null,
-          chartExists: !!chartRef.current,
-          chartId: chartRef.current?.id || null
-        };
-
-        logLifecycle('POST_DATA_CHANGE_CAMERA_STATE', 'MinimalistChart', {
-          preChangeState: preChangeState.cameraState,
-          postChangeState: postDataChangeState.cameraState,
-          cameraStateChanged: JSON.stringify(preChangeState.cameraState) !== JSON.stringify(postDataChangeState.cameraState)
-        });
-      }, 100);
-
-      // Suscribirse al nuevo intervalo
+      // 8. REANUDAR STREAMING CON NUEVO INTERVALO
       if (isStreaming) {
         logLifecycle('SUBSCRIBING_TO_NEW_STREAM', 'MinimalistChart', {
           symbol: currentSymbol,
@@ -1201,7 +1457,7 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
       });
       console.error('Error cambiando intervalo:', error);
     }
-  }, [currentSymbol, currentInterval, isStreaming, candleData.length, simpleCamera]);
+  }, [currentSymbol, currentInterval, isStreaming, candleData.length, simpleCamera, clearChartCompletely]);
 
   const startStreaming = useCallback(async () => {
     const streamingStart = Date.now();
@@ -1771,20 +2027,108 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
 
   // Efectos
   useEffect(() => {
+    // Solo ejecutar si hay un cambio REAL del símbolo o intervalo, o es la primera carga
+    const symbolChanged = previousSymbolRef.current !== '' && previousSymbolRef.current !== currentSymbol;  
+    const intervalChanged = previousIntervalRef.current !== '' && previousIntervalRef.current !== currentInterval;
+    const isFirstLoad = !hasLoadedOnceRef.current;
+    
+    logLifecycle('SYMBOL_INTERVAL_EFFECT_CHECK', 'MinimalistChart', {
+      currentSymbol,
+      previousSymbol: previousSymbolRef.current,
+      currentInterval,
+      previousInterval: previousIntervalRef.current,
+      symbolChanged,
+      intervalChanged,
+      isFirstLoad,
+      hasLoadedOnce: hasLoadedOnceRef.current,
+      willExecute: symbolChanged || intervalChanged || isFirstLoad
+    });
+    
+    if (!symbolChanged && !intervalChanged && !isFirstLoad) {
+      // No hay cambio real, solo actualización de datos - no resetear cámara
+      return;
+    }
+
     const loadInitialData = async () => {
       try {
-        // Marcar que necesitamos reinicializar debido a cambio de símbolo/intervalo
+        logLifecycle('INTENTIONAL_SYMBOL_OR_INTERVAL_CHANGE', 'MinimalistChart', {
+          previousSymbol: previousSymbolRef.current,
+          newSymbol: currentSymbol,
+          previousInterval: previousIntervalRef.current,
+          newInterval: currentInterval,
+          symbolChanged,
+          intervalChanged,
+          isFirstLoad,
+          reason: 'user_initiated_change'
+        });
+
+        // 1. RESETEAR LA CÁMARA solo para cambios intencionales (si no se hizo ya)
+        if (simpleCamera && (symbolChanged || intervalChanged) && isFirstLoad) {
+          logLifecycle('RESETTING_CAMERA_FOR_INTENTIONAL_CHANGE', 'MinimalistChart', {
+            reason: 'intentional_symbol_or_interval_change',
+            symbolChanged,
+            intervalChanged,
+            isFirstLoad
+          });
+          simpleCamera.resetForTimeframeChange();
+        }
+
+        // 2. LIMPIAR DATOS ANTERIORES COMPLETAMENTE solo si es cambio intencional
+        clearChartCompletely();
+
+        // 3. Marcar que necesitamos reinicializar debido a cambio de símbolo/intervalo
         chartNeedsReinitializationRef.current = true;
         
-        const historicalData = await liveStreamingService.loadHistoricalData(currentSymbol, currentInterval, 900);
+        // 4. Resetear bandera para permitir nuevo viewport completo
+        hasAppliedFullViewportAfterChange.current = false;
+        
+        // 4. CARGAR DATOS HISTÓRICOS
+        const historicalData = await liveStreamingService.loadHistoricalData(currentSymbol, currentInterval, 1000);
         setCandleData(historicalData);
+
+        // 5. CONFIGURAR VIEWPORT PARA MOSTRAR TODAS LAS VELAS
+        if (simpleCamera && historicalData.length > 0) {
+          setTimeout(() => {
+            const viewportSet = simpleCamera.setViewportToLatestData(historicalData);
+            
+            logLifecycle('VIEWPORT_CONFIGURED_FOR_SYMBOL_CHANGE', 'MinimalistChart', {
+              symbol: currentSymbol,
+              interval: currentInterval,
+              dataLength: historicalData.length,
+              viewportSet,
+              reason: 'show_all_data_full_graph_symbol_change'
+            });
+
+            // 6. CAMBIAR A MODO AUTO después de configurar viewport
+            setTimeout(() => {
+              const currentState = simpleCamera.getCurrentState();
+              if (currentState.mode === 'FIRST_LOAD') {
+                simpleCamera.unlockCamera(); // Esto cambiará a modo AUTO
+                
+                logLifecycle('CAMERA_MODE_CHANGED_TO_AUTO_AFTER_SYMBOL_CHANGE', 'MinimalistChart', {
+                  previousMode: 'FIRST_LOAD',
+                  newMode: 'AUTO',
+                  reason: 'viewport_configured_successfully_symbol_change'
+                });
+              }
+            }, 200);
+          }, 100);
+        }
       } catch (error) {
         console.error('Error cargando datos iniciales:', error);
       }
     };
 
-    loadInitialData();
-  }, [currentSymbol, currentInterval]);
+    // Solo cargar datos si hay un cambio real o es primera carga
+    if (symbolChanged || intervalChanged || isFirstLoad) {
+      loadInitialData();
+      hasLoadedOnceRef.current = true;
+    }
+    
+    // Actualizar referencias para el próximo cambio
+    previousSymbolRef.current = currentSymbol;
+    previousIntervalRef.current = currentInterval;
+  }, [currentSymbol, currentInterval, simpleCamera, clearChartCompletely]);
 
   // NUEVO: Solo reinicializar el gráfico cuando realmente sea necesario
   const lastCandleCountRef = useRef<number>(0);
@@ -1906,7 +2250,7 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
             });
             
             // Mantener solo las últimas velas según configuración de cámara
-            const maxCandles = simpleCamera.isLocked() ? 200 : 100;
+            const maxCandles = 1000;
             if (newData.length > maxCandles) {
               const removedCount = newData.length - maxCandles;
               newData.splice(0, removedCount);
@@ -2044,12 +2388,12 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
       }
     }
     
-    // En modo auto-ajuste: configurar vista inicial de últimas 100 velas
+    // En modo auto-ajuste: configurar vista inicial de TODAS las velas
     if (simpleCamera.shouldAutoAdjust()) {
       logLifecycle('VIEWPORT_APPLYING_AUTO_CONFIG', 'MinimalistChart');
       
-      const viewport = simpleCamera.getRecommendedViewport(candleData.length, candleData);
-      logViewportState(viewport, 'RECOMMENDED_VIEWPORT');
+      const viewport = simpleCamera.getRecommendedViewport(candleData.length, candleData, true);
+      logViewportState(viewport, 'RECOMMENDED_VIEWPORT_ALL_DATA');
       
       if (chart.scales.x && viewport.min && viewport.max) {
         logLifecycle('VIEWPORT_SETTING_INITIAL_VIEW', 'MinimalistChart', {

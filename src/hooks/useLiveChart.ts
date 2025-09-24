@@ -30,7 +30,7 @@ export const useLiveChart = (options: UseLiveChartOptions) => {
   const { 
     symbol, 
     interval, 
-    maxCandles = 900, // Configurado para máximo 900 velas como requisito
+    maxCandles = 1000, // Configurado para máximo 1000 velas como requisito
     enableUltraFast = false,
     cycleDelay = 100
   } = options;

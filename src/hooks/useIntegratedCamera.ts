@@ -22,23 +22,21 @@ export interface IntegratedCameraControls extends CameraControls {
   };
 }
 
-interface UseIntegratedCameraProps {
-  candleCount: number;
+interface UseIntegratedCameraOptions {
   chartWidth?: number;
-  chartHeight?: number;
   defaultVisibleCandles?: number;
-  onCameraChange?: (state: any) => void;
-  onNewDataReceived?: boolean;
+  candleWidth?: number;
+  enableAutoFollow?: boolean;
+  enableSmartTransitions?: boolean;
 }
 
 export const useIntegratedCamera = ({
-  candleCount,
-  chartWidth = 400,
-  chartHeight = 300,
-  defaultVisibleCandles = 100,
-  onCameraChange,
-  onNewDataReceived = false,
-}: UseIntegratedCameraProps): IntegratedCameraControls => {
+  chartWidth = 800,
+  defaultVisibleCandles = 1000,
+  candleWidth = 8,
+  enableAutoFollow = true,
+  enableSmartTransitions = true
+}: UseIntegratedCameraOptions = {}): IntegratedCameraResult => {
   
   // Hook de cámara tradicional
   const cameraControls = useChartCamera({

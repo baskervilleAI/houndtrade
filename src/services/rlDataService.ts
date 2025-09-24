@@ -163,7 +163,7 @@ class RLDataService {
       id: snapshotId,
       timestamp: new Date().toISOString(),
       symbol,
-      ohlcv: ohlcv.slice(-100), // Keep last 100 candles
+      ohlcv: ohlcv.slice(-1000), // Keep last 1000 candles
       ticker,
       orderBook,
     };

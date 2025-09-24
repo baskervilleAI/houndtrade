@@ -447,7 +447,7 @@ class BinanceService {
   async getKlines(
     symbol: string,
     interval: string,
-    limit: number = 500,
+    limit: number = 1000,
     startTime?: number,
     endTime?: number
   ): Promise<CandleData[]> {

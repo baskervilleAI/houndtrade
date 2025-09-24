@@ -74,8 +74,8 @@ function chartReducer(state: ChartState, action: ChartAction): ChartState {
       const currentCandles = state.candleData[action.payload.key] || [];
       const newCandles = [...currentCandles, action.payload.candle];
       
-      // Keep only last 900 candles for performance while maintaining good historical data
-      const trimmedCandles = newCandles.slice(-900);
+      // Keep only last 1000 candles for performance while maintaining good historical data
+      const trimmedCandles = newCandles.slice(-1000);
 
       return {
         ...state,
@@ -149,7 +149,7 @@ export const ChartProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   const getKey = useCallback((symbol: string, timeframe: string) => `${symbol}_${timeframe}`, []);
 
   // Generate mock candles for fallback
-  const generateMockCandles = useCallback((symbol: string, count: number = 900): CandleData[] => {
+  const generateMockCandles = useCallback((symbol: string, count: number = 1000): CandleData[] => {
     const candles: CandleData[] = [];
     const basePrice = symbol === 'BTCUSDT' ? 95000 : 
                      symbol === 'ETHUSDT' ? 3500 : 
@@ -244,7 +244,7 @@ export const ChartProvider: React.FC<{ children: ReactNode }> = ({ children }) =
         } catch (apiError) {
           console.warn(`⚠️ Binance API failed for ${key}, using mock data:`, apiError);
           // Fallback to mock data
-          candles = generateMockCandles(symbol, 900);
+          candles = generateMockCandles(symbol, 1000);
           console.log(`🎭 Generated ${candles.length} mock candles for ${key}`);
         }
 
@@ -260,7 +260,7 @@ export const ChartProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       } catch (error) {
         console.error(`❌ Error loading candles for ${key}:`, error);
         // Final fallback - generate mock data
-        const mockCandles = generateMockCandles(symbol, 900);
+        const mockCandles = generateMockCandles(symbol, 1000);
         dispatch({ type: 'SET_CANDLES', payload: { key, candles: mockCandles } });
         console.log(`🎭 Fallback: Generated ${mockCandles.length} mock candles for ${key}`);
       } finally {

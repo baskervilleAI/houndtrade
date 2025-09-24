@@ -158,7 +158,7 @@ export const TRADING_CONSTANTS = {
 export const CHART_CONSTANTS = {
   DEFAULT_TIMEFRAME: '1m',
   TIMEFRAMES: ['1m', '5m', '15m', '1h', '4h', '1d'] as const,
-  MAX_CANDLES: 900,
+  MAX_CANDLES: 1000,
   UPDATE_INTERVAL: 1000, // 1 second
 } as const;
 

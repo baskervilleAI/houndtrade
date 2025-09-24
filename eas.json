@@ -34,7 +34,7 @@
       },
       "android": {
         "resourceClass": "medium",
-        "buildType": "aab"
+        "buildType": "app-bundle"
       },
       "channel": "production"
     },
@@ -58,8 +58,5 @@
         "track": "internal"
       }
     }
-  },
-  "updates": {
-    "url": "https://u.expo.dev/your-project-id"
   }
 }

@@ -159,7 +159,7 @@ class LiveStreamingService extends SimpleEventEmitter {
     return selectedUrl;
   }
 
-  private getHistoricalDataUrl(symbol: string, interval: TimeInterval, limit: number = 900): string {
+  private getHistoricalDataUrl(symbol: string, interval: TimeInterval, limit: number = 1000): string {
     const url = `https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`;
     
     debugLogger.log('STREAMING', 'Historical data URL constructed', {
@@ -845,7 +845,7 @@ class LiveStreamingService extends SimpleEventEmitter {
     }
   }
 
-  async loadHistoricalData(symbol: string, interval: TimeInterval, limit: number = 900): Promise<CandleData[]> {
+  async loadHistoricalData(symbol: string, interval: TimeInterval, limit: number = 1000): Promise<CandleData[]> {
     const requestStartTime = Date.now();
     this.apiCallCount++;
     
