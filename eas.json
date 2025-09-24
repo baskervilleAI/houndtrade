@@ -28,12 +28,22 @@
     },
     "production": {
       "ios": {
-        "resourceClass": "m-medium"
+        "resourceClass": "m-medium",
+        "buildConfiguration": "Release",
+        "scheme": "houndtrade"
       },
       "android": {
-        "resourceClass": "medium"
+        "resourceClass": "medium",
+        "buildType": "app-bundle"
       },
       "channel": "production"
+    },
+    "production-apk": {
+      "extends": "production",
+      "android": {
+        "resourceClass": "medium",
+        "buildType": "apk"
+      }
     }
   },
   "submit": {
@@ -48,8 +58,5 @@
         "track": "internal"
       }
     }
-  },
-  "updates": {
-    "url": "https://u.expo.dev/your-project-id"
   }
 }

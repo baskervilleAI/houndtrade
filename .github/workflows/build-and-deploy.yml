@@ -1,0 +1,64 @@
+name: Build and Deploy
+
+on:
+  push:
+    branches: [ main, refactortradegraphic ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  web-build:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'npm'
+        
+    - name: Install dependencies
+      run: npm ci --legacy-peer-deps
+      
+    - name: Build web app
+      run: |
+        npm run build:web
+        
+    - name: Deploy to GitHub Pages
+      if: github.ref == 'refs/heads/main'
+      uses: peaceiris/actions-gh-pages@v3
+      with:
+        github_token: ${{ secrets.GITHUB_TOKEN }}
+        publish_dir: ./dist
+        
+  mobile-builds:
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'npm'
+        
+    - name: Setup Expo
+      uses: expo/expo-github-action@v8
+      with:
+        expo-version: latest
+        token: ${{ secrets.EXPO_TOKEN }}
+        
+    - name: Install dependencies
+      run: npm ci --legacy-peer-deps
+      
+    - name: Build Android APK
+      run: eas build --platform android --profile production-apk --non-interactive
+      
+    - name: Build iOS
+      run: eas build --platform ios --profile production --non-interactive

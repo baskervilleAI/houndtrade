@@ -94,7 +94,10 @@ function appReducer(state: AppState, action: AppAction): AppState {
       };
     
     case 'UPDATE_TICKER':
-      console.log('📊 CONTEXT: Updating ticker:', action.payload.symbol, action.payload.price);
+      // Solo log ocasional para debugging (1 de cada 100 actualizaciones)
+      if (Math.random() < 0.01) {
+        console.log('📊 CONTEXT: Ticker actualizado:', action.payload.symbol, action.payload.price);
+      }
       return {
         ...state,
         tickers: {

@@ -5,6 +5,7 @@ import {
   StyleSheet,
   ScrollView,
   TouchableOpacity,
+  Platform,
 } from 'react-native';
 import { useMarket } from '../../context/AppContext';
 import { formatPrice, formatPercentage } from '../../utils/formatters';
@@ -24,15 +25,8 @@ export const MarketData: React.FC = () => {
   // Debug: Log ticker data changes only when count changes
   React.useEffect(() => {
     const tickerCount = Object.keys(tickers).length;
-    console.log('🔍 MarketData Component - Ticker count changed:', tickerCount);
-    
     if (tickerCount > 0) {
-      POPULAR_PAIRS.forEach(symbol => {
-        const ticker = tickers[symbol];
-        if (ticker) {
-          console.log(`📊 ${symbol}: $${ticker.price}`);
-        }
-      });
+      console.log(`� Datos de mercado actualizados: ${tickerCount} pares`);
     }
   }, [Object.keys(tickers).length]); // Only re-run when count changes
 
@@ -138,21 +132,31 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     borderWidth: 1,
     borderColor: '#333333',
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
-    shadowOpacity: 0.25,
-    shadowRadius: 3.84,
+    // React Native Web compatible shadow
+    ...(Platform.OS === 'web' ? {
+      boxShadow: '0px 2px 3.84px rgba(0, 0, 0, 0.25)',
+    } : {
+      shadowColor: '#000',
+      shadowOffset: {
+        width: 0,
+        height: 2,
+      },
+      shadowOpacity: 0.25,
+      shadowRadius: 3.84,
+    }),
     elevation: 5,
     position: 'relative',
   },
   selectedPair: {
     backgroundColor: '#00ff88',
     borderColor: '#00ff88',
-    shadowColor: '#00ff88',
-    shadowOpacity: 0.5,
+    // React Native Web compatible shadow for selected state
+    ...(Platform.OS === 'web' ? {
+      boxShadow: '0px 2px 3.84px rgba(0, 255, 136, 0.5)',
+    } : {
+      shadowColor: '#00ff88',
+      shadowOpacity: 0.5,
+    }),
   },
   pairSymbol: {
     fontSize: 12,

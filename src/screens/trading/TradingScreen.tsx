@@ -6,18 +6,22 @@ import {
   ScrollView,
   TouchableOpacity,
   Dimensions,
+  Platform,
 } from 'react-native';
 import { useAuth, useTrading, useMarket } from '../../context/AppContext';
 import { useMarketData } from '../../hooks/useMarketData';
-import { CandlestickChart } from '../../components/chart/CandlestickChart_ultrafast';
-import { OrderForm } from '../../components/trading/OrderForm';
-import { PositionsList } from '../../components/trading/PositionsList';
+import { formatPrice, formatPercentage, formatCurrency } from '../../utils/formatters';
+import MinimalistChart from '../../components/chart/MinimalistChart';
 import { MarketData } from '../../components/trading/MarketData';
 
-const { width: screenWidth } = Dimensions.get('window');
+const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
+
+// Responsive breakpoints
+const isTablet = screenWidth >= 768;
+const isMobile = screenWidth < 768;
+const isSmallMobile = screenWidth < 400;
 
 export const TradingScreen: React.FC = () => {
-  const [selectedTab, setSelectedTab] = useState<'chart' | 'positions' | 'orders'>('chart');
   const { user, logout } = useAuth();
   const { balance, equity, totalPnl, pnlPercentage } = useTrading();
   const { selectedPair, tickers } = useMarket();
@@ -62,19 +66,19 @@ export const TradingScreen: React.FC = () => {
       <View style={styles.portfolioSummary}>
         <View style={styles.balanceContainer}>
           <Text style={styles.balanceLabel}>Balance</Text>
-          <Text style={styles.balanceValue}>${balance.toLocaleString()}</Text>
+          <Text style={styles.balanceValue}>${formatCurrency(balance)}</Text>
         </View>
         <View style={styles.equityContainer}>
           <Text style={styles.equityLabel}>Equity</Text>
-          <Text style={styles.equityValue}>${equity.toLocaleString()}</Text>
+          <Text style={styles.equityValue}>${formatCurrency(equity)}</Text>
         </View>
         <View style={styles.pnlContainer}>
           <Text style={styles.pnlLabel}>PnL</Text>
           <Text style={[
             styles.pnlValue,
-            { color: totalPnl >= 0 ? '#00ff88' : '#ff4444' }
+            { color: (totalPnl || 0) >= 0 ? '#00ff88' : '#ff4444' }
           ]}>
-            ${totalPnl.toLocaleString()} ({pnlPercentage.toFixed(2)}%)
+            ${formatCurrency(totalPnl)} ({formatPercentage(pnlPercentage)})
           </Text>
         </View>
       </View>
@@ -82,48 +86,15 @@ export const TradingScreen: React.FC = () => {
       {/* Market Data */}
       <MarketData />
 
-      {/* Tab Navigation */}
-      <View style={styles.tabContainer}>
-        <TouchableOpacity
-          style={[styles.tab, selectedTab === 'chart' && styles.activeTab]}
-          onPress={() => setSelectedTab('chart')}
-        >
-          <Text style={[styles.tabText, selectedTab === 'chart' && styles.activeTabText]}>
-            Gráfico
-          </Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.tab, selectedTab === 'positions' && styles.activeTab]}
-          onPress={() => setSelectedTab('positions')}
-        >
-          <Text style={[styles.tabText, selectedTab === 'positions' && styles.activeTabText]}>
-            Posiciones
-          </Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.tab, selectedTab === 'orders' && styles.activeTab]}
-          onPress={() => setSelectedTab('orders')}
-        >
-          <Text style={[styles.tabText, selectedTab === 'orders' && styles.activeTabText]}>
-            Órdenes
-          </Text>
-        </TouchableOpacity>
-      </View>
-
-      {/* Content */}
+      {/* Maximized Chart Content */}
       <View style={styles.content}>
-        {selectedTab === 'chart' && (
-          <View style={styles.chartContainer}>
-            <CandlestickChart />
-            <OrderForm />
-          </View>
-        )}
-        {selectedTab === 'positions' && <PositionsList />}
-        {selectedTab === 'orders' && (
-          <View style={styles.ordersContainer}>
-            <Text style={styles.comingSoon}>Historial de órdenes próximamente</Text>
-          </View>
-        )}
+        <View style={styles.chartContainer}>
+          <MinimalistChart 
+            height={screenHeight - 220} 
+            width={screenWidth - 20} 
+            symbol={selectedPair} 
+          />
+        </View>
       </View>
     </View>
   );
@@ -142,114 +113,89 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     borderBottomWidth: 1,
     borderBottomColor: '#333333',
+    minHeight: isSmallMobile ? 60 : 70,
   },
   headerLeft: {
     flex: 1,
   },
   appName: {
-    fontSize: 20,
+    fontSize: isSmallMobile ? 18 : 20,
     fontWeight: 'bold',
     color: '#ffffff',
   },
   userName: {
-    fontSize: 14,
+    fontSize: isSmallMobile ? 12 : 14,
     color: '#888888',
     marginTop: 2,
   },
   logoutButton: {
     backgroundColor: '#ff4444',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
+    paddingHorizontal: isSmallMobile ? 12 : 16,
+    paddingVertical: isSmallMobile ? 6 : 8,
     borderRadius: 6,
   },
   logoutText: {
     color: '#ffffff',
-    fontSize: 14,
+    fontSize: isSmallMobile ? 12 : 14,
     fontWeight: '500',
   },
   portfolioSummary: {
-    flexDirection: 'row',
+    flexDirection: isSmallMobile ? 'column' : 'row',
     paddingHorizontal: 16,
     paddingVertical: 12,
     borderBottomWidth: 1,
     borderBottomColor: '#333333',
+    gap: isSmallMobile ? 8 : 0,
   },
   balanceContainer: {
-    flex: 1,
+    flex: isSmallMobile ? 0 : 1,
     alignItems: 'center',
+    paddingVertical: isSmallMobile ? 8 : 0,
   },
   balanceLabel: {
-    fontSize: 12,
+    fontSize: isSmallMobile ? 14 : 12,
     color: '#888888',
     marginBottom: 4,
   },
   balanceValue: {
-    fontSize: 16,
+    fontSize: isSmallMobile ? 18 : 16,
     fontWeight: 'bold',
     color: '#ffffff',
   },
   equityContainer: {
-    flex: 1,
+    flex: isSmallMobile ? 0 : 1,
     alignItems: 'center',
+    paddingVertical: isSmallMobile ? 8 : 0,
   },
   equityLabel: {
-    fontSize: 12,
+    fontSize: isSmallMobile ? 14 : 12,
     color: '#888888',
     marginBottom: 4,
   },
   equityValue: {
-    fontSize: 16,
+    fontSize: isSmallMobile ? 18 : 16,
     fontWeight: 'bold',
     color: '#ffffff',
   },
   pnlContainer: {
-    flex: 1,
+    flex: isSmallMobile ? 0 : 1,
     alignItems: 'center',
+    paddingVertical: isSmallMobile ? 8 : 0,
   },
   pnlLabel: {
-    fontSize: 12,
+    fontSize: isSmallMobile ? 14 : 12,
     color: '#888888',
     marginBottom: 4,
   },
   pnlValue: {
-    fontSize: 16,
+    fontSize: isSmallMobile ? 18 : 16,
     fontWeight: 'bold',
-  },
-  tabContainer: {
-    flexDirection: 'row',
-    borderBottomWidth: 1,
-    borderBottomColor: '#333333',
-  },
-  tab: {
-    flex: 1,
-    paddingVertical: 12,
-    alignItems: 'center',
-  },
-  activeTab: {
-    borderBottomWidth: 2,
-    borderBottomColor: '#00ff88',
-  },
-  tabText: {
-    fontSize: 14,
-    color: '#888888',
-    fontWeight: '500',
-  },
-  activeTabText: {
-    color: '#00ff88',
+    textAlign: 'center',
   },
   content: {
     flex: 1,
   },
   chartContainer: {
     flex: 1,
-  },
-  ordersContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  comingSoon: {
-    fontSize: 16,
-    color: '#888888',
   },
 });
