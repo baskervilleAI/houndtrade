@@ -6,6 +6,7 @@ import {
   Text,
   PanResponder,
   PanResponderInstance,
+  TouchableOpacity,
 } from 'react-native';
 import { formatPrice } from '../../utils/formatters';
 
@@ -45,6 +46,7 @@ const TradingOverlay: React.FC<TradingOverlayProps> = ({
   chartDimensions,
   isVisible,
   onOverlayClick,
+  onClose,
   symbol = 'BTCUSDT',
   priceScale,
   latestPrice,
@@ -250,6 +252,15 @@ const TradingOverlay: React.FC<TradingOverlayProps> = ({
       ]}
       onTouchEnd={handleTouchEnd}
     >
+      {/* Close Button */}
+      <TouchableOpacity
+        style={styles.closeButton}
+        onPress={onClose}
+        hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+      >
+        <Text style={styles.closeButtonText}>✕</Text>
+      </TouchableOpacity>
+
       {!hasScale && (
         <View style={styles.noDataContainer}>
           <Text style={styles.noDataText}>Sin datos de precio para configurar TP/SL</Text>
@@ -366,6 +377,31 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     zIndex: 1000,
     overflow: 'visible',
+  },
+  closeButton: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    borderWidth: 1,
+    borderColor: '#ffffff',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 1001,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  closeButtonText: {
+    color: '#ffffff',
+    fontSize: 18,
+    fontWeight: 'bold',
+    lineHeight: 18,
   },
   noDataContainer: {
     flex: 1,
