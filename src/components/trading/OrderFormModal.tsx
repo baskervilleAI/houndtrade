@@ -17,6 +17,9 @@ interface OrderFormModalProps {
   onClose: () => void;
   onCreateOrder: (params: OrderCreationParams) => Promise<{ success: boolean; order?: any; errors?: string[] }>;
   isLoading: boolean;
+  defaultSymbol?: string;
+  defaultTakeProfitPrice?: number | null;
+  defaultStopLossPrice?: number | null;
 }
 
 export const OrderFormModal: React.FC<OrderFormModalProps> = ({
@@ -24,6 +27,9 @@ export const OrderFormModal: React.FC<OrderFormModalProps> = ({
   onClose,
   onCreateOrder,
   isLoading,
+  defaultSymbol,
+  defaultTakeProfitPrice,
+  defaultStopLossPrice,
 }) => {
   const handleCreateOrder = async (params: OrderCreationParams) => {
     const result = await onCreateOrder(params);
@@ -58,6 +64,9 @@ export const OrderFormModal: React.FC<OrderFormModalProps> = ({
           <OrderForm 
             onCreateOrder={handleCreateOrder}
             isLoading={isLoading}
+            defaultSymbol={defaultSymbol}
+            defaultTakeProfitPrice={defaultTakeProfitPrice}
+            defaultStopLossPrice={defaultStopLossPrice}
           />
         </View>
       </View>

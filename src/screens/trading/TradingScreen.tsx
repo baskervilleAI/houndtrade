@@ -63,6 +63,15 @@ export const TradingScreen: React.FC = () => {
     x: 10,
     y: 80
   });
+  const [overlayTakeProfit, setOverlayTakeProfit] = useState<number | null>(null);
+  const [overlayStopLoss, setOverlayStopLoss] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (showTradingOverlay) {
+      setOverlayTakeProfit(null);
+      setOverlayStopLoss(null);
+    }
+  }, [showTradingOverlay]);
 
   // Initialize market data at the screen level
   const { isInitialized, getStatus } = useMarketData({
@@ -136,6 +145,10 @@ export const TradingScreen: React.FC = () => {
                 symbol={selectedPair}
                 priceScale={priceScale}
                 latestPrice={currentPrice}
+                initialTakeProfit={overlayTakeProfit}
+                initialStopLoss={overlayStopLoss}
+                onTakeProfitChange={setOverlayTakeProfit}
+                onStopLossChange={setOverlayStopLoss}
                 onOverlayClick={(event) => {
                   console.log('🖱️ [OVERLAY_CLICK] Click en overlay detectado', event);
                 }}
@@ -316,6 +329,9 @@ export const TradingScreen: React.FC = () => {
         onClose={() => setShowOrderModal(false)}
         onCreateOrder={createOrder}
         isLoading={isLoading}
+        defaultSymbol={selectedPair}
+        defaultTakeProfitPrice={overlayTakeProfit}
+        defaultStopLossPrice={overlayStopLoss}
       />
 
       {/* Error display */}

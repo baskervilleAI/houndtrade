@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { View, Text, Alert, ScrollView, TouchableOpacity, TextInput } from 'react-native';
 import { OrderCreationParams, OrderSide, OrderType } from '../../types/trading';
 
@@ -6,6 +6,9 @@ interface OrderFormProps {
   onCreateOrder: (params: OrderCreationParams) => Promise<{ success: boolean; order?: any; errors?: string[] }>;
   isLoading: boolean;
   availableSymbols?: string[];
+  defaultSymbol?: string;
+  defaultTakeProfitPrice?: number | null;
+  defaultStopLossPrice?: number | null;
 }
 
 const CRYPTO_SYMBOLS = [
@@ -117,10 +120,13 @@ const SimpleSelect: React.FC<SimpleSelectProps> = ({
 export const OrderForm: React.FC<OrderFormProps> = ({ 
   onCreateOrder, 
   isLoading, 
-  availableSymbols = CRYPTO_SYMBOLS 
+  availableSymbols = CRYPTO_SYMBOLS,
+  defaultSymbol = 'BTCUSDT',
+  defaultTakeProfitPrice,
+  defaultStopLossPrice,
 }) => {
   // Estados del formulario
-  const [symbol, setSymbol] = useState('BTCUSDT');
+  const [symbol, setSymbol] = useState(defaultSymbol);
   const [side, setSide] = useState<OrderSide>(OrderSide.BUY);
   const [orderType, setOrderType] = useState<OrderType>(OrderType.MARKET);
   const [usdtAmount, setUsdtAmount] = useState('100');
@@ -136,6 +142,38 @@ export const OrderForm: React.FC<OrderFormProps> = ({
   
   const [notes, setNotes] = useState('');
   const [showAdvanced, setShowAdvanced] = useState(false);
+
+  useEffect(() => {
+    if (defaultSymbol && defaultSymbol !== symbol) {
+      setSymbol(defaultSymbol);
+    }
+  }, [defaultSymbol]);
+
+  useEffect(() => {
+    if (defaultTakeProfitPrice === undefined) return;
+
+    if (defaultTakeProfitPrice === null) {
+      setTakeProfitPrice('');
+      setTpMode('usdt');
+    } else {
+      setTpMode('price');
+      setTakeProfitUSDT('');
+      setTakeProfitPrice(defaultTakeProfitPrice.toString());
+    }
+  }, [defaultTakeProfitPrice]);
+
+  useEffect(() => {
+    if (defaultStopLossPrice === undefined) return;
+
+    if (defaultStopLossPrice === null) {
+      setStopLossPrice('');
+      setSlMode('usdt');
+    } else {
+      setSlMode('price');
+      setStopLossUSDT('');
+      setStopLossPrice(defaultStopLossPrice.toString());
+    }
+  }, [defaultStopLossPrice]);
 
   // Validación del formulario
   const validateForm = (): string[] => {
