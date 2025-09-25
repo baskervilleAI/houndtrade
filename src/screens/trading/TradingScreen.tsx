@@ -18,6 +18,7 @@ import { PositionsGrid } from '../../components/trading/PositionsGrid';
 import { OrderForm } from '../../components/trading/OrderForm';
 import { OrderFormModal } from '../../components/trading/OrderFormModal';
 import { OrderHistory } from '../../components/trading/OrderHistory';
+import TradingOverlay from '../../components/trading/TradingOverlay';
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
 
@@ -53,6 +54,15 @@ export const TradingScreen: React.FC = () => {
   
   // Order form modal state
   const [showOrderModal, setShowOrderModal] = useState(false);
+
+  // Trading overlay state - para el div de colores encima del gráfico
+  const [showTradingOverlay, setShowTradingOverlay] = useState(false);
+  const [chartDimensions, setChartDimensions] = useState({
+    width: screenWidth - 20 - 90, // Restamos 90px para el label de precios del lado derecho
+    height: screenHeight - 140,
+    x: 10,
+    y: 80
+  });
 
   // Initialize market data at the screen level
   const { isInitialized, getStatus } = useMarketData({
@@ -99,11 +109,37 @@ export const TradingScreen: React.FC = () => {
       case 'trading':
         return (
           <View style={styles.chartContainer}>
-            <MinimalistChart 
-              height={screenHeight - 140} 
-              width={screenWidth - 20} 
-              symbol={selectedPair} 
-            />
+            <View style={styles.chartWrapper}>
+              <MinimalistChart 
+                symbol={selectedPair} 
+              />
+              
+              {/* Overlay de colores - se posiciona encima del gráfico */}
+              <TradingOverlay
+                chartDimensions={chartDimensions}
+                isVisible={showTradingOverlay}
+                onOverlayClick={(event) => {
+                  console.log('🖱️ [OVERLAY_CLICK] Click en overlay detectado', event);
+                }}
+                onClose={() => {
+                  console.log('❌ [OVERLAY_CLOSE] Cerrando overlay');
+                  setShowTradingOverlay(false);
+                }}
+              />
+
+              {/* Botón Configurar Orden para el gráfico - solo visible cuando no hay overlay */}
+              {!showTradingOverlay && (
+                <TouchableOpacity
+                  style={styles.configureOrderButton}
+                  onPress={() => {
+                    console.log('🎨 [CONFIGURE_ORDER] Activando panel de configuración de orden');
+                    setShowTradingOverlay(true);
+                  }}
+                >
+                  <Text style={styles.configureOrderButtonText}>Configurar Orden</Text>
+                </TouchableOpacity>
+              )}
+            </View>
           </View>
         );
       
@@ -451,6 +487,52 @@ const styles = StyleSheet.create({
         minHeight: '70vh',
       },
     }),
+  },
+  // Wrapper para gráfico y overlay
+  chartWrapper: {
+    flex: 1,
+    position: 'relative',
+  },
+  // Botón activador del overlay
+  overlayActivatorButton: {
+    position: 'absolute',
+    bottom: 20,
+    right: 20,
+    backgroundColor: '#00ff88',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+    elevation: 5,
+  },
+  overlayActivatorButtonText: {
+    color: '#000000',
+    fontWeight: 'bold',
+    fontSize: 14,
+  },
+  // Botón específico para configurar orden en el gráfico
+  configureOrderButton: {
+    position: 'absolute',
+    bottom: 20,
+    right: 20,
+    backgroundColor: '#00ff88',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 25,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+    elevation: 5,
+    zIndex: 999,
+  },
+  configureOrderButtonText: {
+    color: '#000000',
+    fontWeight: 'bold',
+    fontSize: 16,
   },
   // Floating action button
   floatingOrderButton: {

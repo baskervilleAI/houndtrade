@@ -475,6 +475,60 @@ class DebugLogger {
   }
 
   /**
+   * Log específico para debugging de colores que parpadean
+   */
+  chartColorFlicker(flickerType: 'APPEAR_ON_HOVER' | 'DISAPPEAR_ON_LEAVE' | 'STREAM_UPDATE_LOSS' | 'HOOK_ERROR_LOSS', details?: any) {
+    if (LOG_CONFIG.CHART_COLOR.enabled) {
+      console.warn(`🎨⚡ [CHART_COLOR_FLICKER] ${flickerType}:`, {
+        ...details,
+        timestamp: new Date().toLocaleTimeString(),
+        stackTrace: new Error().stack?.split('\n').slice(0, 3)
+      });
+    }
+  }
+
+  /**
+   * Log específico para eventos de mouse que afectan colores
+   */
+  chartMouseColorEvent(eventType: 'MOUSEENTER' | 'MOUSELEAVE' | 'MOUSEMOVE' | 'HOVER', position?: any, colorState?: any) {
+    if (LOG_CONFIG.CHART_COLOR.enabled || LOG_CONFIG.CLICK.enabled) {
+      console.log(`🖱️🎨 [CHART_MOUSE_COLOR] ${eventType}:`, {
+        position,
+        colorState,
+        timestamp: new Date().toLocaleTimeString()
+      });
+    }
+  }
+
+  /**
+   * Log específico para el error del hook que está causando problemas
+   */
+  hookErrorLoop(iteration: number, errorLocation: string, candleDataLength?: number) {
+    // Este log se muestra siempre porque es crítico
+    console.error(`🚫🔄 [HOOK_ERROR_LOOP] Iteration ${iteration}:`, {
+      location: errorLocation,
+      candleDataLength,
+      timestamp: new Date().toLocaleTimeString(),
+      message: 'useTechnicalIndicators called in callback - BREAKING THE APP'
+    });
+  }
+
+  /**
+   * Log específico para rastrear el estado de colores durante stream updates
+   */
+  streamUpdateColorTracking(updateType: string, beforeColors: any, afterColors: any, hookErrorOccurred: boolean) {
+    if (LOG_CONFIG.CHART_COLOR.enabled || LOG_CONFIG.CHART.enabled) {
+      console.log(`🌊🎨 [STREAM_COLOR_TRACKING] ${updateType}:`, {
+        beforeColors: beforeColors ? Object.keys(beforeColors) : 'none',
+        afterColors: afterColors ? Object.keys(afterColors) : 'none',
+        colorsLost: beforeColors && !afterColors,
+        hookErrorOccurred,
+        timestamp: new Date().toLocaleTimeString()
+      });
+    }
+  }
+
+  /**
    * Log específico para cuando los colores son aplicados sobre el gráfico
    */
   chartColorApplication(elementType: string, colors: any, position?: any) {
@@ -651,6 +705,50 @@ class DebugLogger {
       });
     }
   }
+
+  /**
+   * Funciones específicas para logging del overlay
+   */
+  overlayCreate(dimensions: any, position: any) {
+    if (LOG_CONFIG.CHART_COLOR.enabled) {
+      console.log(`🎨📋 [OVERLAY_CREATE] Overlay creado:`, {
+        dimensions,
+        position,
+        timestamp: new Date().toLocaleTimeString()
+      });
+    }
+  }
+
+  overlayPosition(chartBounds: any, overlayBounds: any, aligned: boolean) {
+    if (LOG_CONFIG.CHART_COLOR.enabled) {
+      console.log(`📍 [OVERLAY_POSITION] Posicionamiento del overlay:`, {
+        chartBounds,
+        overlayBounds,
+        aligned,
+        timestamp: new Date().toLocaleTimeString()
+      });
+    }
+  }
+
+  overlayClick(clickPosition: any, colorData: any) {
+    if (LOG_CONFIG.CLICK.enabled || LOG_CONFIG.CHART_COLOR.enabled) {
+      console.log(`🖱️📋 [OVERLAY_CLICK] Click en overlay:`, {
+        clickPosition,
+        colorData,
+        timestamp: new Date().toLocaleTimeString()
+      });
+    }
+  }
+
+  overlayClose(reason: 'CLOSE_ORDER_BUTTON' | 'MANUAL' | 'ERROR', finalState: any) {
+    if (LOG_CONFIG.CHART_COLOR.enabled) {
+      console.log(`❌📋 [OVERLAY_CLOSE] Overlay cerrado:`, {
+        reason,
+        finalState,
+        timestamp: new Date().toLocaleTimeString()
+      });
+    }
+  }
 }
 
 // Instancia singleton
@@ -729,6 +827,18 @@ export const logTechnicalIndicatorHookViolation = (callerFunction: string, candl
 
 export const logChartColorLoss = (lossType: string, beforeState: any, afterState: any, trigger: string) =>
   debugLogger.chartColorLoss(lossType, beforeState, afterState, trigger);
+
+export const logChartColorFlicker = (flickerType: 'APPEAR_ON_HOVER' | 'DISAPPEAR_ON_LEAVE' | 'STREAM_UPDATE_LOSS' | 'HOOK_ERROR_LOSS', details?: any) =>
+  debugLogger.chartColorFlicker(flickerType, details);
+
+export const logChartMouseColorEvent = (eventType: 'MOUSEENTER' | 'MOUSELEAVE' | 'MOUSEMOVE' | 'HOVER', position?: any, colorState?: any) =>
+  debugLogger.chartMouseColorEvent(eventType, position, colorState);
+
+export const logHookErrorLoop = (iteration: number, errorLocation: string, candleDataLength?: number) =>
+  debugLogger.hookErrorLoop(iteration, errorLocation, candleDataLength);
+
+export const logStreamUpdateColorTracking = (updateType: string, beforeColors: any, afterColors: any, hookErrorOccurred: boolean) =>
+  debugLogger.streamUpdateColorTracking(updateType, beforeColors, afterColors, hookErrorOccurred);
 
 export const logIndicatorPersistence = (action: string, symbol: string, timeframe: string, indicators?: any) => 
   debugLogger.indicatorPersistence(action, symbol, timeframe, indicators);
@@ -979,8 +1089,313 @@ STORAGE KEYS A MONITOREAR:
     `);
   };
 
+  // Nueva función para debugging específico del parpadeo de colores
+  (window as any).debugColorFlicker = () => {
+    debugLogger.setEnabled('CHART_COLOR', true);
+    debugLogger.setEnabled('CLICK', true);
+    debugLogger.setEnabled('HOOK', true);
+    console.log(`
+🎨⚡ [COLOR_FLICKER_DEBUG] Debugging de parpadeo de colores activado:
+
+PROBLEMA DETECTADO:
+- Los colores aparecen cuando el mouse está sobre "Configurar Orden"
+- Los colores parpadean cuando el mouse sale del gráfico
+- Esto sugiere que hay eventos de hover que controlan la visibilidad
+
+HIPÓTESIS:
+1. Los colores están manejados por CSS hover o eventos de mouse
+2. El parpadeo ocurre por conflictos con stream updates
+3. El hook error está interfiriendo con el estado del chart
+
+NUEVA FUNCIONES DE DEBUG:
+- logChartMouseColorEvent() - Para eventos de mouse
+- logChartColorFlicker() - Para detectar parpadeos
+- logStreamUpdateColorTracking() - Para seguir colores durante updates
+
+PARA USAR:
+1. Mueve el mouse sobre "Configurar Orden" y observa los logs
+2. Mueve el mouse fuera del gráfico y observa los logs
+3. Los logs mostrarán exactamente qué está causando el parpadeo
+
+SIGUIENTE PASO:
+- Hacer click en el chart para agregar colores
+- Observar qué pasa cuando se mueve el mouse
+- Verificar si los colores están en localStorage/sessionStorage
+    `);
+  };
+
+  // Función específica para detectar y corregir el parpadeo
+  (window as any).analyzeColorFlicker = () => {
+    debugLogger.setEnabled('CHART_COLOR', true);
+    debugLogger.setEnabled('CHART', true);
+    debugLogger.setEnabled('CLICK', true);
+    
+    let colorState = { 
+      visible: false, 
+      lastEvent: null as { type: string; x: number; y: number; target: string } | null 
+    };
+    
+    // Interceptar eventos del DOM para detectar cuando aparecen/desaparecen colores
+    const observer = new MutationObserver((mutations) => {
+      mutations.forEach((mutation) => {
+        if (mutation.type === 'attributes' && 
+            (mutation.attributeName === 'style' || mutation.attributeName === 'class')) {
+          const target = mutation.target as HTMLElement;
+          
+          // Buscar elementos que puedan ser colores del chart
+          if (target.style.backgroundColor || target.style.color || target.classList.contains('chart-color')) {
+            const isVisible = target.style.display !== 'none' && target.style.opacity !== '0';
+            
+            if (colorState.visible !== isVisible) {
+              colorState.visible = isVisible;
+              debugLogger.chartColorFlicker(
+                isVisible ? 'APPEAR_ON_HOVER' : 'DISAPPEAR_ON_LEAVE',
+                {
+                  element: target.tagName + '.' + target.className,
+                  style: target.style.cssText,
+                  event: colorState.lastEvent
+                }
+              );
+            }
+          }
+        }
+      });
+    });
+    
+    // Observar cambios en el DOM
+    observer.observe(document.body, {
+      attributes: true,
+      subtree: true,
+      attributeFilter: ['style', 'class']
+    });
+    
+    // Interceptar eventos de mouse para correlacionar con cambios de colores
+    document.addEventListener('mousemove', (e) => {
+      colorState.lastEvent = {
+        type: 'mousemove',
+        x: e.clientX,
+        y: e.clientY,
+        target: (e.target as HTMLElement).tagName + '.' + (e.target as HTMLElement).className
+      };
+    });
+    
+    console.log(`
+🎨🔍 [ANALYZE_COLOR_FLICKER] Análisis de parpadeo iniciado:
+
+OBSERVANDO:
+- Cambios de estilo en elementos del DOM (style, class)
+- Eventos de mouse (mousemove, hover)
+- Correlación entre movimiento del mouse y aparición de colores
+
+DETECTARÁ:
+- Cuándo aparecen los colores (APPEAR_ON_HOVER)
+- Cuándo desaparecen los colores (DISAPPEAR_ON_LEAVE)
+- Qué elementos específicos están cambiando
+- Qué eventos de mouse los están causando
+
+PRÓXIMOS PASOS:
+1. Mueve el mouse sobre el gráfico
+2. Observa los logs de CHART_COLOR_FLICKER
+3. Verifica qué elementos están cambiando de estilo
+4. Identifica el patrón de aparición/desaparición
+    `);
+  };
+
+  // Función específica para rastrear el DRAWING_TRADING_ELEMENTS
+  (window as any).trackTradingElementsDrawing = () => {
+    debugLogger.setEnabled('CHART', true);
+    debugLogger.setEnabled('CHART_COLOR', true);
+    
+    console.log(`
+📊🎨 [TRACK_TRADING_ELEMENTS] Rastreando elementos de trading:
+
+OBSERVADO EN LOGS:
+- DRAWING_TRADING_ELEMENTS aparece después de clicks
+- showTradingOverlay: true indica que los colores deben ser visibles
+- Esto sugiere que los colores están relacionados con elementos de trading
+
+HIPÓTESIS:
+1. Los colores son parte de la "trading overlay"
+2. Se muestran cuando showTradingOverlay es true
+3. Pueden desaparecer si la overlay se oculta por algún motivo
+
+MONITOREAR:
+- Cuándo se llama DRAWING_TRADING_ELEMENTS
+- El estado de showTradingOverlay
+- Los niveles de precio (currentPriceLevel, takeProfitLevel, stopLossLevel)
+- Si estos elementos persisten después de stream updates
+
+PASOS PARA DEBUGGEAR:
+1. Haz click en el chart para activar DRAWING_TRADING_ELEMENTS
+2. Observa si showTradingOverlay permanece true
+3. Verifica si los niveles de precio se mantienen
+4. Mueve el mouse y observa si los elementos desaparecen
+    `);
+    
+    // Interceptar cuando se loggea DRAWING_TRADING_ELEMENTS
+    const originalLog = console.log;
+    console.log = (...args) => {
+      if (args[1] && typeof args[1] === 'string' && args[1].includes('DRAWING_TRADING_ELEMENTS')) {
+        debugLogger.chartColorLifecycle('UPDATE', {
+          message: 'DRAWING_TRADING_ELEMENTS detected',
+          data: args[2] || args[1],
+          timestamp: new Date().toLocaleTimeString()
+        });
+      }
+      originalLog.apply(console, args);
+    };
+  };
+
+  // Nueva función para debugging del overlay de colores
+  (window as any).debugChartOverlay = () => {
+    debugLogger.setEnabled('CHART_COLOR', true);
+    debugLogger.setEnabled('CLICK', true);
+    
+    console.log(`
+🎨📋 [CHART_OVERLAY_DEBUG] Sistema de overlay para colores activado:
+
+CONCEPTO:
+- Crear un div vacío con las mismas dimensiones que el gráfico de velas
+- Posicionarlo exactamente encima del gráfico (z-index superior)
+- Manejar los colores independientemente del gráfico original
+- Solo cerrarlo con el botón "Cerrar Orden"
+
+VENTAJAS:
+1. ✅ Independiente de stream updates
+2. ✅ No afectado por errores de hooks  
+3. ✅ Control total sobre visibilidad
+4. ✅ Fácil manejo de eventos de click/hover
+5. ✅ Persistencia controlada por ti
+
+ARQUITECTURA SUGERIDA:
+- TradingOverlay.tsx (nuevo componente)
+- Mismo tamaño que MinimalistChart
+- position: absolute, z-index: 1000
+- Manejo independiente de colores
+- Estado controlado por TradingScreen
+
+LOGS A IMPLEMENTAR:
+- logOverlayCreate() - Cuando se crea el overlay
+- logOverlayPosition() - Para verificar posicionamiento
+- logOverlayClick() - Para clicks en el overlay
+- logOverlayClose() - Cuando se cierra con "Cerrar Orden"
+    `);
+  };
+
+  // Función para contar los errores de hook repetitivos
+  (window as any).countHookErrors = () => {
+    let errorCount = 0;
+    const originalError = console.error;
+    console.error = (...args) => {
+      if (args[0]?.includes && args[0].includes('useTechnicalIndicators')) {
+        errorCount++;
+        if (errorCount % 10 === 0) {
+          debugLogger.hookErrorLoop(errorCount, 'MinimalistChart.tsx:299', 1000);
+        }
+      }
+      originalError.apply(console, args);
+    };
+    
+    console.log(`🚫📊 [HOOK_ERROR_COUNTER] Contador de errores de hook iniciado. Errores actuales: ${errorCount}`);
+  };
+
+  // Función CRÍTICA: Solución temporal para el problema del hook
+  (window as any).emergencyHookFix = () => {
+    console.error(`
+🚨🚫 [EMERGENCY_HOOK_FIX] SOLUCIÓN CRÍTICA NECESARIA:
+
+PROBLEMA FATAL:
+- useTechnicalIndicators llamado en línea 299 de MinimalistChart.tsx
+- Dentro de restoreIndicatorConfigs() callback
+- Causando errores repetitivos que rompen la aplicación
+- Interfiriendo con la persistencia de colores
+
+SOLUCIÓN INMEDIATA REQUERIDA:
+1. Mover useTechnicalIndicators al nivel superior del componente
+2. Pasar los indicadores como props a restoreIndicatorConfigs
+
+CÓDIGO ACTUAL (INCORRECTO):
+const restoreIndicatorConfigs = useCallback((chart, candleData) => {
+  const currentTechnicalIndicators = useTechnicalIndicators(candleData); // ❌ ESTO ESTÁ MAL
+  // ...
+});
+
+CÓDIGO CORREGIDO (CORRECTO):
+// En el componente principal:
+const technicalIndicators = useTechnicalIndicators(candleData); // ✅ ESTO ESTÁ BIEN
+
+const restoreIndicatorConfigs = useCallback((chart, candleData, indicators) => {
+  // usar 'indicators' en lugar de llamar al hook aquí
+  // ...
+});
+
+HASTA QUE NO SE ARREGLE ESTO:
+- Los colores seguirán parpadeando
+- Los stream updates fallarán
+- La aplicación tendrá errores constantes
+
+PRIORIDAD: CRÍTICA ⚠️
+    `);
+  };
+
+  // Función específica para rastrear los colores con hover
+  (window as any).trackHoverColors = () => {
+    debugLogger.setEnabled('CHART_COLOR', true);
+    debugLogger.setEnabled('CLICK', true);
+    
+    // Interceptar eventos de mouse para ver qué está pasando
+    let hoverState = { active: false, target: null as EventTarget | null };
+    
+    document.addEventListener('mouseover', (e) => {
+      if (e.target && (e.target as HTMLElement).textContent?.includes('Configurar Orden')) {
+        hoverState.active = true;
+        hoverState.target = e.target;
+        debugLogger.chartMouseColorEvent('MOUSEENTER', { 
+          x: e.clientX, 
+          y: e.clientY, 
+          target: (e.target as HTMLElement).textContent 
+        }, hoverState);
+      }
+    });
+    
+    document.addEventListener('mouseout', (e) => {
+      if (hoverState.active && e.target === hoverState.target) {
+        hoverState.active = false;
+        debugLogger.chartMouseColorEvent('MOUSELEAVE', { 
+          x: e.clientX, 
+          y: e.clientY, 
+          target: 'Configurar Orden' 
+        }, hoverState);
+        hoverState.target = null;
+      }
+    });
+    
+    console.log(`
+🖱️🎨 [HOVER_COLOR_TRACKER] Tracking de hover activado:
+
+MONITOREANDO:
+- Eventos mouseover/mouseout en "Configurar Orden"
+- Cambios de estado de colores relacionados con hover
+- Timing de aparición/desaparición de colores
+
+TEORÍA:
+- Los colores aparecen cuando el mouse está sobre ciertos elementos
+- Esto sugiere que hay CSS hover o JavaScript que controla la visibilidad
+- El parpadeo puede ser causado por conflictos entre hover states y stream updates
+
+PRÓXIMOS PASOS:
+1. Mueve el mouse sobre "Configurar Orden"
+2. Observa los logs de MOUSEENTER/MOUSELEAVE
+3. Correlaciona con la aparición/desaparición de colores
+4. Identifica si hay CSS o JavaScript controlando esto
+    `);
+  };
+
   // Mantener habilitados por defecto solo los logs críticos
   // Debug instructions removed for cleaner console
 }
 
+// Instancia singleton - ELIMINADO DUPLICADO
+
+// Export default para compatibilidad
 export default debugLogger;
