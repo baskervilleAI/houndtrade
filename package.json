@@ -7,28 +7,23 @@
     "android": "expo start --android",
     "ios": "expo start --ios",
     "web": "expo start --web",
-
     "proxy": "node scripts/cors-proxy.js",
     "ws-proxy": "node scripts/websocket-proxy.js",
     "dev:web": "concurrently \"npm run proxy\" \"npm run web\"",
     "dev:web-ws": "concurrently \"npm run ws-proxy\" \"npm run web\"",
-
     "test": "jest",
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",
     "lint": "eslint . --ext .ts,.tsx",
     "lint:fix": "eslint . --ext .ts,.tsx --fix",
     "type-check": "tsc --noEmit",
-
     "build:lambdas": "cd backend && npm run build",
     "deploy:dev": "cd backend && ./scripts/deploy.sh dev",
     "deploy:prod": "cd backend && ./scripts/deploy.sh prod",
-
     "build:web": "expo export -p web",
     "build:android": "eas build --platform android --profile production",
     "build:ios": "eas build --platform ios --profile production",
     "build:all": "npm run build:web && npm run build:android && npm run build:ios",
-
     "predeploy": "npm run build:web && cp dist/index.html dist/404.html || true && touch dist/.nojekyll",
     "deploy": "gh-pages -d dist"
   },
@@ -36,6 +31,11 @@
     "@react-native-async-storage/async-storage": "2.2.0",
     "@react-navigation/native": "^6.1.9",
     "@react-navigation/stack": "^6.3.20",
+    "@tamagui/animations-react-native": "^1.134.0",
+    "@tamagui/config": "^1.134.0",
+    "@tamagui/core": "^1.134.0",
+    "@tamagui/font-inter": "^1.134.0",
+    "@tamagui/theme-base": "^1.134.0",
     "chart.js": "^4.5.0",
     "chartjs-adapter-date-fns": "^3.0.0",
     "chartjs-chart-financial": "^0.2.1",
@@ -63,6 +63,7 @@
   "devDependencies": {
     "@babel/core": "^7.23.7",
     "@expo/cli": "^54.0.7",
+    "@tamagui/babel-plugin": "^1.134.0",
     "@types/react": "~19.1.10",
     "babel-preset-expo": "~54.0.0",
     "concurrently": "^9.2.1",

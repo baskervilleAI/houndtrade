@@ -1,6 +1,8 @@
 import React, { useEffect } from 'react';
 import { StatusBar } from 'expo-status-bar';
 import { View, StyleSheet } from 'react-native';
+import { TamaguiProvider } from '@tamagui/core';
+import tamaguiConfig from './tamagui.config';
 import { AppProvider, useAuth, useMarket } from './src/context/AppContext';
 import { LoginScreen } from './src/screens/auth/LoginScreen';
 import { TradingScreen } from './src/screens/trading/TradingScreen';
@@ -40,9 +42,11 @@ const AppContent: React.FC = () => {
 
 export default function App() {
   return (
-    <AppProvider>
-      <AppContent />
-    </AppProvider>
+    <TamaguiProvider config={tamaguiConfig} defaultTheme="dark_hound">
+      <AppProvider>
+        <AppContent />
+      </AppProvider>
+    </TamaguiProvider>
   );
 }
 
