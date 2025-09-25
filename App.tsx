@@ -14,7 +14,7 @@ const AppContent: React.FC = () => {
   // Auto-login on app start for development/testing
   useEffect(() => {
     if (!isAuthenticated) {
-      console.log('🔑 Auto-login iniciado...');
+      // console.log('🔑 Auto-login iniciado...');
       login('baskerville@houndtrade.com', '444binance').catch(console.error);
     }
   }, [isAuthenticated, login]);
