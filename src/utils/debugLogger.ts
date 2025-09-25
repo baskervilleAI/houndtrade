@@ -6,7 +6,7 @@
 
 // Configuración inline para timing y debug - OPTIMIZADA PARA PRODUCCIÓN
 const DEBUG_CONFIG = {
-  ENABLED: true,
+  ENABLED: false,
   DETAILED_LOGS: false, // Reducido para mejor rendimiento
   LOG_PERFORMANCE: false, // Solo para debugging específico
   ENABLE_CAMERA_LOGS: false, // Solo para debugging de cámara
@@ -22,9 +22,9 @@ const DEBUG_CONFIG = {
   ENABLE_ANIMATION_LOGS: false, // Solo para debugging de animaciones
   
   // NUEVOS: Logs específicos para debugging de escala y última vela
-  ENABLE_LAST_CANDLE_LOGS: true, // Para debugging de última vela
-  ENABLE_SCALE_LOGS: true, // Para debugging de escala
-  ENABLE_CRYPTO_CHANGE_LOGS: true // Para debugging de cambio de cripto
+  ENABLE_LAST_CANDLE_LOGS: false, // Para debugging de última vela
+  ENABLE_SCALE_LOGS: false, // Para debugging de escala
+  ENABLE_CRYPTO_CHANGE_LOGS: false // Para debugging de cambio de cripto
 };
 
 const CAMERA_TIMINGS = {

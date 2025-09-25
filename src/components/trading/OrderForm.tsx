@@ -46,20 +46,20 @@ const SimpleSelect: React.FC<SimpleSelectProps> = ({
         onPress={() => setIsOpen(!isOpen)}
         style={{
           borderWidth: 1,
-          borderColor: '#ddd',
+          borderColor: '#555555',
           borderRadius: 6,
           padding: 12,
-          backgroundColor: 'white',
+          backgroundColor: '#1a1a1a',
           flexDirection: 'row',
           justifyContent: 'space-between',
           alignItems: 'center',
           minHeight: 44
         }}
       >
-        <Text style={{ fontSize: 16, color: selectedOption ? '#000' : '#999' }}>
+        <Text style={{ fontSize: 16, color: selectedOption ? '#ffffff' : '#888888' }}>
           {selectedOption ? selectedOption.label : placeholder}
         </Text>
-        <Text style={{ fontSize: 12, color: '#666' }}>
+        <Text style={{ fontSize: 12, color: '#888888' }}>
           {isOpen ? '▲' : '▼'}
         </Text>
       </TouchableOpacity>
@@ -70,9 +70,9 @@ const SimpleSelect: React.FC<SimpleSelectProps> = ({
           top: '100%',
           left: 0,
           right: 0,
-          backgroundColor: 'white',
+          backgroundColor: '#1a1a1a',
           borderWidth: 1,
-          borderColor: '#ddd',
+          borderColor: '#555555',
           borderRadius: 6,
           marginTop: 2,
           maxHeight: 200,
@@ -94,13 +94,13 @@ const SimpleSelect: React.FC<SimpleSelectProps> = ({
                 style={{
                   padding: 12,
                   borderBottomWidth: 1,
-                  borderBottomColor: '#f0f0f0',
-                  backgroundColor: option.value === value ? '#f0f8ff' : 'white'
+                  borderBottomColor: '#333333',
+                  backgroundColor: option.value === value ? '#2a2a2a' : '#1a1a1a'
                 }}
               >
                 <Text style={{ 
                   fontSize: 16,
-                  color: option.value === value ? '#007AFF' : '#000'
+                  color: option.value === value ? '#00ff88' : '#ffffff'
                 }}>
                   {option.label}
                   {option.value === value && ' ✓'}
@@ -254,14 +254,14 @@ export const OrderForm: React.FC<OrderFormProps> = ({
 
   return (
     <ScrollView style={{ flex: 1 }}>
-      <View style={{ padding: 16, gap: 16 }}>
-        <Text style={{ fontSize: 20, fontWeight: 'bold', marginBottom: 8 }}>
+      <View style={{ padding: 16, gap: 16, backgroundColor: '#0a0a0a' }}>
+        <Text style={{ fontSize: 20, fontWeight: 'bold', marginBottom: 8, color: '#ffffff' }}>
           Nueva Orden
         </Text>
 
         {/* Símbolo */}
         <View>
-          <Text style={{ fontSize: 16, marginBottom: 8 }}>Criptomoneda</Text>
+          <Text style={{ fontSize: 16, marginBottom: 8, color: '#ffffff' }}>Criptomoneda</Text>
           <SimpleSelect 
             value={symbol} 
             onValueChange={setSymbol}
@@ -273,7 +273,7 @@ export const OrderForm: React.FC<OrderFormProps> = ({
         {/* Tipo de orden y dirección */}
         <View style={{ flexDirection: 'row', gap: 12 }}>
           <View style={{ flex: 1 }}>
-            <Text style={{ fontSize: 16, marginBottom: 8 }}>Dirección</Text>
+            <Text style={{ fontSize: 16, marginBottom: 8, color: '#ffffff' }}>Dirección</Text>
             <SimpleSelect 
               value={side} 
               onValueChange={(value) => setSide(value as OrderSide)}
@@ -285,7 +285,7 @@ export const OrderForm: React.FC<OrderFormProps> = ({
           </View>
 
           <View style={{ flex: 1 }}>
-            <Text style={{ fontSize: 16, marginBottom: 8 }}>Tipo</Text>
+            <Text style={{ fontSize: 16, marginBottom: 8, color: '#ffffff' }}>Tipo</Text>
             <SimpleSelect 
               value={orderType} 
               onValueChange={(value) => setOrderType(value as OrderType)}
@@ -299,18 +299,20 @@ export const OrderForm: React.FC<OrderFormProps> = ({
 
         {/* Cantidad en USDT */}
         <View>
-          <Text style={{ fontSize: 16, marginBottom: 8 }}>Cantidad (USDT)</Text>
+          <Text style={{ fontSize: 16, marginBottom: 8, color: '#ffffff' }}>Cantidad (USDT)</Text>
           <TextInput
             value={usdtAmount}
             onChangeText={setUsdtAmount}
             placeholder="100"
+            placeholderTextColor="#888888"
             keyboardType="numeric"
             style={{
               borderWidth: 1,
-              borderColor: '#ddd',
+              borderColor: '#555555',
               borderRadius: 6,
               padding: 12,
-              backgroundColor: 'white',
+              backgroundColor: '#1a1a1a',
+              color: '#ffffff',
               fontSize: 16,
               minHeight: 44
             }}
@@ -320,7 +322,7 @@ export const OrderForm: React.FC<OrderFormProps> = ({
         {/* Take Profit */}
         <View>
           <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
-            <Text style={{ fontSize: 16, flex: 1 }}>Take Profit</Text>
+            <Text style={{ fontSize: 16, flex: 1, color: '#ffffff' }}>Take Profit</Text>
             <SimpleSelect 
               value={tpMode} 
               onValueChange={(value) => setTpMode(value as 'price' | 'usdt')}
@@ -337,13 +339,15 @@ export const OrderForm: React.FC<OrderFormProps> = ({
               value={takeProfitUSDT}
               onChangeText={setTakeProfitUSDT}
               placeholder="Ganancia esperada en USDT"
+              placeholderTextColor="#888888"
               keyboardType="numeric"
               style={{
                 borderWidth: 1,
-                borderColor: '#ddd',
+                borderColor: '#555555',
                 borderRadius: 6,
                 padding: 12,
-                backgroundColor: 'white',
+                backgroundColor: '#1a1a1a',
+                color: '#ffffff',
                 fontSize: 16,
                 minHeight: 44
               }}
@@ -353,13 +357,15 @@ export const OrderForm: React.FC<OrderFormProps> = ({
               value={takeProfitPrice}
               onChangeText={setTakeProfitPrice}
               placeholder="Precio objetivo"
+              placeholderTextColor="#888888"
               keyboardType="numeric"
               style={{
                 borderWidth: 1,
-                borderColor: '#ddd',
+                borderColor: '#555555',
                 borderRadius: 6,
                 padding: 12,
-                backgroundColor: 'white',
+                backgroundColor: '#1a1a1a',
+                color: '#ffffff',
                 fontSize: 16,
                 minHeight: 44
               }}
@@ -370,7 +376,7 @@ export const OrderForm: React.FC<OrderFormProps> = ({
         {/* Stop Loss */}
         <View>
           <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
-            <Text style={{ fontSize: 16, flex: 1 }}>Stop Loss</Text>
+            <Text style={{ fontSize: 16, flex: 1, color: '#ffffff' }}>Stop Loss</Text>
             <SimpleSelect 
               value={slMode} 
               onValueChange={(value) => setSlMode(value as 'price' | 'usdt')}
@@ -387,13 +393,15 @@ export const OrderForm: React.FC<OrderFormProps> = ({
               value={stopLossUSDT}
               onChangeText={setStopLossUSDT}
               placeholder="Pérdida máxima en USDT"
+              placeholderTextColor="#888888"
               keyboardType="numeric"
               style={{
                 borderWidth: 1,
-                borderColor: '#ddd',
+                borderColor: '#555555',
                 borderRadius: 6,
                 padding: 12,
-                backgroundColor: 'white',
+                backgroundColor: '#1a1a1a',
+                color: '#ffffff',
                 fontSize: 16,
                 minHeight: 44
               }}
@@ -403,13 +411,15 @@ export const OrderForm: React.FC<OrderFormProps> = ({
               value={stopLossPrice}
               onChangeText={setStopLossPrice}
               placeholder="Precio de stop"
+              placeholderTextColor="#888888"
               keyboardType="numeric"
               style={{
                 borderWidth: 1,
-                borderColor: '#ddd',
+                borderColor: '#555555',
                 borderRadius: 6,
                 padding: 12,
-                backgroundColor: 'white',
+                backgroundColor: '#1a1a1a',
+                color: '#ffffff',
                 fontSize: 16,
                 minHeight: 44
               }}
@@ -420,19 +430,21 @@ export const OrderForm: React.FC<OrderFormProps> = ({
         {/* Métricas calculadas */}
         {(calculateRiskReward() || calculateRiskPercentage()) && (
           <View style={{ 
-            backgroundColor: '#f5f5f5', 
+            backgroundColor: '#2a2a2a', 
             padding: 12, 
             borderRadius: 8,
+            borderWidth: 1,
+            borderColor: '#555555',
             gap: 4
           }}>
-            <Text style={{ fontSize: 14, fontWeight: 'bold' }}>Análisis de Riesgo</Text>
+            <Text style={{ fontSize: 14, fontWeight: 'bold', color: '#ffffff' }}>Análisis de Riesgo</Text>
             {calculateRiskReward() && (
-              <Text style={{ fontSize: 14 }}>
+              <Text style={{ fontSize: 14, color: '#888888' }}>
                 Riesgo/Recompensa: 1:{calculateRiskReward()}
               </Text>
             )}
             {calculateRiskPercentage() && (
-              <Text style={{ fontSize: 14 }}>
+              <Text style={{ fontSize: 14, color: '#888888' }}>
                 Riesgo: {calculateRiskPercentage()}% del capital
               </Text>
             )}
@@ -444,34 +456,36 @@ export const OrderForm: React.FC<OrderFormProps> = ({
           onPress={() => setShowAdvanced(!showAdvanced)}
           style={{
             borderWidth: 1,
-            borderColor: '#ddd',
+            borderColor: '#555555',
             borderRadius: 6,
             padding: 12,
-            backgroundColor: 'white',
+            backgroundColor: '#1a1a1a',
             alignItems: 'center',
             minHeight: 44
           }}
         >
-          <Text style={{ fontSize: 16, color: '#007AFF' }}>
+          <Text style={{ fontSize: 16, color: '#00ff88' }}>
             {showAdvanced ? 'Ocultar' : 'Mostrar'} opciones avanzadas
           </Text>
         </TouchableOpacity>
 
         {showAdvanced && (
           <View>
-            <Text style={{ fontSize: 16, marginBottom: 8 }}>Notas</Text>
+            <Text style={{ fontSize: 16, marginBottom: 8, color: '#ffffff' }}>Notas</Text>
             <TextInput
               value={notes}
               onChangeText={setNotes}
               placeholder="Notas sobre esta orden (opcional)"
+              placeholderTextColor="#888888"
               multiline
               numberOfLines={3}
               style={{
                 borderWidth: 1,
-                borderColor: '#ddd',
+                borderColor: '#555555',
                 borderRadius: 6,
                 padding: 12,
-                backgroundColor: 'white',
+                backgroundColor: '#1a1a1a',
+                color: '#ffffff',
                 fontSize: 16,
                 minHeight: 80,
                 textAlignVertical: 'top'
@@ -500,13 +514,15 @@ export const OrderForm: React.FC<OrderFormProps> = ({
 
         {/* Advertencias */}
         <View style={{ 
-          backgroundColor: '#fff3cd', 
+          backgroundColor: '#2a1f00', 
           padding: 12, 
           borderRadius: 8,
           borderLeftWidth: 4,
-          borderLeftColor: '#ffc107'
+          borderLeftColor: '#ffaa00',
+          borderWidth: 1,
+          borderColor: '#555500'
         }}>
-          <Text style={{ fontSize: 12, color: '#856404' }}>
+          <Text style={{ fontSize: 12, color: '#ffcc88' }}>
             ⚠️ Este es un simulador de trading. Las órdenes no son reales y los precios son simulados para fines educativos.
           </Text>
         </View>

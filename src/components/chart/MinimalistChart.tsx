@@ -49,8 +49,6 @@ import {
 } from '../../utils/debugLogger';
 
 interface MinimalistChartProps {
-  height?: number;
-  width?: number;
   symbol?: string;
 }
 
@@ -64,8 +62,6 @@ const timeIntervals: { label: string; value: TimeInterval }[] = [
 ];
 
 const MinimalistChart: React.FC<MinimalistChartProps> = ({
-  height = 400,
-  width = 600,
   symbol = 'BTCUSDT'
 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -87,6 +83,101 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
   const lastZoomTime = useRef<number>(0);
   const lastPanTime = useRef<number>(0);
   
+  // Estados para las mejoras de trading visual
+  const [showTradingOverlay, setShowTradingOverlay] = useState(false);
+  const [takeProfitLevel, setTakeProfitLevel] = useState<number | null>(null);
+  const [stopLossLevel, setStopLossLevel] = useState<number | null>(null);
+  const [currentPriceLevel, setCurrentPriceLevel] = useState<number | null>(null);
+  
+  // NUEVO: Estado para preservar configuración de indicadores técnicos persistentemente
+  const [persistentIndicatorConfigs, setPersistentIndicatorConfigs] = useState<Record<string, any>>({});
+  
+  // Estado para detectar el tamaño de pantalla
+  const [screenSize, setScreenSize] = useState<'mobile' | 'tablet' | 'desktop'>('desktop');
+  
+  // Hook para detectar cambios de tamaño de pantalla
+  useEffect(() => {
+    const updateScreenSize = () => {
+      const width = window.innerWidth;
+      if (width <= 480) {
+        setScreenSize('mobile');
+      } else if (width <= 768) {
+        setScreenSize('tablet');
+      } else {
+        setScreenSize('desktop');
+      }
+    };
+    
+    updateScreenSize();
+    window.addEventListener('resize', updateScreenSize);
+    
+    return () => window.removeEventListener('resize', updateScreenSize);
+  }, []);
+
+  // Función para obtener estilos responsivos
+  const getResponsiveStyles = (screenSize: 'mobile' | 'tablet' | 'desktop') => {
+    const baseStyles = {
+      mobile: {
+        intervalButton: {
+          paddingHorizontal: 8,
+          paddingVertical: 4,
+          marginRight: 3,
+        },
+        intervalButtonText: {
+          fontSize: 10,
+        },
+        indicatorButton: {
+          paddingHorizontal: 6,
+          paddingVertical: 3,
+          marginLeft: 2,
+        },
+        indicatorButtonText: {
+          fontSize: 9,
+        }
+      },
+      tablet: {
+        intervalButton: {
+          paddingHorizontal: 10,
+          paddingVertical: 5,
+          marginRight: 4,
+        },
+        intervalButtonText: {
+          fontSize: 11,
+        },
+        indicatorButton: {
+          paddingHorizontal: 7,
+          paddingVertical: 3,
+          marginLeft: 3,
+        },
+        indicatorButtonText: {
+          fontSize: 9,
+        }
+      },
+      desktop: {
+        intervalButton: {
+          paddingHorizontal: 12,
+          paddingVertical: 6,
+          marginRight: 6,
+        },
+        intervalButtonText: {
+          fontSize: 12,
+        },
+        indicatorButton: {
+          paddingHorizontal: 8,
+          paddingVertical: 4,
+          marginLeft: 4,
+        },
+        indicatorButtonText: {
+          fontSize: 10,
+        }
+      }
+    };
+    
+    return baseStyles[screenSize];
+  };
+
+  const responsiveStyles = getResponsiveStyles(screenSize);
+  
   // NUEVOS: Métricas detalladas para debugging del sistema
   const chartInitializationCount = useRef<number>(0);
   const cameraResetCount = useRef<number>(0);
@@ -94,6 +185,9 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
   const lastChartUpdate = useRef<number>(0);
   const updateSequence = useRef<number>(0);
   const isInitializing = useRef<boolean>(false);
+  
+  // NUEVO: Referencias para configuraciones persistentes de indicadores
+  const persistentIndicatorConfigsRef = useRef<Record<string, any>>({});
   
   // NUEVO: Referencias para control avanzado de eventos
   const zoomDebounceRef = useRef<NodeJS.Timeout | null>(null);
@@ -125,6 +219,179 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
   const previousSymbolRef = useRef<string>('');
   const previousIntervalRef = useRef<TimeInterval | ''>('');
   const hasLoadedOnceRef = useRef<boolean>(false);
+
+  // NUEVO: Funciones para preservar y restaurar configuraciones de indicadores
+  const preserveIndicatorConfigs = useCallback((chart: any) => {
+    if (!chart?.data?.datasets) return;
+    
+    const configs: Record<string, any> = {};
+    
+    // Preservar configuraciones de todos los indicadores activos
+    chart.data.datasets.forEach((dataset: any, index: number) => {
+      if (index === 0) return; // Skip candlestick dataset
+      
+      const label = dataset.label;
+      if (label && (
+        label.includes('SMA') || 
+        label.includes('EMA') || 
+        label.includes('BB') ||
+        label.includes('RSI') ||
+        label.includes('MACD')
+      )) {
+        configs[label] = {
+          label,
+          type: dataset.type,
+          borderColor: dataset.borderColor,
+          backgroundColor: dataset.backgroundColor,
+          borderWidth: dataset.borderWidth,
+          pointRadius: dataset.pointRadius,
+          tension: dataset.tension,
+          borderDash: dataset.borderDash,
+          yAxisID: dataset.yAxisID,
+          fill: dataset.fill
+        };
+        
+        logChart('PRESERVING_INDICATOR_CONFIG', {
+          label,
+          borderColor: dataset.borderColor,
+          backgroundColor: dataset.backgroundColor
+        });
+      }
+    });
+    
+    persistentIndicatorConfigsRef.current = configs;
+    setPersistentIndicatorConfigs(configs);
+    
+    // También guardar en localStorage para persistencia entre sesiones
+    try {
+      const storageKey = `houndtrade_indicators_${currentSymbol}_${currentInterval}`;
+      const configsWithActiveIndicators = {
+        configs,
+        activeIndicators: Array.from(activeIndicators)
+      };
+      localStorage.setItem(storageKey, JSON.stringify(configsWithActiveIndicators));
+      
+      logChart('INDICATOR_CONFIGS_SAVED_TO_STORAGE', {
+        storageKey,
+        configCount: Object.keys(configs).length,
+        activeIndicators: Array.from(activeIndicators)
+      });
+    } catch (error) {
+      logError('Failed to save indicator configs to localStorage', { error });
+    }
+  }, [currentSymbol, currentInterval, activeIndicators]);
+  
+  const restoreIndicatorConfigs = useCallback((chart: any, candleData: CandleData[]) => {
+    if (!chart?.data?.datasets || !persistentIndicatorConfigsRef.current) return;
+    
+    const configs = persistentIndicatorConfigsRef.current;
+    const configKeys = Object.keys(configs);
+    
+    if (configKeys.length === 0) return;
+    
+    logChart('RESTORING_INDICATOR_CONFIGS', {
+      configCount: configKeys.length,
+      configs: configKeys,
+      candleDataLength: candleData.length
+    });
+    
+    // Recalcular indicadores técnicos con datos actuales
+    const currentTechnicalIndicators = useTechnicalIndicators(candleData);
+    
+    // Restaurar cada indicador preservando su configuración original
+    configKeys.forEach(label => {
+      const config = configs[label];
+      let indicatorData: { x: number; y: number }[] = [];
+      
+      // Determinar qué datos usar según el label
+      if (label === 'SMA 20') {
+        indicatorData = candleData.map((candle, i) => ({
+          x: candle.x,
+          y: currentTechnicalIndicators.sma20[i]
+        })).filter(point => !isNaN(point.y));
+      } else if (label === 'SMA 50') {
+        indicatorData = candleData.map((candle, i) => ({
+          x: candle.x,
+          y: currentTechnicalIndicators.sma50[i]
+        })).filter(point => !isNaN(point.y));
+      } else if (label === 'EMA 20') {
+        indicatorData = candleData.map((candle, i) => ({
+          x: candle.x,
+          y: currentTechnicalIndicators.ema20[i]
+        })).filter(point => !isNaN(point.y));
+      } else if (label === 'BB Upper') {
+        indicatorData = candleData.map((candle, i) => ({
+          x: candle.x,
+          y: currentTechnicalIndicators.bollinger.upper[i]
+        })).filter(point => !isNaN(point.y));
+      } else if (label === 'BB Middle') {
+        indicatorData = candleData.map((candle, i) => ({
+          x: candle.x,
+          y: currentTechnicalIndicators.bollinger.middle[i]
+        })).filter(point => !isNaN(point.y));
+      } else if (label === 'BB Lower') {
+        indicatorData = candleData.map((candle, i) => ({
+          x: candle.x,
+          y: currentTechnicalIndicators.bollinger.lower[i]
+        })).filter(point => !isNaN(point.y));
+      }
+      
+      // Crear dataset con configuración preservada y datos actuales
+      if (indicatorData.length > 0) {
+        const dataset = {
+          ...config,
+          data: indicatorData
+        };
+        
+        chart.data.datasets.push(dataset);
+        
+        logChart('INDICATOR_RESTORED', {
+          label,
+          dataPoints: indicatorData.length,
+          borderColor: config.borderColor,
+          preservedConfig: config
+        });
+      }
+    });
+    
+    logChart('ALL_INDICATORS_RESTORED', {
+      restoredCount: configKeys.length,
+      totalDatasets: chart.data.datasets.length
+    });
+  }, []);
+  
+  // NUEVO: Función para cargar configuraciones desde localStorage al inicializar
+  const loadIndicatorConfigsFromStorage = useCallback(() => {
+    try {
+      const storageKey = `houndtrade_indicators_${currentSymbol}_${currentInterval}`;
+      const stored = localStorage.getItem(storageKey);
+      
+      if (stored) {
+        const parsedData = JSON.parse(stored);
+        const { configs, activeIndicators: storedActiveIndicators } = parsedData;
+        
+        if (configs && storedActiveIndicators) {
+          persistentIndicatorConfigsRef.current = configs;
+          setPersistentIndicatorConfigs(configs);
+          
+          // Restaurar indicadores activos
+          setActiveIndicators(new Set(storedActiveIndicators));
+          
+          logChart('INDICATOR_CONFIGS_LOADED_FROM_STORAGE', {
+            storageKey,
+            configCount: Object.keys(configs).length,
+            activeIndicators: storedActiveIndicators
+          });
+          
+          return { configs, activeIndicators: storedActiveIndicators };
+        }
+      }
+    } catch (error) {
+      logError('Failed to load indicator configs from localStorage', { error });
+    }
+    
+    return null;
+  }, [currentSymbol, currentInterval]);
 
   // Callback estable para cambios de estado de cámara
   const onCameraStateChange = useCallback((cameraState: any) => {
@@ -186,6 +453,431 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
     }
   }, [simpleCamera]);
 
+  // Funciones para el trading overlay
+  const handleChartClick = useCallback((event: MouseEvent | TouchEvent) => {
+    if (!chartRef.current || !canvasRef.current) return;
+
+    const chart = chartRef.current;
+    const canvas = canvasRef.current;
+    const rect = canvas.getBoundingClientRect();
+    
+    // Obtener coordenadas del click/touch
+    const clientX = 'touches' in event ? event.touches[0].clientX : event.clientX;
+    const clientY = 'touches' in event ? event.touches[0].clientY : event.clientY;
+    
+    const x = clientX - rect.left;
+    const y = clientY - rect.top;
+
+    // Convertir coordenadas de pixel a valores del gráfico
+    const canvasPosition = {
+      x: x * (canvas.width / rect.width),
+      y: y * (canvas.height / rect.height)
+    };
+
+    // Obtener el precio en la coordenada Y del click
+    const yScale = chart.scales.y;
+    if (!yScale) return;
+
+    const priceAtClick = yScale.getValueForPixel(canvasPosition.y);
+    
+    // Obtener el precio actual de la última vela
+    const dataset = chart.data.datasets[0];
+    if (!dataset || !dataset.data || dataset.data.length === 0) return;
+    
+    const lastCandle = dataset.data[dataset.data.length - 1] as any;
+    const currentPrice = lastCandle.c;
+
+    logChart('CHART_CLICK_DETECTED', {
+      clickCoords: { x, y },
+      canvasCoords: canvasPosition,
+      priceAtClick,
+      currentPrice,
+      timestamp: new Date().toLocaleTimeString()
+    });
+
+    // Activar el overlay de trading
+    setCurrentPriceLevel(currentPrice);
+    setShowTradingOverlay(true);
+
+    // Configurar niveles iniciales de TP y SL basados en el precio actual
+    const initialSpread = currentPrice * 0.02; // 2% de spread inicial
+    setTakeProfitLevel(currentPrice + initialSpread);
+    setStopLossLevel(currentPrice - initialSpread);
+
+  }, []);
+
+  // Configurar los event listeners para el canvas
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    let isDragging = false;
+    let dragTarget: 'tp' | 'sl' | null = null;
+
+    // Función para detectar si el cursor está sobre una barra de TP/SL
+    const getBarTarget = (x: number, y: number): 'tp' | 'sl' | null => {
+      if (!chartRef.current || !showTradingOverlay || !takeProfitLevel || !stopLossLevel) return null;
+      
+      const chart = chartRef.current;
+      const chartArea = chart.chartArea;
+      const yScale = chart.scales.y;
+      
+      if (!yScale) return null;
+      
+      const barX = chartArea.right + 80; // Nueva posición X de las barras
+      const barWidth = 16; // Ancho moderado
+      const barHeight = 26; // Altura moderada
+      
+      // Verificar si está dentro del área de las barras
+      if (x >= barX && x <= barX + barWidth) {
+        const tpY = yScale.getPixelForValue(takeProfitLevel);
+        const slY = yScale.getPixelForValue(stopLossLevel);
+        
+        // Verificar TP bar
+        if (Math.abs(y - tpY) <= barHeight/2) return 'tp';
+        // Verificar SL bar
+        if (Math.abs(y - slY) <= barHeight/2) return 'sl';
+      }
+      
+      return null;
+    };
+
+    // Manejar click del mouse
+    const handleMouseClick = (event: MouseEvent) => {
+      const rect = canvas.getBoundingClientRect();
+      const x = event.clientX - rect.left;
+      const y = event.clientY - rect.top;
+      
+      const barTarget = getBarTarget(x, y);
+      
+      if (!barTarget && !isDragging) {
+        // Solo activar en clicks simples (no en arrastres) y no sobre barras
+        event.preventDefault();
+        handleChartClick(event);
+      }
+    };
+
+    // Manejar touch en móviles
+    const handleTouchStart = (event: TouchEvent) => {
+      // Solo activar en toques simples
+      if (event.touches.length === 1) {
+        const touch = event.touches[0];
+        const rect = canvas.getBoundingClientRect();
+        const x = touch.clientX - rect.left;
+        const y = touch.clientY - rect.top;
+        
+        const barTarget = getBarTarget(x, y);
+        
+        if (barTarget) {
+          event.preventDefault();
+          isDragging = true;
+          dragTarget = barTarget;
+          canvas.style.cursor = 'grabbing';
+        } else if (!isDragging) {
+          event.preventDefault();
+          handleChartClick(event);
+        }
+      }
+    };
+
+    // Manejar mouse down para iniciar arrastre
+    const handleMouseDown = (event: MouseEvent) => {
+      const rect = canvas.getBoundingClientRect();
+      const x = event.clientX - rect.left;
+      const y = event.clientY - rect.top;
+      
+      const barTarget = getBarTarget(x, y);
+      
+      if (barTarget) {
+        event.preventDefault();
+        isDragging = true;
+        dragTarget = barTarget;
+        canvas.style.cursor = 'grabbing';
+      }
+    };
+
+    // Manejar mouse move para cambiar cursor y arrastrar
+    const handleMouseMove = (event: MouseEvent) => {
+      const rect = canvas.getBoundingClientRect();
+      const x = event.clientX - rect.left;
+      const y = event.clientY - rect.top;
+      
+      if (isDragging && dragTarget && chartRef.current) {
+        event.preventDefault();
+        
+        const chart = chartRef.current;
+        const yScale = chart.scales.y;
+        
+        if (!yScale) return;
+        
+        const canvasY = y * (canvas.height / rect.height);
+        const priceAtCursor = yScale.getValueForPixel(canvasY);
+        
+        // Actualizar el nivel correspondiente
+        if (dragTarget === 'tp') {
+          setTakeProfitLevel(priceAtCursor);
+        } else if (dragTarget === 'sl') {
+          setStopLossLevel(priceAtCursor);
+        }
+        
+        // Forzar redibujado del gráfico y elementos de trading
+        chart.update('none');
+        setTimeout(() => {
+          drawTradingElements();
+        }, 5);
+        
+      } else if (showTradingOverlay && !isDragging) {
+        // Cambiar cursor si está sobre una barra
+        const barTarget = getBarTarget(x, y);
+        canvas.style.cursor = barTarget ? 'grab' : 'default';
+      }
+    };
+
+    // Manejar mouse up para terminar arrastre
+    const handleMouseUp = (event: MouseEvent) => {
+      if (isDragging) {
+        event.preventDefault();
+        isDragging = false;
+        dragTarget = null;
+        canvas.style.cursor = 'default';
+        
+        logChart('TRADING_LEVEL_UPDATED', {
+          takeProfitLevel,
+          stopLossLevel,
+          currentPriceLevel,
+          dragTarget: dragTarget
+        });
+      }
+    };
+
+    // Manejar touch move para arrastre táctil
+    const handleTouchMove = (event: TouchEvent) => {
+      if (isDragging && dragTarget && event.touches.length === 1 && chartRef.current) {
+        event.preventDefault();
+        
+        const touch = event.touches[0];
+        const rect = canvas.getBoundingClientRect();
+        const y = touch.clientY - rect.top;
+        
+        const chart = chartRef.current;
+        const yScale = chart.scales.y;
+        
+        if (!yScale) return;
+        
+        const canvasY = y * (canvas.height / rect.height);
+        const priceAtCursor = yScale.getValueForPixel(canvasY);
+        
+        // Actualizar el nivel correspondiente
+        if (dragTarget === 'tp') {
+          setTakeProfitLevel(priceAtCursor);
+        } else if (dragTarget === 'sl') {
+          setStopLossLevel(priceAtCursor);
+        }
+        
+        // Forzar redibujado del gráfico y elementos de trading
+        chart.update('none');
+        setTimeout(() => {
+          drawTradingElements();
+        }, 5);
+      }
+    };
+
+    // Manejar touch end para terminar arrastre táctil
+    const handleTouchEnd = (event: TouchEvent) => {
+      if (isDragging) {
+        event.preventDefault();
+        isDragging = false;
+        dragTarget = null;
+        
+        logChart('TRADING_LEVEL_UPDATED_TOUCH', {
+          takeProfitLevel,
+          stopLossLevel,
+          currentPriceLevel
+        });
+      }
+    };
+
+    // Registrar todos los event listeners
+    canvas.addEventListener('click', handleMouseClick);
+    canvas.addEventListener('touchstart', handleTouchStart);
+    canvas.addEventListener('mousedown', handleMouseDown);
+    canvas.addEventListener('mousemove', handleMouseMove);
+    canvas.addEventListener('mouseup', handleMouseUp);
+    canvas.addEventListener('touchmove', handleTouchMove);
+    canvas.addEventListener('touchend', handleTouchEnd);
+
+    return () => {
+      canvas.removeEventListener('click', handleMouseClick);
+      canvas.removeEventListener('touchstart', handleTouchStart);
+      canvas.removeEventListener('mousedown', handleMouseDown);
+      canvas.removeEventListener('mousemove', handleMouseMove);
+      canvas.removeEventListener('mouseup', handleMouseUp);
+      canvas.removeEventListener('touchmove', handleTouchMove);
+      canvas.removeEventListener('touchend', handleTouchEnd);
+      
+      // Restaurar cursor
+      canvas.style.cursor = 'default';
+    };
+  }, [handleChartClick, showTradingOverlay, takeProfitLevel, stopLossLevel]);
+
+  // Actualizar el precio actual cuando cambian los datos de velas
+  useEffect(() => {
+    if (candleData.length > 0 && showTradingOverlay) {
+      const lastCandle = candleData[candleData.length - 1];
+      const newCurrentPrice = lastCandle.c;
+      
+      if (newCurrentPrice !== currentPriceLevel) {
+        setCurrentPriceLevel(newCurrentPrice);
+        
+        // Actualizar gráfico si existe
+        if (chartRef.current) {
+          chartRef.current.update('none');
+        }
+      }
+    }
+  }, [candleData, showTradingOverlay, currentPriceLevel]);
+
+  // Función para dibujar los elementos de trading directamente en el canvas
+  const drawTradingElements = useCallback(() => {
+    if (!chartRef.current || !canvasRef.current || !showTradingOverlay || !currentPriceLevel) {
+      return;
+    }
+
+    const chart = chartRef.current;
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext('2d');
+    const chartArea = chart.chartArea;
+    const yScale = chart.scales.y;
+
+    if (!ctx || !yScale || !chartArea) return;
+
+    logChart('DRAWING_TRADING_ELEMENTS', {
+      showTradingOverlay,
+      currentPriceLevel,
+      takeProfitLevel,
+      stopLossLevel,
+      chartAreaExists: !!chartArea
+    });
+
+    ctx.save();
+
+    // Obtener la coordenada Y del precio actual
+    const currentPriceY = yScale.getPixelForValue(currentPriceLevel);
+
+    // 1. Dibujar área verde (para TP) arriba del precio actual
+    ctx.fillStyle = 'rgba(0, 255, 136, 0.08)';
+    ctx.fillRect(
+      chartArea.left,
+      chartArea.top,
+      chartArea.right - chartArea.left,
+      currentPriceY - chartArea.top
+    );
+
+    // 2. Dibujar área roja (para SL) abajo del precio actual  
+    ctx.fillStyle = 'rgba(255, 68, 68, 0.08)';
+    ctx.fillRect(
+      chartArea.left,
+      currentPriceY,
+      chartArea.right - chartArea.left,
+      chartArea.bottom - currentPriceY
+    );
+
+    // 3. Dibujar línea horizontal del precio actual
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 1.2; // Ligeramente más gruesa pero no exagerado
+    ctx.setLineDash([5, 5]);
+    ctx.beginPath();
+    ctx.moveTo(chartArea.left, currentPriceY);
+    ctx.lineTo(chartArea.right, currentPriceY);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // 4. Dibujar líneas de TP y SL si están definidas
+    if (takeProfitLevel) {
+      const tpY = yScale.getPixelForValue(takeProfitLevel);
+      ctx.strokeStyle = '#00ff88';
+      ctx.lineWidth = 2.5; // Más visible pero no exagerado
+      ctx.beginPath();
+      ctx.moveTo(chartArea.left, tpY);
+      ctx.lineTo(chartArea.right, tpY);
+      ctx.stroke();
+
+      // Etiqueta del TP en el lado derecho
+      ctx.fillStyle = '#00ff88';
+      ctx.font = 'bold 13px Arial'; // Tamaño moderado
+      ctx.textAlign = 'left';
+      const tpText = `TP: $${(takeProfitLevel/1000).toFixed(1)}k`;
+      ctx.fillText(tpText, chartArea.right + 5, tpY - 5);
+    }
+
+    if (stopLossLevel) {
+      const slY = yScale.getPixelForValue(stopLossLevel);
+      ctx.strokeStyle = '#ff4444';
+      ctx.lineWidth = 2.5; // Más visible pero no exagerado
+      ctx.beginPath();
+      ctx.moveTo(chartArea.left, slY);
+      ctx.lineTo(chartArea.right, slY);
+      ctx.stroke();
+
+      // Etiqueta del SL en el lado derecho
+      ctx.fillStyle = '#ff4444';
+      ctx.font = 'bold 13px Arial'; // Tamaño moderado
+      ctx.textAlign = 'left';
+      const slText = `SL: $${(stopLossLevel/1000).toFixed(1)}k`;
+      ctx.fillText(slText, chartArea.right + 5, slY + 15);
+    }
+
+    // 5. Dibujar barras de control interactivas
+    if (takeProfitLevel && stopLossLevel) {
+      const barWidth = 16; // Tamaño moderado
+      const barHeight = 26; // Altura moderada
+      const barX = chartArea.right + 80;
+
+      // Barra de Take Profit (verde)
+      const tpY = yScale.getPixelForValue(takeProfitLevel);
+      ctx.fillStyle = '#00ff88';
+      ctx.fillRect(barX, tpY - barHeight/2, barWidth, barHeight);
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 1.2; // Borde ligeramente más grueso pero moderado
+      ctx.strokeRect(barX, tpY - barHeight/2, barWidth, barHeight);
+
+      // Barra de Stop Loss (roja)
+      const slY = yScale.getPixelForValue(stopLossLevel);
+      ctx.fillStyle = '#ff4444';
+      ctx.fillRect(barX, slY - barHeight/2, barWidth, barHeight);
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 1.2; // Borde ligeramente más grueso pero moderado
+      ctx.strokeRect(barX, slY - barHeight/2, barWidth, barHeight);
+    }
+
+    ctx.restore();
+  }, [showTradingOverlay, currentPriceLevel, takeProfitLevel, stopLossLevel]);
+
+  // useEffect para dibujar elementos de trading después de cada actualización del gráfico
+  useEffect(() => {
+    if (showTradingOverlay && chartRef.current) {
+      // Agregar un pequeño delay para asegurar que el gráfico se haya renderizado completamente
+      const timeoutId = setTimeout(() => {
+        drawTradingElements();
+      }, 50);
+
+      return () => clearTimeout(timeoutId);
+    }
+  }, [showTradingOverlay, currentPriceLevel, takeProfitLevel, stopLossLevel, candleData, drawTradingElements]);
+
+  // Función para ocultar el overlay de trading
+  const hideTradingOverlay = useCallback(() => {
+    setShowTradingOverlay(false);
+    setTakeProfitLevel(null);
+    setStopLossLevel(null);
+    setCurrentPriceLevel(null);
+    
+    if (chartRef.current) {
+      // Forzar redibujado para limpiar los elementos de trading
+      chartRef.current.update('none');
+    }
+  }, []);
+
   // NUEVO: Función para limpiar completamente el chart y datos
   const clearChartCompletely = useCallback(() => {
     logLifecycle('CLEARING_CHART_COMPLETELY', 'MinimalistChart', {
@@ -193,6 +885,15 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
       chartExists: !!chartRef.current,
       dataLength: candleData.length
     });
+
+    // CRÍTICO: Preservar configuraciones de indicadores ANTES de limpiar
+    if (chartRef.current) {
+      preserveIndicatorConfigs(chartRef.current);
+      logChart('INDICATOR_CONFIGS_PRESERVED_BEFORE_CLEAR', {
+        reason: 'timeframe_change_preparation',
+        configCount: Object.keys(persistentIndicatorConfigsRef.current).length
+      });
+    }
 
     // 1. Limpiar datos del estado de React
     setCandleData([]);
@@ -251,7 +952,7 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
     // 4. Reset flags
     initialViewportSet.current = false;
     
-  }, [candleData.length]);
+  }, [candleData.length, preserveIndicatorConfigs]);
 
   // NUEVO: Función específica para limpiar el chart en cambios de criptomoneda
   const clearChartForCryptoCurrencyChange = useCallback(() => {
@@ -265,6 +966,18 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
       timestamp: new Date().toLocaleTimeString(),
       phase: 'start'
     });
+
+    // CRÍTICO: Preservar configuraciones de indicadores ANTES de limpiar
+    if (chartRef.current) {
+      preserveIndicatorConfigs(chartRef.current);
+      logCryptoChange('INDICATOR_CONFIGS_PRESERVED_BEFORE_CRYPTO_CHANGE', {
+        reason: 'cryptocurrency_change_preparation',
+        configCount: Object.keys(persistentIndicatorConfigsRef.current).length,
+        previousSymbol: previousSymbolRef.current,
+        newSymbol: currentSymbol,
+        timestamp: new Date().toLocaleTimeString()
+      });
+    }
 
     // 1. Detener streaming anterior inmediatamente y limpiar listeners
     if (isStreaming) {
@@ -407,7 +1120,7 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
       timestamp: new Date().toLocaleTimeString()
     });
     
-  }, [candleData.length, currentSymbol, currentInterval, isStreaming]);
+  }, [candleData.length, currentSymbol, currentInterval, isStreaming, preserveIndicatorConfigs]);
 
   const endUserInteraction = useCallback(() => {
     const timestamp = Date.now();
@@ -705,6 +1418,18 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
     responsive: false,
     maintainAspectRatio: false,
     parsing: false as const, // Importante para performance con datos de velas
+    // MEJORA DE RESOLUCIÓN: Configuraciones para aprovechar el PPI mejorado pero sin exagerar
+    devicePixelRatio: Math.min((window.devicePixelRatio || 1) * 1.25, 2.5),
+    elements: {
+      point: {
+        radius: 0, // Sin puntos para mejor performance
+        hoverRadius: 2
+      },
+      line: {
+        borderWidth: 1.5, // Líneas ligeramente más gruesas pero no exagerado
+        tension: 0.1
+      }
+    },
     interaction: {
       intersect: false,
       mode: 'index' as const
@@ -723,7 +1448,10 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
         },
         ticks: {
           color: '#ffffff',
-          maxTicksLimit: 12
+          maxTicksLimit: 12, // Volver al valor original
+          font: {
+            size: 12 // Tamaño normal, no muy pequeño
+          }
         },
         grid: {
           display: false
@@ -744,6 +1472,9 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
         position: 'right' as const,
         ticks: {
           color: '#ffffff',
+          font: {
+            size: 12 // Tamaño normal para buena legibilidad
+          },
           callback: function(value: any) {
             return '$' + (value / 1000).toFixed(2) + 'k';
           }
@@ -761,10 +1492,17 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
         display: true,
         text: `${currentSymbol} - ${currentInterval.toUpperCase()} ${isStreaming ? '🔴 LIVE' : ''}`,
         color: '#ffffff',
-        font: { size: 16 }
+        font: { 
+          size: 16 // Tamaño normal del título
+        }
       },
       legend: {
-        labels: { color: '#ffffff' }
+        labels: { 
+          color: '#ffffff',
+          font: {
+            size: 11 // Leyenda un poco más pequeña pero legible
+          }
+        }
       },
       zoom: {
         zoom: {
@@ -798,7 +1536,8 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
             debouncedPanHandler(chart, xScale);
           }
         }
-      }
+      },
+      // Plugin personalizado para el background de trading se registra en initializeChart
     }
   }), [currentSymbol, currentInterval, isStreaming, debouncedZoomHandler, debouncedPanHandler]);
 
@@ -944,9 +1683,11 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
         zoomPlugin.default
       );
       
+      // Registrar solo los componentes básicos de Chart.js
+      
       logLifecycle('PLUGINS_REGISTERED', 'MinimalistChart', {
         initializationNumber: chartInitializationCount.current,
-        registeredPlugins: ['CandlestickController', 'CandlestickElement', 'OhlcController', 'OhlcElement', 'zoomPlugin']
+        registeredPlugins: ['CandlestickController', 'CandlestickElement', 'OhlcController', 'OhlcElement', 'zoomPlugin', 'tradingBackgroundPlugin']
       });
 
       if (!canvasRef.current) {
@@ -1113,12 +1854,31 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
 
       setStatus(`✅ Gráfico listo (${candleData.length} velas)`);
 
-      // Re-aplicar indicadores activos después de inicialización exitosa
-      if (chartRef.current && activeIndicators.size > 0) {
+      // MEJORADO: Cargar configuraciones guardadas y re-aplicar indicadores activos
+      if (chartRef.current) {
+        // Intentar cargar configuraciones desde localStorage primero
+        const storedData = loadIndicatorConfigsFromStorage();
+        
         setTimeout(() => {
-          activeIndicators.forEach(indicator => {
-            addIndicatorToChart(chartRef.current, indicator);
-          });
+          if (storedData?.configs && storedData?.activeIndicators?.length > 0) {
+            // Usar configuraciones guardadas
+            logChart('RESTORING_INDICATORS_FROM_STORAGE', {
+              activeIndicators: storedData.activeIndicators,
+              configCount: Object.keys(storedData.configs).length
+            });
+            
+            // Restaurar directamente usando las configuraciones persistidas
+            restoreIndicatorConfigs(chartRef.current, candleData);
+          } else if (activeIndicators.size > 0) {
+            // Usar indicadores activos actuales si no hay configuraciones guardadas
+            logChart('APPLYING_CURRENT_ACTIVE_INDICATORS', {
+              activeIndicators: Array.from(activeIndicators)
+            });
+            
+            activeIndicators.forEach(indicator => {
+              addIndicatorToChart(chartRef.current, indicator);
+            });
+          }
         }, 50); // Pequeño delay para asegurar que el gráfico esté completamente inicializado
       }
 
@@ -1469,8 +2229,27 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
       });
       
       const updateStartTime = Date.now();
+      
+      // CRÍTICO: Restaurar indicadores técnicos ANTES de actualizar el gráfico
+      // para preservar los colores y configuraciones del usuario
+      if (persistentIndicatorConfigsRef.current && Object.keys(persistentIndicatorConfigsRef.current).length > 0) {
+        restoreIndicatorConfigs(chart, candleData);
+        logChart('INDICATORS_RESTORED_DURING_UPDATE', {
+          updateSequence: updateSequence.current,
+          indicatorCount: Object.keys(persistentIndicatorConfigsRef.current).length,
+          timestamp: new Date().toLocaleTimeString()
+        });
+      }
+      
       chart.update('none');
       const updateDuration = Date.now() - updateStartTime;
+      
+      // Redibujar elementos de trading después de la actualización del gráfico
+      if (showTradingOverlay) {
+        setTimeout(() => {
+          drawTradingElements();
+        }, 10);
+      }
       
       logTidalFlow('CHART_UPDATE_COMPLETED', {
         updateSequence: updateSequence.current,
@@ -1478,7 +2257,8 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
         finalViewport: chart.scales?.x ? {
           min: chart.scales.x.min,
           max: chart.scales.x.max
-        } : null
+        } : null,
+        tradingElementsRedrawn: showTradingOverlay
       });
       
     } finally {
@@ -1535,7 +2315,7 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
       candlePrice: newCandle.c,
       finalViewport: desiredViewport
     });
-  }, [currentInterval, simpleCamera, persistentViewport, lastUpdateTime, updateThrottleMs]);
+  }, [currentInterval, simpleCamera, persistentViewport, lastUpdateTime, updateThrottleMs, restoreIndicatorConfigs, candleData]);
 
   const changeTimeInterval = useCallback(async (newInterval: TimeInterval) => {
     // CRÍTICO: Prevenir cambios de intervalo simultáneos
@@ -2030,6 +2810,9 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
 
     const candleDataForIndicators = candleData;
     
+    // CRÍTICO: Preservar configuraciones antes de añadir nuevos indicadores
+    preserveIndicatorConfigs(chart);
+    
     switch (indicator) {
       case 'sma20':
         chart.data.datasets.push({
@@ -2132,9 +2915,12 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
         break;
     }
     
+    // CRÍTICO: Actualizar configuraciones después de añadir indicador
+    preserveIndicatorConfigs(chart);
+    
     // Actualizar con animación
     chart.update('default');
-  }, [candleData, technicalIndicators]);
+  }, [candleData, technicalIndicators, preserveIndicatorConfigs]);
 
   const removeIndicatorFromChart = useCallback((chart: any, indicator: string) => {
     if (!chart?.data?.datasets) return;
@@ -2257,6 +3043,18 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
       chart.update('none'); // Usar 'none' para evitar animaciones durante actualizaciones de datos
     }
   }, [technicalIndicators, candleData, activeIndicators]);
+
+  // NUEVO: Efecto para cargar configuraciones de indicadores al montar el componente
+  useEffect(() => {
+    // Solo cargar al montar el componente por primera vez
+    const storedData = loadIndicatorConfigsFromStorage();
+    if (storedData) {
+      logChart('COMPONENT_MOUNTED_WITH_STORED_INDICATORS', {
+        activeIndicators: storedData.activeIndicators,
+        configCount: Object.keys(storedData.configs).length
+      });
+    }
+  }, []); // Sin dependencias para que solo se ejecute al montar
 
   // Efectos
   useEffect(() => {
@@ -2687,7 +3485,7 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
     };
 
     const handleDisconnected = () => {
-      setStatus('🔄 Reconectando...');
+      setStatus(''); // Ocultar mensaje de reconexión
     };
 
     const handleMaxReconnectReached = () => {
@@ -2730,6 +3528,100 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
       liveStreamingService.off('connected', handleConnected);
       liveStreamingService.off('disconnected', handleDisconnected);
       liveStreamingService.off('maxReconnectAttemptsReached', handleMaxReconnectReached);
+    };
+  }, []);
+
+  // useEffect para manejar el resize dinámico del canvas
+  useEffect(() => {
+    const resizeCanvas = () => {
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+
+      const wrapper = canvas.parentElement;
+      if (!wrapper) return;
+
+      // Obtener las dimensiones del wrapper
+      const rect = wrapper.getBoundingClientRect();
+      
+      // Calcular altura mínima basada en el tamaño de la ventana
+      const windowHeight = window.innerHeight;
+      const windowWidth = window.innerWidth;
+      
+      // Media queries en JavaScript para diferentes tamaños
+      let minHeight = 300; // Altura mínima por defecto
+      
+      if (windowWidth <= 480) {
+        // Móvil pequeño
+        minHeight = Math.max(250, windowHeight * 0.4);
+      } else if (windowWidth <= 768) {
+        // Tablet/móvil grande
+        minHeight = Math.max(350, windowHeight * 0.5);
+      } else if (windowWidth <= 1024) {
+        // Tablet horizontal/laptop pequeño
+        minHeight = Math.max(400, windowHeight * 0.6);
+      } else {
+        // Desktop
+        minHeight = Math.max(500, windowHeight * 0.7);
+      }
+      
+      // Establecer el tamaño del canvas para que coincida con el wrapper
+      // MEJORA DE RESOLUCIÓN: Aumentar PPI moderadamente para mejor definición
+      const basePixelRatio = window.devicePixelRatio || 1;
+      const enhancedPixelRatio = Math.min(basePixelRatio * 1.25, 2.5); // Moderado: máximo 25% extra, tope 2.5x
+      const finalHeight = Math.max(rect.height, minHeight);
+      
+      // Configurar el tamaño real del canvas (buffer interno) con resolución mejorada
+      canvas.width = rect.width * enhancedPixelRatio;
+      canvas.height = finalHeight * enhancedPixelRatio;
+      
+      // Configurar el tamaño CSS del canvas
+      canvas.style.width = rect.width + 'px';
+      canvas.style.height = finalHeight + 'px';
+      
+      // Asegurar que el wrapper tenga la altura mínima
+      if (wrapper instanceof HTMLElement) {
+        wrapper.style.minHeight = minHeight + 'px';
+      }
+      
+      // Escalar el contexto para manejar la densidad de píxeles mejorada
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        ctx.scale(enhancedPixelRatio, enhancedPixelRatio);
+      }
+
+      // Si tenemos un gráfico, actualizar sus dimensiones
+      if (chartRef.current) {
+        chartRef.current.resize();
+        chartRef.current.update('none');
+      }
+
+      logLifecycle('CANVAS_RESIZED_WITH_MEDIA_QUERIES', 'MinimalistChart', {
+        windowSize: { width: windowWidth, height: windowHeight },
+        wrapperSize: { width: rect.width, height: rect.height },
+        canvasSize: { width: canvas.width, height: canvas.height },
+        calculatedMinHeight: minHeight,
+        finalHeight,
+        basePixelRatio,
+        enhancedPixelRatio,
+        resolutionMultiplier: (enhancedPixelRatio / basePixelRatio).toFixed(2),
+        chartExists: !!chartRef.current
+      });
+    };
+
+    // Resize inicial
+    resizeCanvas();
+
+    // Escuchar cambios de tamaño de ventana
+    window.addEventListener('resize', resizeCanvas);
+    
+    // También escuchar cambios de orientación en móviles
+    window.addEventListener('orientationchange', () => {
+      setTimeout(resizeCanvas, 100); // Delay para asegurar que la orientación se complete
+    });
+
+    return () => {
+      window.removeEventListener('resize', resizeCanvas);
+      window.removeEventListener('orientationchange', resizeCanvas);
     };
   }, []);
 
@@ -2897,12 +3789,14 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
                   key={interval.value}
                   style={[
                     styles.intervalButton,
+                    responsiveStyles.intervalButton,
                     currentInterval === interval.value && styles.intervalButtonActive
                   ]}
                   onPress={() => changeTimeInterval(interval.value)}
                 >
                   <Text style={[
                     styles.intervalButtonText,
+                    responsiveStyles.intervalButtonText,
                     currentInterval === interval.value && styles.intervalButtonTextActive
                   ]}>
                     {interval.label}
@@ -2914,37 +3808,62 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
             {/* Indicadores en la misma fila */}
             <View style={styles.indicatorsRow}>
               <TouchableOpacity
-                style={[styles.indicatorButton, activeIndicators.has('sma20') && styles.indicatorButtonActive]}
+                style={[
+                  styles.indicatorButton, 
+                  responsiveStyles.indicatorButton,
+                  activeIndicators.has('sma20') && styles.indicatorButtonActive
+                ]}
                 onPress={() => toggleIndicator('sma20')}
               >
-                <Text style={styles.indicatorButtonText}>SMA20</Text>
+                <Text style={[styles.indicatorButtonText, responsiveStyles.indicatorButtonText]}>
+                  SMA20
+                </Text>
               </TouchableOpacity>
 
               <TouchableOpacity
-                style={[styles.indicatorButton, activeIndicators.has('sma50') && styles.indicatorButtonActive]}
+                style={[
+                  styles.indicatorButton, 
+                  responsiveStyles.indicatorButton,
+                  activeIndicators.has('sma50') && styles.indicatorButtonActive
+                ]}
                 onPress={() => toggleIndicator('sma50')}
               >
-                <Text style={styles.indicatorButtonText}>SMA50</Text>
+                <Text style={[styles.indicatorButtonText, responsiveStyles.indicatorButtonText]}>
+                  SMA50
+                </Text>
               </TouchableOpacity>
 
               <TouchableOpacity
-                style={[styles.indicatorButton, activeIndicators.has('ema20') && styles.indicatorButtonActive]}
+                style={[
+                  styles.indicatorButton, 
+                  responsiveStyles.indicatorButton,
+                  activeIndicators.has('ema20') && styles.indicatorButtonActive
+                ]}
                 onPress={() => toggleIndicator('ema20')}
               >
-                <Text style={styles.indicatorButtonText}>EMA20</Text>
+                <Text style={[styles.indicatorButtonText, responsiveStyles.indicatorButtonText]}>
+                  EMA20
+                </Text>
               </TouchableOpacity>
 
               <TouchableOpacity
-                style={[styles.indicatorButton, activeIndicators.has('bollinger') && styles.indicatorButtonActive]}
+                style={[
+                  styles.indicatorButton, 
+                  responsiveStyles.indicatorButton,
+                  activeIndicators.has('bollinger') && styles.indicatorButtonActive
+                ]}
                 onPress={() => toggleIndicator('bollinger')}
               >
-                <Text style={styles.indicatorButtonText}>BB</Text>
+                <Text style={[styles.indicatorButtonText, responsiveStyles.indicatorButtonText]}>
+                  BB
+                </Text>
               </TouchableOpacity>
 
               {/* Botón de reset de cámara con estado visual */}
               <TouchableOpacity
                 style={[
                   styles.indicatorButton, 
+                  responsiveStyles.indicatorButton,
                   simpleCamera.isLocked() ? styles.cameraManualButton : styles.cameraResetButton
                 ]}
                 onPress={() => {
@@ -2971,7 +3890,7 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
                   // El gráfico se reiniciará automáticamente con el próximo useEffect
                 }}
               >
-                <Text style={styles.indicatorButtonText}>
+                <Text style={[styles.indicatorButtonText, responsiveStyles.indicatorButtonText]}>
                   {simpleCamera.isLocked() ? '📷 Reset' : '📷 Auto'}
                 </Text>
               </TouchableOpacity>
@@ -2991,16 +3910,35 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
         </View>
 
         {/* Canvas del gráfico pegado directamente */}
-        <canvas
-          ref={canvasRef}
-          width={width}
-          height={height}
-          style={{
-            backgroundColor: '#000',
-            maxWidth: '100%',
-            display: 'block'
-          }}
-        />
+        <View style={styles.canvasWrapper}>
+          <canvas
+            ref={canvasRef}
+            style={styles.chartCanvas as any}
+          />
+        </View>
+        
+        {/* Overlay de información del trading */}
+        {showTradingOverlay && (
+          <View style={styles.tradingOverlay}>
+            <Text style={styles.overlayTitle}>Configurar Orden</Text>
+            <Text style={styles.overlayPrice}>
+              Precio Actual: ${currentPriceLevel?.toLocaleString('en-US', { minimumFractionDigits: 2 }) || '---'}
+            </Text>
+            {takeProfitLevel && (
+              <Text style={styles.overlayTP}>
+                Take Profit: ${takeProfitLevel.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+              </Text>
+            )}
+            {stopLossLevel && (
+              <Text style={styles.overlaySL}>
+                Stop Loss: ${stopLossLevel.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+              </Text>
+            )}
+            <TouchableOpacity style={styles.overlayCloseButton} onPress={hideTradingOverlay}>
+              <Text style={styles.overlayCloseText}>✕ Cerrar</Text>
+            </TouchableOpacity>
+          </View>
+        )}
 
         {/* Estado del gráfico en una línea minimalista debajo */}
         <View style={styles.statusBelow}>
@@ -3015,24 +3953,58 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#0a0a0a',
+    position: 'absolute' as any,
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    display: 'flex' as any,
+    flexDirection: 'column',
+    overflow: 'hidden' as any,
   },
   chartContainer: {
     flex: 1,
     backgroundColor: '#0a0a0a',
+    display: 'flex' as any,
+    flexDirection: 'column',
+    minHeight: 0,
+    position: 'relative',
+  },
+  canvasWrapper: {
+    flex: 1,
+    backgroundColor: '#000',
+    position: 'relative',
+    minHeight: 300,
+    width: '100%',
+  },
+  chartCanvas: {
+    backgroundColor: '#000',
+    width: '100%',
+    height: '100%',
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
   },
   controlsAboveChart: {
     backgroundColor: '#0a0a0a',
     paddingHorizontal: 8,
     paddingVertical: 6,
+    flexShrink: 0,
   },
   timeframeRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    flexWrap: 'wrap' as any,
+    minHeight: 40,
   },
   intervalContainer: {
     flexDirection: 'row',
     flex: 1,
+    minWidth: 200,
+    marginRight: 8,
   },
   intervalButton: {
     backgroundColor: '#333',
@@ -3055,6 +4027,9 @@ const styles = StyleSheet.create({
   indicatorsRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    flexWrap: 'wrap' as any,
+    justifyContent: 'flex-end',
+    minWidth: 0,
   },
   indicatorButton: {
     backgroundColor: '#333',
@@ -3112,6 +4087,55 @@ const styles = StyleSheet.create({
     fontSize: 16,
     textAlign: 'center',
     padding: 20,
+  },
+  // Estilos para el overlay de trading
+  tradingOverlay: {
+    position: 'absolute',
+    top: 10,
+    left: 10,
+    backgroundColor: 'rgba(42, 42, 42, 0.95)',
+    padding: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#444',
+    minWidth: 200,
+    zIndex: 1000,
+  },
+  overlayTitle: {
+    color: '#ffffff',
+    fontSize: 14,
+    fontWeight: 'bold',
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  overlayPrice: {
+    color: '#ffffff',
+    fontSize: 12,
+    marginBottom: 6,
+  },
+  overlayTP: {
+    color: '#00ff88',
+    fontSize: 12,
+    marginBottom: 6,
+    fontWeight: '500',
+  },
+  overlaySL: {
+    color: '#ff4444',
+    fontSize: 12,
+    marginBottom: 8,
+    fontWeight: '500',
+  },
+  overlayCloseButton: {
+    backgroundColor: '#444',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 4,
+    alignSelf: 'center',
+  },
+  overlayCloseText: {
+    color: '#ffffff',
+    fontSize: 11,
+    fontWeight: '500',
   },
 });
 

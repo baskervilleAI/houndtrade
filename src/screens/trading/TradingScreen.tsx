@@ -14,8 +14,9 @@ import { useTrading } from '../../hooks/useTrading';
 import { formatPrice, formatPercentage, formatCurrency } from '../../utils/formatters';
 import MinimalistChart from '../../components/chart/MinimalistChart';
 import { MarketData } from '../../components/trading/MarketData';
-import { PortfolioSummary } from '../../components/trading/PortfolioSummary';
+import { PositionsGrid } from '../../components/trading/PositionsGrid';
 import { OrderForm } from '../../components/trading/OrderForm';
+import { OrderFormModal } from '../../components/trading/OrderFormModal';
 import { OrderHistory } from '../../components/trading/OrderHistory';
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
@@ -47,8 +48,11 @@ export const TradingScreen: React.FC = () => {
     updatePrice
   } = useTrading();
 
-  // Tab state
-  const [activeTab, setActiveTab] = useState<'chart' | 'orders' | 'history' | 'portfolio'>('chart');
+  // Tab state - simplified to 3 main sections
+  const [activeTab, setActiveTab] = useState<'trading' | 'posiciones' | 'trades'>('trading');
+  
+  // Order form modal state
+  const [showOrderModal, setShowOrderModal] = useState(false);
 
   // Initialize market data at the screen level
   const { isInitialized, getStatus } = useMarketData({
@@ -92,79 +96,59 @@ export const TradingScreen: React.FC = () => {
 
   const renderTabContent = () => {
     switch (activeTab) {
-      case 'chart':
+      case 'trading':
         return (
           <View style={styles.chartContainer}>
             <MinimalistChart 
-              height={screenHeight - 220} 
+              height={screenHeight - 140} 
               width={screenWidth - 20} 
               symbol={selectedPair} 
             />
           </View>
         );
       
-      case 'orders':
+      case 'posiciones':
+        // Convert trading orders to positions format
+        const positions = activeOrders.map(order => {
+          const currentPrice = tickers[order.symbol]?.price || order.entryPrice;
+          const currentValue = order.quantity * currentPrice;
+          const pnl = currentValue - order.usdtAmount;
+          
+          return {
+            id: order.id,
+            symbol: order.symbol,
+            side: order.side,
+            quantity: order.quantity,
+            entryPrice: order.entryPrice,
+            currentPrice: currentPrice,
+            stopLoss: order.stopLossPrice || undefined,
+            takeProfit: order.takeProfitPrice || undefined,
+            pnl: pnl,
+            pnlPercentage: (pnl / order.usdtAmount) * 100,
+            usdtAmount: order.usdtAmount,
+            timestamp: order.createdAt,
+          };
+        });
+
         return (
-          <OrderForm 
-            onCreateOrder={createOrder}
-            isLoading={isLoading}
+          <PositionsGrid 
+            positions={positions}
+            onAddPosition={() => setShowOrderModal(true)}
+            onPositionPress={(position) => {
+              console.log('Position pressed:', position);
+            }}
+            onClosePosition={(positionId) => {
+              closeOrder(positionId, 'Cerrado desde posiciones');
+            }}
           />
         );
       
-      case 'history':
+      case 'trades':
         return (
           <OrderHistory 
             orders={orders}
             onRefresh={handleRefreshData}
           />
-        );
-      
-      case 'portfolio':
-        return (
-          <ScrollView style={styles.portfolioContainer}>
-            <PortfolioSummary
-              portfolio={portfolio}
-              stats={stats}
-              isLoading={isLoading}
-              onRefresh={handleRefreshData}
-            />
-            
-            {/* Active orders list (simplified) */}
-            {activeOrders.length > 0 && (
-              <View style={styles.activeOrdersSection}>
-                <Text style={styles.sectionTitle}>
-                  Órdenes Activas ({activeOrders.length})
-                </Text>
-                {activeOrders.map(order => (
-                  <View key={order.id} style={styles.quickOrderItem}>
-                    <View style={styles.quickOrderHeader}>
-                      <Text style={styles.quickOrderSymbol}>{order.symbol}</Text>
-                      <Text style={[
-                        styles.quickOrderSide,
-                        { color: order.side === 'BUY' ? '#16a085' : '#e74c3c' }
-                      ]}>
-                        {order.side}
-                      </Text>
-                    </View>
-                    <View style={styles.quickOrderDetails}>
-                      <Text style={styles.quickOrderAmount}>
-                        ${order.usdtAmount.toFixed(2)}
-                      </Text>
-                      <Text style={styles.quickOrderPrice}>
-                        @${order.entryPrice.toFixed(2)}
-                      </Text>
-                    </View>
-                    <TouchableOpacity
-                      style={styles.quickCloseButton}
-                      onPress={() => closeOrder(order.id, 'Cerrado desde resumen')}
-                    >
-                      <Text style={styles.quickCloseButtonText}>Cerrar</Text>
-                    </TouchableOpacity>
-                  </View>
-                ))}
-              </View>
-            )}
-          </ScrollView>
         );
       
       default:
@@ -187,7 +171,7 @@ export const TradingScreen: React.FC = () => {
         </TouchableOpacity>
       </View>
 
-      {/* Quick Portfolio Summary */}
+      {/* Quick Portfolio Summary with Menu */}
       <View style={styles.portfolioSummary}>
         <View style={styles.balanceContainer}>
           <Text style={styles.balanceLabel}>Balance</Text>
@@ -219,57 +203,66 @@ export const TradingScreen: React.FC = () => {
         </View>
       </View>
 
-      {/* Market Data */}
-      <MarketData />
-
-      {/* Tab Navigation */}
-      <View style={styles.tabNavigation}>
+      {/* Menu tabs directly below balance */}
+      <View style={styles.menuNavigation}>
         <TouchableOpacity
-          style={[styles.tabButton, activeTab === 'chart' && styles.activeTabButton]}
-          onPress={() => setActiveTab('chart')}
+          style={[styles.menuButton, activeTab === 'trading' && styles.activeMenuButton]}
+          onPress={() => setActiveTab('trading')}
         >
-          <Text style={[styles.tabButtonText, activeTab === 'chart' && styles.activeTabButtonText]}>
-            Gráfico
+          <Text style={[styles.menuButtonText, activeTab === 'trading' && styles.activeMenuButtonText]}>
+            Trading
           </Text>
         </TouchableOpacity>
         
         <TouchableOpacity
-          style={[styles.tabButton, activeTab === 'orders' && styles.activeTabButton]}
-          onPress={() => setActiveTab('orders')}
+          style={[styles.menuButton, activeTab === 'posiciones' && styles.activeMenuButton]}
+          onPress={() => setActiveTab('posiciones')}
         >
-          <Text style={[styles.tabButtonText, activeTab === 'orders' && styles.activeTabButtonText]}>
-            Nueva Orden
-          </Text>
-        </TouchableOpacity>
-        
-        <TouchableOpacity
-          style={[styles.tabButton, activeTab === 'portfolio' && styles.activeTabButton]}
-          onPress={() => setActiveTab('portfolio')}
-        >
-          <Text style={[styles.tabButtonText, activeTab === 'portfolio' && styles.activeTabButtonText]}>
-            Portfolio
+          <Text style={[styles.menuButtonText, activeTab === 'posiciones' && styles.activeMenuButtonText]}>
+            Posiciones
           </Text>
           {activeOrders.length > 0 && (
-            <View style={styles.tabBadge}>
-              <Text style={styles.tabBadgeText}>{activeOrders.length}</Text>
+            <View style={styles.menuBadge}>
+              <Text style={styles.menuBadgeText}>{activeOrders.length}</Text>
             </View>
           )}
         </TouchableOpacity>
         
         <TouchableOpacity
-          style={[styles.tabButton, activeTab === 'history' && styles.activeTabButton]}
-          onPress={() => setActiveTab('history')}
+          style={[styles.menuButton, activeTab === 'trades' && styles.activeMenuButton]}
+          onPress={() => setActiveTab('trades')}
         >
-          <Text style={[styles.tabButtonText, activeTab === 'history' && styles.activeTabButtonText]}>
-            Historial
+          <Text style={[styles.menuButtonText, activeTab === 'trades' && styles.activeMenuButtonText]}>
+            Trades
           </Text>
         </TouchableOpacity>
       </View>
+
+      {/* Market Data - only show for trading view */}
+      {activeTab === 'trading' && <MarketData />}
 
       {/* Tab Content */}
       <View style={styles.content}>
         {renderTabContent()}
       </View>
+
+      {/* Order Form Modal/Overlay */}
+      {activeTab === 'posiciones' && (
+        <TouchableOpacity 
+          style={styles.floatingOrderButton}
+          onPress={() => setShowOrderModal(true)}
+        >
+          <Text style={styles.floatingOrderButtonText}>Nueva Orden</Text>
+        </TouchableOpacity>
+      )}
+
+      {/* Order Form Modal */}
+      <OrderFormModal
+        visible={showOrderModal}
+        onClose={() => setShowOrderModal(false)}
+        onCreateOrder={createOrder}
+        isLoading={isLoading}
+      />
 
       {/* Error display */}
       {error && (
@@ -320,171 +313,165 @@ const styles = StyleSheet.create({
     fontSize: isSmallMobile ? 12 : 14,
     fontWeight: '500',
   },
+  // Portfolio summary with responsive design
   portfolioSummary: {
-    flexDirection: isSmallMobile ? 'column' : 'row',
+    flexDirection: 'row',
     paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingVertical: 16,
     borderBottomWidth: 1,
     borderBottomColor: '#333333',
-    gap: isSmallMobile ? 8 : 0,
+    ...(Platform.OS === 'web' && {
+      '@media (max-width: 480px)': {
+        flexDirection: 'column',
+        gap: 8,
+      },
+    }),
   },
   balanceContainer: {
-    flex: isSmallMobile ? 0 : 1,
+    flex: 1,
     alignItems: 'center',
-    paddingVertical: isSmallMobile ? 8 : 0,
+    ...(Platform.OS === 'web' && {
+      '@media (max-width: 480px)': {
+        alignItems: 'flex-start',
+        paddingVertical: 8,
+      },
+    }),
   },
   balanceLabel: {
-    fontSize: isSmallMobile ? 14 : 12,
+    fontSize: 14,
     color: '#888888',
     marginBottom: 4,
   },
   balanceValue: {
-    fontSize: isSmallMobile ? 18 : 16,
+    fontSize: 18,
     fontWeight: 'bold',
     color: '#ffffff',
   },
   equityContainer: {
-    flex: isSmallMobile ? 0 : 1,
+    flex: 1,
     alignItems: 'center',
-    paddingVertical: isSmallMobile ? 8 : 0,
+    ...(Platform.OS === 'web' && {
+      '@media (max-width: 480px)': {
+        alignItems: 'flex-start',
+        paddingVertical: 8,
+      },
+    }),
   },
   equityLabel: {
-    fontSize: isSmallMobile ? 14 : 12,
+    fontSize: 14,
     color: '#888888',
     marginBottom: 4,
   },
   equityValue: {
-    fontSize: isSmallMobile ? 18 : 16,
+    fontSize: 18,
     fontWeight: 'bold',
-    color: '#ffffff',
   },
   pnlContainer: {
-    flex: isSmallMobile ? 0 : 1,
+    flex: 1,
     alignItems: 'center',
-    paddingVertical: isSmallMobile ? 8 : 0,
+    ...(Platform.OS === 'web' && {
+      '@media (max-width: 480px)': {
+        alignItems: 'flex-start',
+        paddingVertical: 8,
+      },
+    }),
   },
   pnlLabel: {
-    fontSize: isSmallMobile ? 14 : 12,
+    fontSize: 14,
     color: '#888888',
     marginBottom: 4,
   },
   pnlValue: {
-    fontSize: isSmallMobile ? 18 : 16,
-    fontWeight: 'bold',
-    textAlign: 'center',
-  },
-  content: {
-    flex: 1,
-  },
-  chartContainer: {
-    flex: 1,
-  },
-  // Tab navigation styles
-  tabNavigation: {
-    flexDirection: 'row',
-    backgroundColor: '#1a1a1a',
-    borderBottomWidth: 1,
-    borderBottomColor: '#333333',
-  },
-  tabButton: {
-    flex: 1,
-    paddingVertical: 12,
-    alignItems: 'center',
-    position: 'relative',
-  },
-  activeTabButton: {
-    backgroundColor: '#2a2a2a',
-    borderBottomWidth: 2,
-    borderBottomColor: '#00ff88',
-  },
-  tabButtonText: {
-    fontSize: 14,
-    color: '#888888',
-  },
-  activeTabButtonText: {
-    color: '#ffffff',
-    fontWeight: '600',
-  },
-  tabBadge: {
-    position: 'absolute',
-    top: 4,
-    right: 16,
-    backgroundColor: '#ff4444',
-    borderRadius: 10,
-    minWidth: 20,
-    height: 20,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  tabBadgeText: {
-    color: '#ffffff',
-    fontSize: 12,
-    fontWeight: 'bold',
-  },
-  // Portfolio section styles
-  portfolioContainer: {
-    flex: 1,
-    backgroundColor: '#0a0a0a',
-  },
-  activeOrdersSection: {
-    padding: 16,
-    backgroundColor: '#1a1a1a',
-    margin: 16,
-    borderRadius: 12,
-  },
-  sectionTitle: {
     fontSize: 18,
     fontWeight: 'bold',
     color: '#ffffff',
-    marginBottom: 12,
   },
-  quickOrderItem: {
-    backgroundColor: '#2a2a2a',
-    padding: 12,
-    borderRadius: 8,
-    marginBottom: 8,
+  // New menu navigation
+  menuNavigation: {
     flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+    backgroundColor: '#1a1a1a',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#333333',
   },
-  quickOrderHeader: {
+  menuButton: {
     flex: 1,
+    paddingVertical: 12,
+    paddingHorizontal: 8,
+    alignItems: 'center',
+    marginHorizontal: 4,
+    borderRadius: 8,
+    position: 'relative',
   },
-  quickOrderSymbol: {
+  activeMenuButton: {
+    backgroundColor: '#2a2a2a',
+    borderWidth: 1,
+    borderColor: '#00ff88',
+  },
+  menuButtonText: {
+    fontSize: 14,
+    color: '#888888',
+    fontWeight: '500',
+  },
+  activeMenuButtonText: {
+    color: '#00ff88',
+    fontWeight: 'bold',
+  },
+  menuBadge: {
+    position: 'absolute',
+    top: 4,
+    right: 4,
+    backgroundColor: '#ff4444',
+    borderRadius: 10,
+    minWidth: 18,
+    height: 18,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  menuBadgeText: {
+    color: '#ffffff',
+    fontSize: 10,
+    fontWeight: 'bold',
+  },
+  // Content area maximized
+  content: {
+    flex: 1,
+    backgroundColor: '#0a0a0a',
+  },
+  // Chart container with responsive height
+  chartContainer: {
+    flex: 1,
+    backgroundColor: '#0a0a0a',
+    ...(Platform.OS === 'web' && {
+      '@media (max-width: 768px)': {
+        minHeight: '60vh',
+      },
+      '@media (min-width: 769px)': {
+        minHeight: '70vh',
+      },
+    }),
+  },
+  // Floating action button
+  floatingOrderButton: {
+    position: 'absolute',
+    bottom: 20,
+    right: 20,
+    backgroundColor: '#00ff88',
+    borderRadius: 25,
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    elevation: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 6,
+    zIndex: 1000,
+  },
+  floatingOrderButtonText: {
+    color: '#000000',
     fontSize: 14,
     fontWeight: 'bold',
-    color: '#ffffff',
-    marginBottom: 2,
-  },
-  quickOrderSide: {
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  quickOrderDetails: {
-    flex: 1,
-    alignItems: 'flex-end',
-    marginRight: 12,
-  },
-  quickOrderAmount: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#ffffff',
-    marginBottom: 2,
-  },
-  quickOrderPrice: {
-    fontSize: 12,
-    color: '#888888',
-  },
-  quickCloseButton: {
-    backgroundColor: '#ff4444',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 6,
-  },
-  quickCloseButtonText: {
-    color: '#ffffff',
-    fontSize: 12,
-    fontWeight: '600',
   },
   // Error banner
   errorBanner: {
