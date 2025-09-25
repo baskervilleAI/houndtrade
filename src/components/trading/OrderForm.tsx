@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
-import { View, Text, Alert, ScrollView } from 'react-native';
-import { Button, Input, Select, Adapt, Sheet } from '@tamagui/core';
+import { View, Text, Alert, ScrollView, TouchableOpacity, TextInput } from 'react-native';
 import { OrderCreationParams, OrderSide, OrderType } from '../../types/trading';
 
 interface OrderFormProps {
@@ -21,6 +20,99 @@ const CRYPTO_SYMBOLS = [
   'AVAXUSDT',
   'UNIUSDT'
 ];
+
+// Componente selector simple
+interface SimpleSelectProps {
+  value: string;
+  onValueChange: (value: string) => void;
+  options: { value: string; label: string }[];
+  placeholder?: string;
+  width?: number | string;
+}
+
+const SimpleSelect: React.FC<SimpleSelectProps> = ({ 
+  value, 
+  onValueChange, 
+  options, 
+  placeholder = "Selecciona...",
+  width = "100%"
+}) => {
+  const [isOpen, setIsOpen] = useState(false);
+  const selectedOption = options.find(opt => opt.value === value);
+
+  return (
+    <View style={{ position: 'relative', width: width as any }}>
+      <TouchableOpacity
+        onPress={() => setIsOpen(!isOpen)}
+        style={{
+          borderWidth: 1,
+          borderColor: '#ddd',
+          borderRadius: 6,
+          padding: 12,
+          backgroundColor: 'white',
+          flexDirection: 'row',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          minHeight: 44
+        }}
+      >
+        <Text style={{ fontSize: 16, color: selectedOption ? '#000' : '#999' }}>
+          {selectedOption ? selectedOption.label : placeholder}
+        </Text>
+        <Text style={{ fontSize: 12, color: '#666' }}>
+          {isOpen ? '▲' : '▼'}
+        </Text>
+      </TouchableOpacity>
+      
+      {isOpen && (
+        <View style={{
+          position: 'absolute',
+          top: '100%',
+          left: 0,
+          right: 0,
+          backgroundColor: 'white',
+          borderWidth: 1,
+          borderColor: '#ddd',
+          borderRadius: 6,
+          marginTop: 2,
+          maxHeight: 200,
+          zIndex: 1000,
+          elevation: 5,
+          shadowColor: '#000',
+          shadowOffset: { width: 0, height: 2 },
+          shadowOpacity: 0.25,
+          shadowRadius: 3.84,
+        }}>
+          <ScrollView style={{ maxHeight: 200 }}>
+            {options.map((option) => (
+              <TouchableOpacity
+                key={option.value}
+                onPress={() => {
+                  onValueChange(option.value);
+                  setIsOpen(false);
+                }}
+                style={{
+                  padding: 12,
+                  borderBottomWidth: 1,
+                  borderBottomColor: '#f0f0f0',
+                  backgroundColor: option.value === value ? '#f0f8ff' : 'white'
+                }}
+              >
+                <Text style={{ 
+                  fontSize: 16,
+                  color: option.value === value ? '#007AFF' : '#000'
+                }}>
+                  {option.label}
+                  {option.value === value && ' ✓'}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+        </View>
+      )}
+    </View>
+  );
+};
 
 export const OrderForm: React.FC<OrderFormProps> = ({ 
   onCreateOrder, 
@@ -170,79 +262,58 @@ export const OrderForm: React.FC<OrderFormProps> = ({
         {/* Símbolo */}
         <View>
           <Text style={{ fontSize: 16, marginBottom: 8 }}>Criptomoneda</Text>
-          <Select value={symbol} onValueChange={setSymbol}>
-            <Select.Trigger>
-              <Select.Value placeholder="Selecciona una criptomoneda" />
-            </Select.Trigger>
-            <Select.Content zIndex={200000}>
-              <Select.ScrollUpButton />
-              <Select.Viewport>
-                {availableSymbols.map((sym, index) => (
-                  <Select.Item key={sym} index={index} value={sym}>
-                    <Select.ItemText>{sym}</Select.ItemText>
-                    <Select.ItemIndicator marginLeft="auto">✓</Select.ItemIndicator>
-                  </Select.Item>
-                ))}
-              </Select.Viewport>
-              <Select.ScrollDownButton />
-            </Select.Content>
-          </Select>
+          <SimpleSelect 
+            value={symbol} 
+            onValueChange={setSymbol}
+            options={availableSymbols.map(sym => ({ value: sym, label: sym }))}
+            placeholder="Selecciona una criptomoneda"
+          />
         </View>
 
         {/* Tipo de orden y dirección */}
         <View style={{ flexDirection: 'row', gap: 12 }}>
           <View style={{ flex: 1 }}>
             <Text style={{ fontSize: 16, marginBottom: 8 }}>Dirección</Text>
-            <Select value={side} onValueChange={setSide}>
-              <Select.Trigger>
-                <Select.Value />
-              </Select.Trigger>
-              <Select.Content zIndex={200000}>
-                <Select.Viewport>
-                  <Select.Item index={0} value={OrderSide.BUY}>
-                    <Select.ItemText>BUY (Comprar)</Select.ItemText>
-                    <Select.ItemIndicator marginLeft="auto">✓</Select.ItemIndicator>
-                  </Select.Item>
-                  <Select.Item index={1} value={OrderSide.SELL}>
-                    <Select.ItemText>SELL (Vender)</Select.ItemText>
-                    <Select.ItemIndicator marginLeft="auto">✓</Select.ItemIndicator>
-                  </Select.Item>
-                </Select.Viewport>
-              </Select.Content>
-            </Select>
+            <SimpleSelect 
+              value={side} 
+              onValueChange={(value) => setSide(value as OrderSide)}
+              options={[
+                { value: OrderSide.BUY, label: 'BUY (Comprar)' },
+                { value: OrderSide.SELL, label: 'SELL (Vender)' }
+              ]}
+            />
           </View>
 
           <View style={{ flex: 1 }}>
             <Text style={{ fontSize: 16, marginBottom: 8 }}>Tipo</Text>
-            <Select value={orderType} onValueChange={setOrderType}>
-              <Select.Trigger>
-                <Select.Value />
-              </Select.Trigger>
-              <Select.Content zIndex={200000}>
-                <Select.Viewport>
-                  <Select.Item index={0} value={OrderType.MARKET}>
-                    <Select.ItemText>MARKET</Select.ItemText>
-                    <Select.ItemIndicator marginLeft="auto">✓</Select.ItemIndicator>
-                  </Select.Item>
-                  <Select.Item index={1} value={OrderType.LIMIT}>
-                    <Select.ItemText>LIMIT</Select.ItemText>
-                    <Select.ItemIndicator marginLeft="auto">✓</Select.ItemIndicator>
-                  </Select.Item>
-                </Select.Viewport>
-              </Select.Content>
-            </Select>
+            <SimpleSelect 
+              value={orderType} 
+              onValueChange={(value) => setOrderType(value as OrderType)}
+              options={[
+                { value: OrderType.MARKET, label: 'MARKET' },
+                { value: OrderType.LIMIT, label: 'LIMIT' }
+              ]}
+            />
           </View>
         </View>
 
         {/* Cantidad en USDT */}
         <View>
           <Text style={{ fontSize: 16, marginBottom: 8 }}>Cantidad (USDT)</Text>
-          <Input
+          <TextInput
             value={usdtAmount}
             onChangeText={setUsdtAmount}
             placeholder="100"
             keyboardType="numeric"
-            size="$4"
+            style={{
+              borderWidth: 1,
+              borderColor: '#ddd',
+              borderRadius: 6,
+              padding: 12,
+              backgroundColor: 'white',
+              fontSize: 16,
+              minHeight: 44
+            }}
           />
         </View>
 
@@ -250,38 +321,48 @@ export const OrderForm: React.FC<OrderFormProps> = ({
         <View>
           <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
             <Text style={{ fontSize: 16, flex: 1 }}>Take Profit</Text>
-            <Select value={tpMode} onValueChange={setTpMode} size="$3">
-              <Select.Trigger width={100}>
-                <Select.Value />
-              </Select.Trigger>
-              <Select.Content zIndex={200000}>
-                <Select.Viewport>
-                  <Select.Item index={0} value="usdt">
-                    <Select.ItemText>USDT</Select.ItemText>
-                  </Select.Item>
-                  <Select.Item index={1} value="price">
-                    <Select.ItemText>Precio</Select.ItemText>
-                  </Select.Item>
-                </Select.Viewport>
-              </Select.Content>
-            </Select>
+            <SimpleSelect 
+              value={tpMode} 
+              onValueChange={(value) => setTpMode(value as 'price' | 'usdt')}
+              options={[
+                { value: 'usdt', label: 'USDT' },
+                { value: 'price', label: 'Precio' }
+              ]}
+              width={100}
+            />
           </View>
           
           {tpMode === 'usdt' ? (
-            <Input
+            <TextInput
               value={takeProfitUSDT}
               onChangeText={setTakeProfitUSDT}
               placeholder="Ganancia esperada en USDT"
               keyboardType="numeric"
-              size="$4"
+              style={{
+                borderWidth: 1,
+                borderColor: '#ddd',
+                borderRadius: 6,
+                padding: 12,
+                backgroundColor: 'white',
+                fontSize: 16,
+                minHeight: 44
+              }}
             />
           ) : (
-            <Input
+            <TextInput
               value={takeProfitPrice}
               onChangeText={setTakeProfitPrice}
               placeholder="Precio objetivo"
               keyboardType="numeric"
-              size="$4"
+              style={{
+                borderWidth: 1,
+                borderColor: '#ddd',
+                borderRadius: 6,
+                padding: 12,
+                backgroundColor: 'white',
+                fontSize: 16,
+                minHeight: 44
+              }}
             />
           )}
         </View>
@@ -290,38 +371,48 @@ export const OrderForm: React.FC<OrderFormProps> = ({
         <View>
           <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
             <Text style={{ fontSize: 16, flex: 1 }}>Stop Loss</Text>
-            <Select value={slMode} onValueChange={setSlMode} size="$3">
-              <Select.Trigger width={100}>
-                <Select.Value />
-              </Select.Trigger>
-              <Select.Content zIndex={200000}>
-                <Select.Viewport>
-                  <Select.Item index={0} value="usdt">
-                    <Select.ItemText>USDT</Select.ItemText>
-                  </Select.Item>
-                  <Select.Item index={1} value="price">
-                    <Select.ItemText>Precio</Select.ItemText>
-                  </Select.Item>
-                </Select.Viewport>
-              </Select.Content>
-            </Select>
+            <SimpleSelect 
+              value={slMode} 
+              onValueChange={(value) => setSlMode(value as 'price' | 'usdt')}
+              options={[
+                { value: 'usdt', label: 'USDT' },
+                { value: 'price', label: 'Precio' }
+              ]}
+              width={100}
+            />
           </View>
           
           {slMode === 'usdt' ? (
-            <Input
+            <TextInput
               value={stopLossUSDT}
               onChangeText={setStopLossUSDT}
               placeholder="Pérdida máxima en USDT"
               keyboardType="numeric"
-              size="$4"
+              style={{
+                borderWidth: 1,
+                borderColor: '#ddd',
+                borderRadius: 6,
+                padding: 12,
+                backgroundColor: 'white',
+                fontSize: 16,
+                minHeight: 44
+              }}
             />
           ) : (
-            <Input
+            <TextInput
               value={stopLossPrice}
               onChangeText={setStopLossPrice}
               placeholder="Precio de stop"
               keyboardType="numeric"
-              size="$4"
+              style={{
+                borderWidth: 1,
+                borderColor: '#ddd',
+                borderRadius: 6,
+                padding: 12,
+                backgroundColor: 'white',
+                fontSize: 16,
+                minHeight: 44
+              }}
             />
           )}
         </View>
@@ -349,38 +440,63 @@ export const OrderForm: React.FC<OrderFormProps> = ({
         )}
 
         {/* Opciones avanzadas */}
-        <Button 
-          variant="outlined" 
+        <TouchableOpacity 
           onPress={() => setShowAdvanced(!showAdvanced)}
-          size="$3"
+          style={{
+            borderWidth: 1,
+            borderColor: '#ddd',
+            borderRadius: 6,
+            padding: 12,
+            backgroundColor: 'white',
+            alignItems: 'center',
+            minHeight: 44
+          }}
         >
-          {showAdvanced ? 'Ocultar' : 'Mostrar'} opciones avanzadas
-        </Button>
+          <Text style={{ fontSize: 16, color: '#007AFF' }}>
+            {showAdvanced ? 'Ocultar' : 'Mostrar'} opciones avanzadas
+          </Text>
+        </TouchableOpacity>
 
         {showAdvanced && (
           <View>
             <Text style={{ fontSize: 16, marginBottom: 8 }}>Notas</Text>
-            <Input
+            <TextInput
               value={notes}
               onChangeText={setNotes}
               placeholder="Notas sobre esta orden (opcional)"
               multiline
               numberOfLines={3}
-              size="$4"
+              style={{
+                borderWidth: 1,
+                borderColor: '#ddd',
+                borderRadius: 6,
+                padding: 12,
+                backgroundColor: 'white',
+                fontSize: 16,
+                minHeight: 80,
+                textAlignVertical: 'top'
+              }}
             />
           </View>
         )}
 
         {/* Botón de crear orden */}
-        <Button
+        <TouchableOpacity
           onPress={handleSubmit}
           disabled={isLoading}
-          backgroundColor={side === OrderSide.BUY ? '$green10' : '$red10'}
-          color="white"
-          size="$5"
+          style={{
+            backgroundColor: side === OrderSide.BUY ? '#28a745' : '#dc3545',
+            borderRadius: 6,
+            padding: 16,
+            alignItems: 'center',
+            minHeight: 52,
+            opacity: isLoading ? 0.6 : 1
+          }}
         >
-          {isLoading ? 'Creando...' : `Crear Orden ${side}`}
-        </Button>
+          <Text style={{ fontSize: 18, color: 'white', fontWeight: 'bold' }}>
+            {isLoading ? 'Creando...' : `Crear Orden ${side}`}
+          </Text>
+        </TouchableOpacity>
 
         {/* Advertencias */}
         <View style={{ 
