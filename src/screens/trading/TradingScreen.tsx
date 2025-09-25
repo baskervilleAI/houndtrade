@@ -96,6 +96,21 @@ export const TradingScreen: React.FC = () => {
   const currentPrice = tickers[selectedPair]?.price || 0;
   const priceChange = tickers[selectedPair]?.changePercent24h || 0;
 
+  // Calcular escala de precios para el overlay
+  const priceScale = React.useMemo(() => {
+    if (!currentPrice) return undefined;
+    
+    // Crear un rango de precios basado en el precio actual
+    const basePrice = currentPrice;
+    const range = basePrice * 0.1; // 10% de rango
+    
+    return {
+      min: basePrice - range,
+      max: basePrice + range,
+      pixelsPerPrice: chartDimensions.height / (range * 2)
+    };
+  }, [currentPrice, chartDimensions.height]);
+
   const handleLogout = () => {
     logout();
   };
@@ -118,6 +133,9 @@ export const TradingScreen: React.FC = () => {
               <TradingOverlay
                 chartDimensions={chartDimensions}
                 isVisible={showTradingOverlay}
+                symbol={selectedPair}
+                priceScale={priceScale}
+                latestPrice={currentPrice}
                 onOverlayClick={(event) => {
                   console.log('🖱️ [OVERLAY_CLICK] Click en overlay detectado', event);
                 }}
