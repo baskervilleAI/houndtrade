@@ -212,6 +212,25 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
   const isChangingCryptocurrency = useRef<boolean>(false);
   const cryptocurrencyChangeTimeout = useRef<NodeJS.Timeout | null>(null);
   
+  // NUEVO: Sistema de control para elementos de trading (similar al sistema de cámara)
+  const tradingOverlayState = useRef<{
+    isActive: boolean;
+    lastDrawTime: number;
+    needsRedraw: boolean;
+    isDrawing: boolean;
+    currentPrice: number | null;
+    takeProfitLevel: number | null;
+    stopLossLevel: number | null;
+  }>({
+    isActive: false,
+    lastDrawTime: 0,
+    needsRedraw: false,
+    isDrawing: false,
+    currentPrice: null,
+    takeProfitLevel: null,
+    stopLossLevel: null
+  });
+  
   const { selectedPair } = useMarket();
   const currentSymbol = symbol || selectedPair;
   
@@ -219,6 +238,103 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
   const previousSymbolRef = useRef<string>('');
   const previousIntervalRef = useRef<TimeInterval | ''>('');
   const hasLoadedOnceRef = useRef<boolean>(false);
+
+  // NUEVO: Funciones para controlar el estado de trading de manera estable
+  const activateTradingOverlay = useCallback((currentPrice: number) => {
+    const now = Date.now();
+    
+    logChart('ACTIVATING_TRADING_OVERLAY', {
+      currentPrice,
+      timestamp: new Date().toLocaleTimeString(),
+      previousState: tradingOverlayState.current
+    });
+    
+    // Configurar niveles iniciales
+    const initialSpread = currentPrice * 0.02;
+    const newTpLevel = currentPrice + initialSpread;
+    const newSlLevel = currentPrice - initialSpread;
+    
+    // Actualizar estado interno
+    tradingOverlayState.current = {
+      isActive: true,
+      lastDrawTime: 0, // Forzar redibujado
+      needsRedraw: true,
+      isDrawing: false,
+      currentPrice,
+      takeProfitLevel: newTpLevel,
+      stopLossLevel: newSlLevel
+    };
+    
+    // Actualizar estados de React
+    setShowTradingOverlay(true);
+    setCurrentPriceLevel(currentPrice);
+    setTakeProfitLevel(newTpLevel);
+    setStopLossLevel(newSlLevel);
+    
+    // Marcar para redibujado inmediato
+    requestTradingRedraw();
+  }, []);
+  
+  const deactivateTradingOverlay = useCallback(() => {
+    logChart('DEACTIVATING_TRADING_OVERLAY', {
+      timestamp: new Date().toLocaleTimeString(),
+      previousState: tradingOverlayState.current
+    });
+    
+    // Resetear estado interno
+    tradingOverlayState.current = {
+      isActive: false,
+      lastDrawTime: 0,
+      needsRedraw: false,
+      isDrawing: false,
+      currentPrice: null,
+      takeProfitLevel: null,
+      stopLossLevel: null
+    };
+    
+    // Actualizar estados de React
+    setShowTradingOverlay(false);
+    setCurrentPriceLevel(null);
+    setTakeProfitLevel(null);
+    setStopLossLevel(null);
+    
+    // El plugin tradingElementsPlugin automáticamente no dibujará nada
+    // cuando isActive sea false, limpiando el canvas automáticamente
+    if (chartRef.current) {
+      chartRef.current.update('none');
+    }
+  }, []);
+  
+  const updateTradingLevels = useCallback((newTp?: number, newSl?: number) => {
+    if (!tradingOverlayState.current.isActive) return;
+    
+    const currentState = tradingOverlayState.current;
+    const needsUpdate = 
+      (newTp !== undefined && newTp !== currentState.takeProfitLevel) ||
+      (newSl !== undefined && newSl !== currentState.stopLossLevel);
+    
+    if (needsUpdate) {
+      // Actualizar estado interno
+      if (newTp !== undefined) {
+        tradingOverlayState.current.takeProfitLevel = newTp;
+        setTakeProfitLevel(newTp);
+      }
+      if (newSl !== undefined) {
+        tradingOverlayState.current.stopLossLevel = newSl;
+        setStopLossLevel(newSl);
+      }
+      
+      tradingOverlayState.current.needsRedraw = true;
+      requestTradingRedraw();
+    }
+  }, []);
+  
+  const requestTradingRedraw = useCallback(() => {
+    // SIMPLIFICADO: Solo forzar update del chart, el plugin se encarga del dibujado
+    if (chartRef.current && tradingOverlayState.current.isActive) {
+      chartRef.current.update('none');
+    }
+  }, []);
 
   // NUEVO: Funciones para preservar y restaurar configuraciones de indicadores
   const preserveIndicatorConfigs = useCallback((chart: any) => {
@@ -453,7 +569,7 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
     }
   }, [simpleCamera]);
 
-  // Funciones para el trading overlay
+  // Funciones para el trading overlay - USANDO NUEVO SISTEMA DE CONTROL
   const handleChartClick = useCallback((event: MouseEvent | TouchEvent) => {
     if (!chartRef.current || !canvasRef.current) return;
 
@@ -492,19 +608,29 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
       canvasCoords: canvasPosition,
       priceAtClick,
       currentPrice,
+      currentOverlayState: showTradingOverlay,
       timestamp: new Date().toLocaleTimeString()
     });
 
-    // Activar el overlay de trading
-    setCurrentPriceLevel(currentPrice);
-    setShowTradingOverlay(true);
+    // TOGGLE: Activar/desactivar overlay según el estado actual
+    if (showTradingOverlay) {
+      // Si ya está activo, desactivarlo
+      deactivateTradingOverlay();
+      logChart('TRADING_OVERLAY_TOGGLED_OFF', {
+        reason: 'user_click_to_deactivate',
+        timestamp: new Date().toLocaleTimeString()
+      });
+    } else {
+      // Si está inactivo, activarlo
+      activateTradingOverlay(currentPrice);
+      logChart('TRADING_OVERLAY_TOGGLED_ON', {
+        reason: 'user_click_to_activate',
+        currentPrice,
+        timestamp: new Date().toLocaleTimeString()
+      });
+    }
 
-    // Configurar niveles iniciales de TP y SL basados en el precio actual
-    const initialSpread = currentPrice * 0.02; // 2% de spread inicial
-    setTakeProfitLevel(currentPrice + initialSpread);
-    setStopLossLevel(currentPrice - initialSpread);
-
-  }, []);
+  }, [showTradingOverlay, activateTradingOverlay, deactivateTradingOverlay]);
 
   // Configurar los event listeners para el canvas
   useEffect(() => {
@@ -613,18 +739,16 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
         const canvasY = y * (canvas.height / rect.height);
         const priceAtCursor = yScale.getValueForPixel(canvasY);
         
-        // Actualizar el nivel correspondiente
+        // Actualizar el nivel correspondiente usando el nuevo sistema
         if (dragTarget === 'tp') {
-          setTakeProfitLevel(priceAtCursor);
+          updateTradingLevels(priceAtCursor, undefined);
         } else if (dragTarget === 'sl') {
-          setStopLossLevel(priceAtCursor);
+          updateTradingLevels(undefined, priceAtCursor);
         }
         
-        // Forzar redibujado del gráfico y elementos de trading
-        chart.update('none');
-        setTimeout(() => {
-          drawTradingElements();
-        }, 5);
+        // No forzar redibujado aquí - el sistema controlado se encarga
+        // chart.update('none'); // ELIMINADO para evitar bucles
+        // setTimeout(() => { drawTradingElements(); }, 5); // ELIMINADO
         
       } else if (showTradingOverlay && !isDragging) {
         // Cambiar cursor si está sobre una barra
@@ -667,18 +791,16 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
         const canvasY = y * (canvas.height / rect.height);
         const priceAtCursor = yScale.getValueForPixel(canvasY);
         
-        // Actualizar el nivel correspondiente
+        // Actualizar el nivel correspondiente usando el nuevo sistema
         if (dragTarget === 'tp') {
-          setTakeProfitLevel(priceAtCursor);
+          updateTradingLevels(priceAtCursor, undefined);
         } else if (dragTarget === 'sl') {
-          setStopLossLevel(priceAtCursor);
+          updateTradingLevels(undefined, priceAtCursor);
         }
         
-        // Forzar redibujado del gráfico y elementos de trading
-        chart.update('none');
-        setTimeout(() => {
-          drawTradingElements();
-        }, 5);
+        // No forzar redibujado aquí - el sistema controlado se encarga
+        // chart.update('none'); // ELIMINADO para evitar bucles
+        // setTimeout(() => { drawTradingElements(); }, 5); // ELIMINADO
       }
     };
 
@@ -737,9 +859,21 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
     }
   }, [candleData, showTradingOverlay, currentPriceLevel]);
 
-  // Función para dibujar los elementos de trading directamente en el canvas
+  // Función para dibujar los elementos de trading directamente en el canvas - OPTIMIZADA
   const drawTradingElements = useCallback(() => {
-    if (!chartRef.current || !canvasRef.current || !showTradingOverlay || !currentPriceLevel) {
+    const state = tradingOverlayState.current;
+    
+    // CRÍTICO: Prevenir bucles infinitos con guards múltiples
+    if (!state.isActive || state.isDrawing) {
+      return;
+    }
+    
+    if (!chartRef.current || !canvasRef.current) {
+      return;
+    }
+    
+    // Verificar que tenemos datos válidos
+    if (!state.currentPrice || !state.takeProfitLevel || !state.stopLossLevel) {
       return;
     }
 
@@ -751,132 +885,177 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
 
     if (!ctx || !yScale || !chartArea) return;
 
-    logChart('DRAWING_TRADING_ELEMENTS', {
-      showTradingOverlay,
-      currentPriceLevel,
-      takeProfitLevel,
-      stopLossLevel,
-      chartAreaExists: !!chartArea
+    // Marcar que estamos dibujando para prevenir loops
+    tradingOverlayState.current.isDrawing = true;
+    const now = Date.now();
+    
+    logChart('DRAWING_TRADING_ELEMENTS_CONTROLLED', {
+      currentPrice: state.currentPrice,
+      takeProfitLevel: state.takeProfitLevel,
+      stopLossLevel: state.stopLossLevel,
+      timeSinceLastDraw: now - state.lastDrawTime,
+      needsRedraw: state.needsRedraw
     });
 
-    ctx.save();
+    try {
+      ctx.save();
 
-    // Obtener la coordenada Y del precio actual
-    const currentPriceY = yScale.getPixelForValue(currentPriceLevel);
+      // Obtener la coordenada Y del precio actual
+      const currentPriceY = yScale.getPixelForValue(state.currentPrice);
 
-    // 1. Dibujar área verde (para TP) arriba del precio actual
-    ctx.fillStyle = 'rgba(0, 255, 136, 0.08)';
-    ctx.fillRect(
-      chartArea.left,
-      chartArea.top,
-      chartArea.right - chartArea.left,
-      currentPriceY - chartArea.top
-    );
+      // 1. Dibujar área verde (para TP) arriba del precio actual
+      ctx.fillStyle = 'rgba(0, 255, 136, 0.15)';
+      ctx.fillRect(
+        chartArea.left,
+        chartArea.top,
+        chartArea.right - chartArea.left,
+        currentPriceY - chartArea.top
+      );
 
-    // 2. Dibujar área roja (para SL) abajo del precio actual  
-    ctx.fillStyle = 'rgba(255, 68, 68, 0.08)';
-    ctx.fillRect(
-      chartArea.left,
-      currentPriceY,
-      chartArea.right - chartArea.left,
-      chartArea.bottom - currentPriceY
-    );
+      // 2. Dibujar área roja (para SL) abajo del precio actual  
+      ctx.fillStyle = 'rgba(255, 68, 68, 0.15)';
+      ctx.fillRect(
+        chartArea.left,
+        currentPriceY,
+        chartArea.right - chartArea.left,
+        chartArea.bottom - currentPriceY
+      );
 
-    // 3. Dibujar línea horizontal del precio actual
-    ctx.strokeStyle = '#ffffff';
-    ctx.lineWidth = 1.2; // Ligeramente más gruesa pero no exagerado
-    ctx.setLineDash([5, 5]);
-    ctx.beginPath();
-    ctx.moveTo(chartArea.left, currentPriceY);
-    ctx.lineTo(chartArea.right, currentPriceY);
-    ctx.stroke();
-    ctx.setLineDash([]);
+      // 3. Dibujar línea horizontal del precio actual
+      ctx.strokeStyle = '#ffff00';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([8, 4]);
+      ctx.beginPath();
+      ctx.moveTo(chartArea.left, currentPriceY);
+      ctx.lineTo(chartArea.right, currentPriceY);
+      ctx.stroke();
+      ctx.setLineDash([]);
 
-    // 4. Dibujar líneas de TP y SL si están definidas
-    if (takeProfitLevel) {
-      const tpY = yScale.getPixelForValue(takeProfitLevel);
+      // 4. Dibujar líneas de TP y SL
+      const tpY = yScale.getPixelForValue(state.takeProfitLevel);
       ctx.strokeStyle = '#00ff88';
-      ctx.lineWidth = 2.5; // Más visible pero no exagerado
+      ctx.lineWidth = 3;
+      ctx.shadowColor = '#00ff88';
+      ctx.shadowBlur = 3;
       ctx.beginPath();
       ctx.moveTo(chartArea.left, tpY);
       ctx.lineTo(chartArea.right, tpY);
       ctx.stroke();
+      ctx.shadowBlur = 0;
 
-      // Etiqueta del TP en el lado derecho
+      // Etiqueta TP
       ctx.fillStyle = '#00ff88';
-      ctx.font = 'bold 13px Arial'; // Tamaño moderado
+      ctx.font = 'bold 14px Arial';
       ctx.textAlign = 'left';
-      const tpText = `TP: $${(takeProfitLevel/1000).toFixed(1)}k`;
+      ctx.strokeStyle = '#000000';
+      ctx.lineWidth = 3;
+      const tpText = `TP: $${(state.takeProfitLevel/1000).toFixed(1)}k`;
+      ctx.strokeText(tpText, chartArea.right + 5, tpY - 5);
       ctx.fillText(tpText, chartArea.right + 5, tpY - 5);
-    }
 
-    if (stopLossLevel) {
-      const slY = yScale.getPixelForValue(stopLossLevel);
+      // Línea SL
+      const slY = yScale.getPixelForValue(state.stopLossLevel);
       ctx.strokeStyle = '#ff4444';
-      ctx.lineWidth = 2.5; // Más visible pero no exagerado
+      ctx.lineWidth = 3;
+      ctx.shadowColor = '#ff4444';
+      ctx.shadowBlur = 3;
       ctx.beginPath();
       ctx.moveTo(chartArea.left, slY);
       ctx.lineTo(chartArea.right, slY);
       ctx.stroke();
+      ctx.shadowBlur = 0;
 
-      // Etiqueta del SL en el lado derecho
+      // Etiqueta SL
       ctx.fillStyle = '#ff4444';
-      ctx.font = 'bold 13px Arial'; // Tamaño moderado
+      ctx.font = 'bold 14px Arial';
       ctx.textAlign = 'left';
-      const slText = `SL: $${(stopLossLevel/1000).toFixed(1)}k`;
+      ctx.strokeStyle = '#000000';
+      ctx.lineWidth = 3;
+      const slText = `SL: $${(state.stopLossLevel/1000).toFixed(1)}k`;
+      ctx.strokeText(slText, chartArea.right + 5, slY + 15);
       ctx.fillText(slText, chartArea.right + 5, slY + 15);
-    }
 
-    // 5. Dibujar barras de control interactivas
-    if (takeProfitLevel && stopLossLevel) {
-      const barWidth = 16; // Tamaño moderado
-      const barHeight = 26; // Altura moderada
+      // 5. Dibujar barras de control interactivas
+      const barWidth = 20;
+      const barHeight = 30;
       const barX = chartArea.right + 80;
 
-      // Barra de Take Profit (verde)
-      const tpY = yScale.getPixelForValue(takeProfitLevel);
+      // Barra TP
+      ctx.shadowColor = 'rgba(0, 0, 0, 0.5)';
+      ctx.shadowBlur = 4;
+      ctx.shadowOffsetX = 2;
+      ctx.shadowOffsetY = 2;
       ctx.fillStyle = '#00ff88';
       ctx.fillRect(barX, tpY - barHeight/2, barWidth, barHeight);
+      ctx.shadowBlur = 0;
       ctx.strokeStyle = '#ffffff';
-      ctx.lineWidth = 1.2; // Borde ligeramente más grueso pero moderado
+      ctx.lineWidth = 2;
       ctx.strokeRect(barX, tpY - barHeight/2, barWidth, barHeight);
 
-      // Barra de Stop Loss (roja)
-      const slY = yScale.getPixelForValue(stopLossLevel);
+      // Barra SL
+      ctx.shadowColor = 'rgba(0, 0, 0, 0.5)';
+      ctx.shadowBlur = 4;
+      ctx.shadowOffsetX = 2;
+      ctx.shadowOffsetY = 2;
       ctx.fillStyle = '#ff4444';
       ctx.fillRect(barX, slY - barHeight/2, barWidth, barHeight);
+      ctx.shadowBlur = 0;
       ctx.strokeStyle = '#ffffff';
-      ctx.lineWidth = 1.2; // Borde ligeramente más grueso pero moderado
+      ctx.lineWidth = 2;
       ctx.strokeRect(barX, slY - barHeight/2, barWidth, barHeight);
-    }
 
-    ctx.restore();
-  }, [showTradingOverlay, currentPriceLevel, takeProfitLevel, stopLossLevel]);
-
-  // useEffect para dibujar elementos de trading después de cada actualización del gráfico
-  useEffect(() => {
-    if (showTradingOverlay && chartRef.current) {
-      // Agregar un pequeño delay para asegurar que el gráfico se haya renderizado completamente
-      const timeoutId = setTimeout(() => {
-        drawTradingElements();
-      }, 50);
-
-      return () => clearTimeout(timeoutId);
-    }
-  }, [showTradingOverlay, currentPriceLevel, takeProfitLevel, stopLossLevel, candleData, drawTradingElements]);
-
-  // Función para ocultar el overlay de trading
-  const hideTradingOverlay = useCallback(() => {
-    setShowTradingOverlay(false);
-    setTakeProfitLevel(null);
-    setStopLossLevel(null);
-    setCurrentPriceLevel(null);
-    
-    if (chartRef.current) {
-      // Forzar redibujado para limpiar los elementos de trading
-      chartRef.current.update('none');
+      ctx.restore();
+      
+      // Actualizar estado después del dibujado exitoso
+      tradingOverlayState.current.lastDrawTime = now;
+      tradingOverlayState.current.needsRedraw = false;
+      
+    } catch (error) {
+      logError('Error drawing trading elements', { error });
+    } finally {
+      // CRÍTICO: Siempre liberar el flag de drawing
+      tradingOverlayState.current.isDrawing = false;
     }
   }, []);
+
+  // useEffect para controlar elementos de trading de manera eficiente - SIMPLIFICADO
+  useEffect(() => {
+    // Solo actualizar el chart cuando cambie el estado del overlay
+    // El plugin tradingElementsPlugin se encargará del dibujado automático
+    if (chartRef.current) {
+      chartRef.current.update('none');
+    }
+  }, [showTradingOverlay]); // Solo cuando cambie el estado del overlay
+
+  // useEffect para actualizar precios - SIMPLIFICADO
+  useEffect(() => {
+    if (!showTradingOverlay || !chartRef.current) return;
+    
+    // Solo actualizar el chart, el plugin se encarga del dibujado
+    chartRef.current.update('none');
+  }, [currentPriceLevel, takeProfitLevel, stopLossLevel, showTradingOverlay]);
+
+  // useEffect para actualización de velas - SIMPLIFICADO  
+  useEffect(() => {
+    if (!showTradingOverlay || !tradingOverlayState.current.isActive || !chartRef.current) return;
+    
+    // Actualizar precio actual con la nueva vela
+    if (candleData.length > 0) {
+      const lastCandle = candleData[candleData.length - 1];
+      const newPrice = lastCandle.c;
+      
+      if (newPrice !== tradingOverlayState.current.currentPrice) {
+        tradingOverlayState.current.currentPrice = newPrice;
+        setCurrentPriceLevel(newPrice);
+        // El plugin tradingElementsPlugin se encargará del dibujado en el próximo update
+      }
+    }
+  }, [candleData, showTradingOverlay]); // Solo cuando cambien las velas o el estado del overlay
+
+  // Función para ocultar el overlay de trading - USANDO NUEVO SISTEMA
+  const hideTradingOverlay = useCallback(() => {
+    deactivateTradingOverlay();
+  }, [deactivateTradingOverlay]);
 
   // NUEVO: Función para limpiar completamente el chart y datos
   const clearChartCompletely = useCallback(() => {
@@ -1682,6 +1861,115 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
         ChartFinancial.OhlcElement,
         zoomPlugin.default
       );
+
+      // Plugin personalizado para elementos de trading persistentes - OPTIMIZADO
+      const tradingElementsPlugin = {
+        id: 'tradingElements',
+        afterDraw: (chart: any) => {
+          const state = tradingOverlayState.current;
+          
+          // Solo dibujar si el overlay está activo y no estamos ya dibujando
+          if (!state.isActive || state.isDrawing) return;
+          
+          // Verificar que tenemos todos los datos necesarios
+          if (!state.currentPrice || !state.takeProfitLevel || !state.stopLossLevel) return;
+          
+          const ctx = chart.ctx;
+          const chartArea = chart.chartArea;
+          const yScale = chart.scales.y;
+
+          if (!ctx || !yScale || !chartArea) return;
+
+          // Marcar que estamos dibujando para prevenir loops
+          state.isDrawing = true;
+          
+          try {
+            ctx.save();
+
+            // Obtener la coordenada Y del precio actual
+            const currentPriceY = yScale.getPixelForValue(state.currentPrice);
+
+            // Área verde (para TP) arriba del precio actual
+            ctx.fillStyle = 'rgba(0, 255, 136, 0.15)';
+            ctx.fillRect(
+              chartArea.left,
+              chartArea.top,
+              chartArea.right - chartArea.left,
+              currentPriceY - chartArea.top
+            );
+
+            // Área roja (para SL) abajo del precio actual
+            ctx.fillStyle = 'rgba(255, 68, 68, 0.15)';
+            ctx.fillRect(
+              chartArea.left,
+              currentPriceY,
+              chartArea.right - chartArea.left,
+              chartArea.bottom - currentPriceY
+            );
+
+            // Línea del precio actual
+            ctx.strokeStyle = '#ffff00';
+            ctx.lineWidth = 2;
+            ctx.setLineDash([8, 4]);
+            ctx.beginPath();
+            ctx.moveTo(chartArea.left, currentPriceY);
+            ctx.lineTo(chartArea.right, currentPriceY);
+            ctx.stroke();
+            ctx.setLineDash([]);
+
+            // Líneas de TP y SL
+            const tpY = yScale.getPixelForValue(state.takeProfitLevel);
+            ctx.strokeStyle = '#00ff88';
+            ctx.lineWidth = 3;
+            ctx.beginPath();
+            ctx.moveTo(chartArea.left, tpY);
+            ctx.lineTo(chartArea.right, tpY);
+            ctx.stroke();
+
+            // Etiqueta TP
+            ctx.fillStyle = '#00ff88';
+            ctx.font = 'bold 14px Arial';
+            ctx.textAlign = 'left';
+            ctx.strokeStyle = '#000000';
+            ctx.lineWidth = 3;
+            const tpText = `TP: $${(state.takeProfitLevel/1000).toFixed(1)}k`;
+            ctx.strokeText(tpText, chartArea.right + 5, tpY - 5);
+            ctx.fillText(tpText, chartArea.right + 5, tpY - 5);
+
+            const slY = yScale.getPixelForValue(state.stopLossLevel);
+            ctx.strokeStyle = '#ff4444';
+            ctx.lineWidth = 3;
+            ctx.beginPath();
+            ctx.moveTo(chartArea.left, slY);
+            ctx.lineTo(chartArea.right, slY);
+            ctx.stroke();
+
+            // Etiqueta SL
+            ctx.fillStyle = '#ff4444';
+            ctx.font = 'bold 14px Arial';
+            ctx.textAlign = 'left';
+            ctx.strokeStyle = '#000000';
+            ctx.lineWidth = 3;
+            const slText = `SL: $${(state.stopLossLevel/1000).toFixed(1)}k`;
+            ctx.strokeText(slText, chartArea.right + 5, slY + 15);
+            ctx.fillText(slText, chartArea.right + 5, slY + 15);
+
+            ctx.restore();
+            
+            // Actualizar estado después del dibujado
+            state.lastDrawTime = Date.now();
+            state.needsRedraw = false;
+          } catch (error) {
+            console.error('Error in trading plugin:', error);
+          } finally {
+            // CRÍTICO: Siempre liberar el flag
+            state.isDrawing = false;
+          }
+        }
+      };
+
+      // Registrar el plugin personalizado
+      Chart.register(tradingElementsPlugin);
       
       // Registrar solo los componentes básicos de Chart.js
       
@@ -2244,12 +2532,8 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
       chart.update('none');
       const updateDuration = Date.now() - updateStartTime;
       
-      // Redibujar elementos de trading después de la actualización del gráfico
-      if (showTradingOverlay) {
-        setTimeout(() => {
-          drawTradingElements();
-        }, 10);
-      }
+      // El plugin tradingElementsPlugin se encargará automáticamente del redibujado
+      // si el overlay está activo - no necesitamos llamadas manuales
       
       logTidalFlow('CHART_UPDATE_COMPLETED', {
         updateSequence: updateSequence.current,
@@ -3917,28 +4201,7 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
           />
         </View>
         
-        {/* Overlay de información del trading */}
-        {showTradingOverlay && (
-          <View style={styles.tradingOverlay}>
-            <Text style={styles.overlayTitle}>Configurar Orden</Text>
-            <Text style={styles.overlayPrice}>
-              Precio Actual: ${currentPriceLevel?.toLocaleString('en-US', { minimumFractionDigits: 2 }) || '---'}
-            </Text>
-            {takeProfitLevel && (
-              <Text style={styles.overlayTP}>
-                Take Profit: ${takeProfitLevel.toLocaleString('en-US', { minimumFractionDigits: 2 })}
-              </Text>
-            )}
-            {stopLossLevel && (
-              <Text style={styles.overlaySL}>
-                Stop Loss: ${stopLossLevel.toLocaleString('en-US', { minimumFractionDigits: 2 })}
-              </Text>
-            )}
-            <TouchableOpacity style={styles.overlayCloseButton} onPress={hideTradingOverlay}>
-              <Text style={styles.overlayCloseText}>✕ Cerrar</Text>
-            </TouchableOpacity>
-          </View>
-        )}
+
 
         {/* Estado del gráfico en una línea minimalista debajo */}
         <View style={styles.statusBelow}>
