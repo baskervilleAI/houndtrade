@@ -9,8 +9,7 @@ import {
 } from 'react-native';
 import { useMarket } from '../../context/AppContext';
 import { formatPrice, formatPercentage } from '../../utils/formatters';
-
-const POPULAR_PAIRS = ['BTCUSDT', 'ETHUSDT', 'ADAUSDT', 'BNBUSDT', 'SOLUSDT'];
+import { POPULAR_PAIRS } from '../../constants/tradingSymbols';
 
 export const MarketData: React.FC = () => {
   const { selectedPair, tickers, setSelectedPair } = useMarket();
