@@ -83,11 +83,18 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
   const lastZoomTime = useRef<number>(0);
   const lastPanTime = useRef<number>(0);
   
-  // NUEVO: Estados para distinguir entre interacciones de cámara y clicks de trading
+  // MEJORADO: Estados para distinguir entre interacciones de cámara y clicks de trading
   const isCameraInteracting = useRef<boolean>(false);
   const isZoomingOrPanning = useRef<boolean>(false);
   const lastCameraInteractionTime = useRef<number>(0);
-  const cameraInteractionCooldown = 150; // Reducido a 150ms para mejor respuesta
+  const cameraInteractionCooldown = 300; // Aumentado a 300ms para mejor detección
+  
+  // NUEVO: Detección de movimiento para distinguir drag de click
+  const mouseStartPosition = useRef<{x: number, y: number} | null>(null);
+  const hasMouseMoved = useRef<boolean>(false);
+  const mouseMoveThreshold = 5; // píxeles mínimos para considerar movimiento
+  const lastMouseDownTime = useRef<number>(0);
+  const mouseTrackingTimeout = useRef<number | null>(null);
   
   // Estados para las mejoras de trading visual
   const [showTradingOverlay, setShowTradingOverlay] = useState(false);
@@ -593,12 +600,38 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
 
     const now = Date.now();
     
-    // SIMPLIFICADO: Solo bloquear clicks si acabamos de hacer zoom/pan recientemente
+    // MEJORADO: Verificar si hubo movimiento antes del click (indica drag/pan)
+    if (hasMouseMoved.current) {
+      console.log('🔴 [CLICK DEBUG] Click bloqueado - se detectó movimiento (drag/pan)');
+      hasMouseMoved.current = false; // Reset para próximo click
+      return;
+    }
+    
+    // MEJORADO: Verificar cooldown después de interacciones de cámara
     const timeSinceLastCameraInteraction = now - lastCameraInteractionTime.current;
     if (timeSinceLastCameraInteraction < cameraInteractionCooldown) {
       console.log(`🔴 [CLICK DEBUG] Click bloqueado - interacción reciente (${timeSinceLastCameraInteraction}ms < ${cameraInteractionCooldown}ms)`);
       return;
     }
+    
+    // NUEVO: Verificar que el click no fue inmediatamente después de mousedown (indica possible drag)
+    const timeSinceMouseDown = now - lastMouseDownTime.current;
+    if (timeSinceMouseDown < 100) { // Si el click fue menos de 100ms después de mousedown
+      console.log(`🔴 [CLICK DEBUG] Click bloqueado - muy rápido después de mousedown (${timeSinceMouseDown}ms)`);
+      return;
+    }
+    
+    // NUEVO: Limpiar variables de tracking después del click exitoso
+    const resetTrackingVariables = () => {
+      if (mouseTrackingTimeout.current) {
+        clearTimeout(mouseTrackingTimeout.current);
+      }
+      mouseTrackingTimeout.current = window.setTimeout(() => {
+        hasMouseMoved.current = false;
+        mouseStartPosition.current = null;
+        lastMouseDownTime.current = 0;
+      }, 100);
+    };
 
     const chart = chartRef.current;
     const canvas = canvasRef.current;
@@ -628,10 +661,12 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
       // Si ya está activo, desactivarlo
       console.log('🔴 [CLICK DEBUG] Desactivando trading overlay');
       deactivateTradingOverlay();
+      resetTrackingVariables();
     } else {
       // Si está inactivo, activarlo
       console.log('🟢 [CLICK DEBUG] Activando trading overlay con precio:', currentPrice.toFixed(2));
       activateTradingOverlay(currentPrice);
+      resetTrackingVariables();
     }
 
   }, [showTradingOverlay, activateTradingOverlay, deactivateTradingOverlay]);
@@ -696,6 +731,11 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
         const x = touch.clientX - rect.left;
         const y = touch.clientY - rect.top;
         
+        // NUEVO: Trackear posición inicial para detectar movimiento en touch
+        mouseStartPosition.current = { x, y };
+        hasMouseMoved.current = false;
+        lastMouseDownTime.current = Date.now();
+        
         const barTarget = getBarTarget(x, y);
         
         if (barTarget) {
@@ -716,6 +756,11 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
       const x = event.clientX - rect.left;
       const y = event.clientY - rect.top;
       
+      // NUEVO: Trackear posición inicial y tiempo para detectar movimiento
+      mouseStartPosition.current = { x, y };
+      hasMouseMoved.current = false;
+      lastMouseDownTime.current = Date.now();
+      
       const barTarget = getBarTarget(x, y);
       
       if (barTarget) {
@@ -731,6 +776,17 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
       const rect = canvas.getBoundingClientRect();
       const x = event.clientX - rect.left;
       const y = event.clientY - rect.top;
+      
+      // NUEVO: Detectar si hubo movimiento significativo desde mousedown
+      if (mouseStartPosition.current) {
+        const deltaX = Math.abs(x - mouseStartPosition.current.x);
+        const deltaY = Math.abs(y - mouseStartPosition.current.y);
+        const totalMovement = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
+        
+        if (totalMovement > mouseMoveThreshold) {
+          hasMouseMoved.current = true;
+        }
+      }
       
       if (isDragging && dragTarget && chartRef.current) {
         event.preventDefault();
@@ -763,11 +819,18 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
 
     // Manejar mouse up para terminar arrastre
     const handleMouseUp = (event: MouseEvent) => {
+      // NUEVO: Reset variables de tracking si no hubo drag significativo
+      if (!isDragging && !hasMouseMoved.current) {
+        // Permitir que el click se procese normalmente
+        mouseStartPosition.current = null;
+      }
+      
       if (isDragging) {
         event.preventDefault();
         isDragging = false;
         dragTarget = null;
         canvas.style.cursor = 'default';
+        hasMouseMoved.current = true; // Marcar que hubo movimiento por el drag
         
         logChart('TRADING_LEVEL_UPDATED', {
           takeProfitLevel,
@@ -780,6 +843,24 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
 
     // Manejar touch move para arrastre táctil
     const handleTouchMove = (event: TouchEvent) => {
+      if (event.touches.length === 1) {
+        const touch = event.touches[0];
+        const rect = canvas.getBoundingClientRect();
+        const x = touch.clientX - rect.left;
+        const y = touch.clientY - rect.top;
+        
+        // NUEVO: Detectar movimiento en touch también
+        if (mouseStartPosition.current) {
+          const deltaX = Math.abs(x - mouseStartPosition.current.x);
+          const deltaY = Math.abs(y - mouseStartPosition.current.y);
+          const totalMovement = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
+          
+          if (totalMovement > mouseMoveThreshold) {
+            hasMouseMoved.current = true;
+          }
+        }
+      }
+      
       if (isDragging && dragTarget && event.touches.length === 1 && chartRef.current) {
         event.preventDefault();
         
@@ -810,10 +891,17 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
 
     // Manejar touch end para terminar arrastre táctil
     const handleTouchEnd = (event: TouchEvent) => {
+      // NUEVO: Reset variables de tracking si no hubo drag significativo
+      if (!isDragging && !hasMouseMoved.current) {
+        // Permitir que el touch se procese normalmente
+        mouseStartPosition.current = null;
+      }
+      
       if (isDragging) {
         event.preventDefault();
         isDragging = false;
         dragTarget = null;
+        hasMouseMoved.current = true; // Marcar que hubo movimiento por el drag
         
         logChart('TRADING_LEVEL_UPDATED_TOUCH', {
           takeProfitLevel,
@@ -840,6 +928,12 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
       canvas.removeEventListener('mouseup', handleMouseUp);
       canvas.removeEventListener('touchmove', handleTouchMove);
       canvas.removeEventListener('touchend', handleTouchEnd);
+      
+      // Limpiar timeout de tracking
+      if (mouseTrackingTimeout.current) {
+        clearTimeout(mouseTrackingTimeout.current);
+        mouseTrackingTimeout.current = null;
+      }
       
       // Restaurar cursor
       canvas.style.cursor = 'default';
