@@ -83,6 +83,12 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
   const lastZoomTime = useRef<number>(0);
   const lastPanTime = useRef<number>(0);
   
+  // NUEVO: Estados para distinguir entre interacciones de cámara y clicks de trading
+  const isCameraInteracting = useRef<boolean>(false);
+  const isZoomingOrPanning = useRef<boolean>(false);
+  const lastCameraInteractionTime = useRef<number>(0);
+  const cameraInteractionCooldown = 150; // Reducido a 150ms para mejor respuesta
+  
   // Estados para las mejoras de trading visual
   const [showTradingOverlay, setShowTradingOverlay] = useState(false);
   const [takeProfitLevel, setTakeProfitLevel] = useState<number | null>(null);
@@ -193,6 +199,10 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
   const zoomDebounceRef = useRef<NodeJS.Timeout | null>(null);
   const panDebounceRef = useRef<NodeJS.Timeout | null>(null);
   
+  // 🐛 DEBUG: Referencias para controlar spam de logs
+  const lastPluginLogState = useRef<boolean | null>(null);
+  const lastPluginDrawTime = useRef<number>(0);
+  
   // NUEVO: Control global para evitar cualquier solapamiento
   const globalInteractionBlocked = useRef<boolean>(false);
   
@@ -239,20 +249,18 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
   const previousIntervalRef = useRef<TimeInterval | ''>('');
   const hasLoadedOnceRef = useRef<boolean>(false);
 
-  // NUEVO: Funciones para controlar el estado de trading de manera estable
+  // NUEVO: Funciones para controlar el estado de trading de manera estable - CON DEBUG
   const activateTradingOverlay = useCallback((currentPrice: number) => {
     const now = Date.now();
     
-    logChart('ACTIVATING_TRADING_OVERLAY', {
-      currentPrice,
-      timestamp: new Date().toLocaleTimeString(),
-      previousState: tradingOverlayState.current
-    });
+    console.log(`🟢 [OVERLAY DEBUG] ACTIVANDO overlay - Precio: $${currentPrice.toFixed(2)}`);
     
     // Configurar niveles iniciales
     const initialSpread = currentPrice * 0.02;
     const newTpLevel = currentPrice + initialSpread;
     const newSlLevel = currentPrice - initialSpread;
+    
+    console.log(`🎯 [OVERLAY DEBUG] Niveles calculados - TP: $${newTpLevel.toFixed(2)}, SL: $${newSlLevel.toFixed(2)}`);
     
     // Actualizar estado interno
     tradingOverlayState.current = {
@@ -271,15 +279,14 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
     setTakeProfitLevel(newTpLevel);
     setStopLossLevel(newSlLevel);
     
+    console.log(`✅ [OVERLAY DEBUG] Estados actualizados - showTradingOverlay: true`);
+    
     // Marcar para redibujado inmediato
     requestTradingRedraw();
   }, []);
   
   const deactivateTradingOverlay = useCallback(() => {
-    logChart('DEACTIVATING_TRADING_OVERLAY', {
-      timestamp: new Date().toLocaleTimeString(),
-      previousState: tradingOverlayState.current
-    });
+    console.log(`🔴 [OVERLAY DEBUG] DESACTIVANDO overlay`);
     
     // Resetear estado interno
     tradingOverlayState.current = {
@@ -292,16 +299,21 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
       stopLossLevel: null
     };
     
+    console.log(`🔄 [OVERLAY DEBUG] Estado interno reseteado`);
+    
     // Actualizar estados de React
     setShowTradingOverlay(false);
     setCurrentPriceLevel(null);
     setTakeProfitLevel(null);
     setStopLossLevel(null);
     
+    console.log(`✅ [OVERLAY DEBUG] Estados React actualizados - showTradingOverlay: false`);
+    
     // El plugin tradingElementsPlugin automáticamente no dibujará nada
     // cuando isActive sea false, limpiando el canvas automáticamente
     if (chartRef.current) {
       chartRef.current.update('none');
+      console.log(`🎨 [OVERLAY DEBUG] Chart.update() ejecutado para limpiar canvas`);
     }
   }, []);
   
@@ -529,6 +541,9 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
     const timestamp = Date.now();
     const preCameraState = simpleCamera.getCurrentState();
     
+    // SIMPLIFICADO: Solo actualizar timestamp de interacción
+    lastCameraInteractionTime.current = timestamp;
+    
     logUserInteractionDetailed('START_USER_INTERACTION_CHART', {
       timestamp: new Date(timestamp).toLocaleTimeString(),
       component: 'MinimalistChart',
@@ -569,9 +584,21 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
     }
   }, [simpleCamera]);
 
-  // Funciones para el trading overlay - USANDO NUEVO SISTEMA DE CONTROL
+  // Funciones para el trading overlay - DEBUGGING ESPECÍFICO PARA CLICKS
   const handleChartClick = useCallback((event: MouseEvent | TouchEvent) => {
-    if (!chartRef.current || !canvasRef.current) return;
+    if (!chartRef.current || !canvasRef.current) {
+      console.log('🔴 [CLICK DEBUG] Chart o canvas no disponible');
+      return;
+    }
+
+    const now = Date.now();
+    
+    // SIMPLIFICADO: Solo bloquear clicks si acabamos de hacer zoom/pan recientemente
+    const timeSinceLastCameraInteraction = now - lastCameraInteractionTime.current;
+    if (timeSinceLastCameraInteraction < cameraInteractionCooldown) {
+      console.log(`🔴 [CLICK DEBUG] Click bloqueado - interacción reciente (${timeSinceLastCameraInteraction}ms < ${cameraInteractionCooldown}ms)`);
+      return;
+    }
 
     const chart = chartRef.current;
     const canvas = canvasRef.current;
@@ -584,50 +611,27 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
     const x = clientX - rect.left;
     const y = clientY - rect.top;
 
-    // Convertir coordenadas de pixel a valores del gráfico
-    const canvasPosition = {
-      x: x * (canvas.width / rect.width),
-      y: y * (canvas.height / rect.height)
-    };
-
-    // Obtener el precio en la coordenada Y del click
-    const yScale = chart.scales.y;
-    if (!yScale) return;
-
-    const priceAtClick = yScale.getValueForPixel(canvasPosition.y);
-    
     // Obtener el precio actual de la última vela
     const dataset = chart.data.datasets[0];
-    if (!dataset || !dataset.data || dataset.data.length === 0) return;
+    if (!dataset || !dataset.data || dataset.data.length === 0) {
+      console.log('🔴 [CLICK DEBUG] No hay datos de velas disponibles');
+      return;
+    }
     
     const lastCandle = dataset.data[dataset.data.length - 1] as any;
     const currentPrice = lastCandle.c;
 
-    logChart('CHART_CLICK_DETECTED', {
-      clickCoords: { x, y },
-      canvasCoords: canvasPosition,
-      priceAtClick,
-      currentPrice,
-      currentOverlayState: showTradingOverlay,
-      timestamp: new Date().toLocaleTimeString()
-    });
+    console.log(`🎯 [CLICK DEBUG] Click detectado en (${x}, ${y}) - Precio actual: $${currentPrice.toFixed(2)} - Overlay activo: ${showTradingOverlay}`);
 
     // TOGGLE: Activar/desactivar overlay según el estado actual
     if (showTradingOverlay) {
       // Si ya está activo, desactivarlo
+      console.log('🔴 [CLICK DEBUG] Desactivando trading overlay');
       deactivateTradingOverlay();
-      logChart('TRADING_OVERLAY_TOGGLED_OFF', {
-        reason: 'user_click_to_deactivate',
-        timestamp: new Date().toLocaleTimeString()
-      });
     } else {
       // Si está inactivo, activarlo
+      console.log('🟢 [CLICK DEBUG] Activando trading overlay con precio:', currentPrice.toFixed(2));
       activateTradingOverlay(currentPrice);
-      logChart('TRADING_OVERLAY_TOGGLED_ON', {
-        reason: 'user_click_to_activate',
-        currentPrice,
-        timestamp: new Date().toLocaleTimeString()
-      });
     }
 
   }, [showTradingOverlay, activateTradingOverlay, deactivateTradingOverlay]);
@@ -1057,6 +1061,22 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
     deactivateTradingOverlay();
   }, [deactivateTradingOverlay]);
 
+  // 🐛 DEBUG: Rastrear cambios inesperados en el estado showTradingOverlay
+  useEffect(() => {
+    console.log(`🔄 [STATE DEBUG] showTradingOverlay cambió a: ${showTradingOverlay}`);
+    console.log(`📊 [STATE DEBUG] Estado completo del trading:`, {
+      showTradingOverlay,
+      currentPriceLevel,
+      takeProfitLevel: takeProfitLevel?.toFixed(2),
+      stopLossLevel: stopLossLevel?.toFixed(2),
+      internalState: {
+        isActive: tradingOverlayState.current.isActive,
+        isDrawing: tradingOverlayState.current.isDrawing,
+        currentPrice: tradingOverlayState.current.currentPrice?.toFixed(2)
+      }
+    });
+  }, [showTradingOverlay, currentPriceLevel, takeProfitLevel, stopLossLevel]);
+
   // NUEVO: Función para limpiar completamente el chart y datos
   const clearChartCompletely = useCallback(() => {
     logLifecycle('CLEARING_CHART_COMPLETELY', 'MinimalistChart', {
@@ -1174,6 +1194,20 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
       liveStreamingService.disconnect();
       
       setIsStreaming(false);
+    }
+    
+    // NUEVO: Limpiar explícitamente cualquier dato residual del símbolo anterior
+    // Nota: liveStreamingService no tiene método clearCandleBuffer, pero podemos hacer disconnect
+    // que limpia automáticamente los buffers pendientes
+    
+    // NUEVO: Forzar limpieza del trading overlay si está activo
+    if (showTradingOverlay) {
+      deactivateTradingOverlay();
+      logCryptoChange('TRADING_OVERLAY_DEACTIVATED_FOR_CRYPTO_CHANGE', {
+        reason: 'preparing_for_new_cryptocurrency',
+        previousSymbol: previousSymbolRef.current,
+        newSymbol: currentSymbol
+      });
     }
 
     // 2. Limpiar datos del estado de React
@@ -1459,11 +1493,11 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
         // Liberar bloqueos después de completar
         isProcessingZoom.current = false;
         
-        // CRÍTICO: Liberar bloqueo global inmediatamente para mejor respuesta
+        // SIMPLIFICADO: Liberar bloqueo global inmediatamente
         setTimeout(() => {
           globalInteractionBlocked.current = false;
           logChart('ZOOM_GLOBAL_BLOCK_RELEASED');
-        }, 25); // Reducido de 50ms a 25ms para mejor respuesta
+        }, 25);
       }, 25); // Reducido de 50ms a 25ms para mejor respuesta
     }, 50); // Reducido de 100ms a 50ms para mejor respuesta
   }, [startUserInteraction, endUserInteraction, simpleCamera]);
@@ -1570,11 +1604,11 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
         // Liberar bloqueos después de completar
         isProcessingPan.current = false;
         
-        // CRÍTICO: Liberar bloqueo global inmediatamente para mejor respuesta
+        // SIMPLIFICADO: Liberar bloqueo global inmediatamente
         setTimeout(() => {
           globalInteractionBlocked.current = false;
           logChart('PAN_GLOBAL_BLOCK_RELEASED');
-        }, 25); // Reducido de 50ms a 25ms para mejor respuesta
+        }, 25);
       }, 25); // Reducido de 50ms a 25ms para mejor respuesta
     }, 50); // Reducido de 100ms a 50ms para mejor respuesta
   }, [startUserInteraction, endUserInteraction, simpleCamera]);
@@ -1862,23 +1896,51 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
         zoomPlugin.default
       );
 
-      // Plugin personalizado para elementos de trading persistentes - OPTIMIZADO
+      // Plugin personalizado para elementos de trading persistentes - CON DEBUG
       const tradingElementsPlugin = {
         id: 'tradingElements',
         afterDraw: (chart: any) => {
           const state = tradingOverlayState.current;
           
           // Solo dibujar si el overlay está activo y no estamos ya dibujando
-          if (!state.isActive || state.isDrawing) return;
+          if (!state.isActive || state.isDrawing) {
+            // Solo logear cambios de estado para evitar spam
+            if (lastPluginLogState.current !== state.isActive) {
+              console.log(`🎨 [PLUGIN DEBUG] Estado overlay cambió: ${state.isActive ? 'ACTIVO' : 'INACTIVO'}`);
+              lastPluginLogState.current = state.isActive;
+            }
+            return;
+          }
           
           // Verificar que tenemos todos los datos necesarios
-          if (!state.currentPrice || !state.takeProfitLevel || !state.stopLossLevel) return;
+          if (!state.currentPrice || !state.takeProfitLevel || !state.stopLossLevel) {
+            console.log(`❌ [PLUGIN DEBUG] No dibujando - datos incompletos:`, {
+              currentPrice: state.currentPrice,
+              takeProfitLevel: state.takeProfitLevel,
+              stopLossLevel: state.stopLossLevel
+            });
+            return;
+          }
+          
+          // Solo logear inicio de dibujado cada 2 segundos para evitar spam
+          const now = Date.now();
+          if (now - lastPluginDrawTime.current > 2000) {
+            console.log(`✅ [PLUGIN DEBUG] Iniciando dibujado - Precio: $${state.currentPrice.toFixed(2)}, TP: $${state.takeProfitLevel.toFixed(2)}, SL: $${state.stopLossLevel.toFixed(2)}`);
+            lastPluginDrawTime.current = now;
+          }
           
           const ctx = chart.ctx;
           const chartArea = chart.chartArea;
           const yScale = chart.scales.y;
 
-          if (!ctx || !yScale || !chartArea) return;
+          if (!ctx || !yScale || !chartArea) {
+            console.log(`❌ [PLUGIN DEBUG] No dibujando - contextos no disponibles:`, {
+              ctx: !!ctx,
+              yScale: !!yScale,
+              chartArea: !!chartArea
+            });
+            return;
+          }
 
           // Marcar que estamos dibujando para prevenir loops
           state.isDrawing = true;
@@ -1960,7 +2022,7 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
             state.lastDrawTime = Date.now();
             state.needsRedraw = false;
           } catch (error) {
-            console.error('Error in trading plugin:', error);
+            console.error('❌ [PLUGIN DEBUG] Error in trading plugin:', error);
           } finally {
             // CRÍTICO: Siempre liberar el flag
             state.isDrawing = false;
@@ -3448,6 +3510,24 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
         // 4. CARGAR DATOS HISTÓRICOS
         const historicalData = await liveStreamingService.loadHistoricalData(currentSymbol, currentInterval, 1000);
         setCandleData(historicalData);
+        
+        // NUEVO: Verificar que los datos históricos cargados sean válidos y del símbolo correcto
+        if (historicalData && historicalData.length > 0) {
+          logCryptoChange('HISTORICAL_DATA_LOADED_SUCCESSFULLY', {
+            symbol: currentSymbol,
+            interval: currentInterval,
+            candleCount: historicalData.length,
+            firstCandleTime: new Date(historicalData[0].x).toLocaleTimeString(),
+            lastCandleTime: new Date(historicalData[historicalData.length - 1].x).toLocaleTimeString(),
+            lastCandlePrice: historicalData[historicalData.length - 1].c.toFixed(4)
+          });
+        } else {
+          logCryptoChange('HISTORICAL_DATA_LOAD_FAILED', {
+            symbol: currentSymbol,
+            interval: currentInterval,
+            dataLength: historicalData ? historicalData.length : 0
+          });
+        }
 
         // 5. CONFIGURAR VIEWPORT PARA MOSTRAR TODAS LAS VELAS (específico por tipo de cambio)
         if (simpleCamera && historicalData.length > 0) {
@@ -3520,6 +3600,24 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
                 if (symbolChanged) {
                   cryptocurrencyChangeTimeout.current = setTimeout(() => {
                     isChangingCryptocurrency.current = false;
+                    
+                    // NUEVO: Verificación final de que tenemos datos de la nueva criptomoneda
+                    if (candleData.length > 0) {
+                      const lastCandle = candleData[candleData.length - 1];
+                      logCryptoChange('FINAL_VERIFICATION_NEW_CRYPTO_DATA', {
+                        newSymbol: currentSymbol,
+                        lastCandlePrice: lastCandle.c.toFixed(4),
+                        lastCandleTime: new Date(lastCandle.x).toLocaleTimeString(),
+                        totalCandles: candleData.length,
+                        verificationPassed: true
+                      });
+                    } else {
+                      logCryptoChange('FINAL_VERIFICATION_NO_DATA_WARNING', {
+                        newSymbol: currentSymbol,
+                        reason: 'no_candle_data_after_crypto_change'
+                      });
+                    }
+                    
                     logCryptoChange('CRYPTOCURRENCY_CHANGE_PROTECTION_DISABLED', {
                       reason: 'camera_and_viewport_configured_successfully',
                       streamUpdatesEnabled: true,
@@ -3527,7 +3625,7 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
                       totalTransitionTime: Date.now(),
                       timestamp: new Date().toLocaleTimeString()
                     });
-                  }, 500); // Dar tiempo extra para que se estabilice todo
+                  }, 1500); // Aumentado de 500ms a 1500ms para mayor seguridad
                 }
               }
             }, 200);
@@ -3625,23 +3723,37 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
         return;
       }
       
-      if (update.symbol === currentSymbol && update.interval === currentInterval) {
-        logChart('STREAM_UPDATE_PROCESSING', {
-          symbol: update.symbol,
-          interval: update.interval,
-          isFinal: update.isFinal,
-          price: update.candle.c
+      // NUEVA PROTECCIÓN: Verificar que el símbolo coincida exactamente antes de procesar
+      if (update.symbol !== currentSymbol || update.interval !== currentInterval) {
+        logLastCandle('STREAM_UPDATE_SYMBOL_MISMATCH', {
+          updateSymbol: update.symbol,
+          updateInterval: update.interval,
+          currentSymbol: currentSymbol,
+          currentInterval: currentInterval,
+          reason: 'symbol_or_interval_mismatch_blocking_update',
+          price: update.candle.c,
+          timestamp: new Date().toLocaleTimeString()
         });
-        
-        // CRÍTICO: updateChart NO debe hacer setState ni lockCamera durante ticks
-        updateChart(update.candle, update.isFinal);
-        
-        logChart('STREAM_UPDATE_CHART_COMPLETE', { 
-          symbol: update.symbol, 
-          price: update.candle.c 
-        });
-        
-        setCandleData(prev => {
+        return;
+      }
+      
+      // Si llegamos aquí, el update es válido y coincide con el símbolo/intervalo actual
+      logChart('STREAM_UPDATE_PROCESSING', {
+        symbol: update.symbol,
+        interval: update.interval,
+        isFinal: update.isFinal,
+        price: update.candle.c
+      });
+      
+            // CRÍTICO: updateChart NO debe hacer setState ni lockCamera durante ticks
+            updateChart(update.candle, update.isFinal);
+            
+            logChart('STREAM_UPDATE_CHART_COMPLETE', { 
+              symbol: update.symbol, 
+              price: update.candle.c,
+              candleTimestamp: new Date(update.candle.x).toLocaleTimeString(),
+              isNewSymbolFirstUpdate: previousSymbolRef.current !== currentSymbol
+            });        setCandleData(prev => {
           const newData = [...prev];
           
           // Buscar vela existente considerando ventana de tiempo en lugar de timestamp exacto
@@ -3675,52 +3787,24 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
             const oldPrice = oldCandle.c;
             newData[existingIndex] = update.candle;
             
-            logLastCandle('STREAM_STATE_UPDATE_EXISTING', {
-              index: existingIndex,
-              symbol: update.symbol,
-              oldPrice: oldPrice.toFixed(4),
-              newPrice: update.candle.c.toFixed(4),
-              priceChange: (update.candle.c - oldPrice).toFixed(4),
-              percentChange: ((update.candle.c - oldPrice) / oldPrice * 100).toFixed(2),
-              isFinal: update.isFinal,
-              oldTimestamp: new Date(oldCandle.x).toLocaleTimeString(),
-              newTimestamp: new Date(update.candle.x).toLocaleTimeString(),
-              totalCandles: newData.length,
-              lastCandleIndex: existingIndex
-            });
+            // 🐛 DEBUG: Solo log cuando hay cambio significativo de precio
+            const priceChange = Math.abs(update.candle.c - oldPrice);
+            if (priceChange > oldPrice * 0.001) { // Solo si cambia más del 0.1%
+              console.log(`📈 [VELA ACTUALIZADA] ${update.symbol}: $${oldPrice.toFixed(2)} → $${update.candle.c.toFixed(2)} (${((update.candle.c - oldPrice) / oldPrice * 100).toFixed(2)}%)`);
+            }
           } else {
             // Agregar nueva vela
             newData.push(update.candle);
             
-            logLastCandle('STREAM_STATE_ADD_NEW', {
-              price: update.candle.c.toFixed(4),
-              timestamp: new Date(update.candle.x).toLocaleTimeString(),
-              symbol: update.symbol,
-              interval: update.interval,
-              totalCandles: newData.length,
-              isFinal: update.isFinal,
-              newCandleIndex: newData.length - 1,
-              candleRange: {
-                open: update.candle.o,
-                high: update.candle.h,
-                low: update.candle.l,
-                close: update.candle.c
-              }
-            });
+            // 🐛 DEBUG: Siempre log cuando se añade nueva vela
+            console.log(`🆕 [NUEVA VELA] ${update.symbol}: $${update.candle.c.toFixed(2)} - Total: ${newData.length} velas`);
             
             // Mantener solo las últimas velas según configuración de cámara
             const maxCandles = 1000;
             if (newData.length > maxCandles) {
               const removedCount = newData.length - maxCandles;
-              const removedCandles = newData.splice(0, removedCount);
-              logLastCandle('STREAM_STATE_TRIM', {
-                removedCount,
-                finalCount: newData.length,
-                removedCandlesTimeRange: removedCandles.length > 0 ? {
-                  from: new Date(removedCandles[0].x).toLocaleTimeString(),
-                  to: new Date(removedCandles[removedCandles.length - 1].x).toLocaleTimeString()
-                } : null
-              });
+              newData.splice(0, removedCount);
+              console.log(`🗑️ [LIMPIEZA] Removidas ${removedCount} velas antiguas, quedan ${newData.length}`);
             }
           }
           
@@ -3729,7 +3813,6 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
           
           return newData;
         });
-      }
     };
 
     // Función auxiliar para obtener intervalos en milisegundos
