@@ -330,19 +330,58 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: '#333333',
     ...(Platform.OS === 'web' && {
+      // Pequeños móviles y alta escala de texto
+      '@media (max-width: 360px), (max-height: 640px)': {
+        flexDirection: 'column',
+        gap: 6,
+        paddingVertical: 12,
+        paddingHorizontal: 12,
+      },
+      // Móviles estándar
       '@media (max-width: 480px)': {
         flexDirection: 'column',
         gap: 8,
+        paddingVertical: 14,
+      },
+      // Tablets pequeñas en modo portrait
+      '@media (max-width: 600px) and (orientation: portrait)': {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        gap: 8,
+      },
+      // Dispositivos con zoom alto o escalado de texto
+      '@media (min-resolution: 2dppx), (-webkit-min-device-pixel-ratio: 2)': {
+        paddingVertical: 14,
+        paddingHorizontal: 14,
       },
     }),
   },
   balanceContainer: {
     flex: 1,
     alignItems: 'center',
+    minWidth: 100,
     ...(Platform.OS === 'web' && {
+      // Pequeños móviles
+      '@media (max-width: 360px)': {
+        alignItems: 'flex-start',
+        paddingVertical: 6,
+        minWidth: 'auto',
+        width: '100%',
+      },
+      // Móviles estándar
       '@media (max-width: 480px)': {
         alignItems: 'flex-start',
         paddingVertical: 8,
+        minWidth: 'auto',
+      },
+      // Tablets en portrait
+      '@media (max-width: 600px) and (orientation: portrait)': {
+        flex: '0 1 calc(50% - 8px)',
+        alignItems: 'center',
+      },
+      // Alto DPI / escalado
+      '@media (min-resolution: 2dppx)': {
+        minWidth: 110,
       },
     }),
   },
@@ -350,19 +389,55 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#888888',
     marginBottom: 4,
+    ...(Platform.OS === 'web' && {
+      '@media (max-width: 360px)': {
+        fontSize: 12,
+        marginBottom: 2,
+      },
+      '@media (max-height: 500px) and (orientation: landscape)': {
+        fontSize: 12,
+        marginBottom: 2,
+      },
+    }),
   },
   balanceValue: {
     fontSize: 18,
     fontWeight: 'bold',
     color: '#ffffff',
+    ...(Platform.OS === 'web' && {
+      '@media (max-width: 360px)': {
+        fontSize: 16,
+      },
+      '@media (max-width: 480px)': {
+        fontSize: 17,
+      },
+      '@media (max-height: 500px) and (orientation: landscape)': {
+        fontSize: 16,
+      },
+    }),
   },
   equityContainer: {
     flex: 1,
     alignItems: 'center',
+    minWidth: 100,
     ...(Platform.OS === 'web' && {
+      '@media (max-width: 360px)': {
+        alignItems: 'flex-start',
+        paddingVertical: 6,
+        minWidth: 'auto',
+        width: '100%',
+      },
       '@media (max-width: 480px)': {
         alignItems: 'flex-start',
         paddingVertical: 8,
+        minWidth: 'auto',
+      },
+      '@media (max-width: 600px) and (orientation: portrait)': {
+        flex: '0 1 calc(50% - 8px)',
+        alignItems: 'center',
+      },
+      '@media (min-resolution: 2dppx)': {
+        minWidth: 110,
       },
     }),
   },
@@ -370,18 +445,54 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#888888',
     marginBottom: 4,
+    ...(Platform.OS === 'web' && {
+      '@media (max-width: 360px)': {
+        fontSize: 12,
+        marginBottom: 2,
+      },
+      '@media (max-height: 500px) and (orientation: landscape)': {
+        fontSize: 12,
+        marginBottom: 2,
+      },
+    }),
   },
   equityValue: {
     fontSize: 18,
     fontWeight: 'bold',
+    ...(Platform.OS === 'web' && {
+      '@media (max-width: 360px)': {
+        fontSize: 16,
+      },
+      '@media (max-width: 480px)': {
+        fontSize: 17,
+      },
+      '@media (max-height: 500px) and (orientation: landscape)': {
+        fontSize: 16,
+      },
+    }),
   },
   pnlContainer: {
     flex: 1,
     alignItems: 'center',
+    minWidth: 100,
     ...(Platform.OS === 'web' && {
+      '@media (max-width: 360px)': {
+        alignItems: 'flex-start',
+        paddingVertical: 6,
+        minWidth: 'auto',
+        width: '100%',
+      },
       '@media (max-width: 480px)': {
         alignItems: 'flex-start',
         paddingVertical: 8,
+        minWidth: 'auto',
+      },
+      '@media (max-width: 600px) and (orientation: portrait)': {
+        flex: '0 1 calc(50% - 8px)',
+        alignItems: 'center',
+      },
+      '@media (min-resolution: 2dppx)': {
+        minWidth: 110,
       },
     }),
   },
@@ -389,11 +500,32 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#888888',
     marginBottom: 4,
+    ...(Platform.OS === 'web' && {
+      '@media (max-width: 360px)': {
+        fontSize: 12,
+        marginBottom: 2,
+      },
+      '@media (max-height: 500px) and (orientation: landscape)': {
+        fontSize: 12,
+        marginBottom: 2,
+      },
+    }),
   },
   pnlValue: {
     fontSize: 18,
     fontWeight: 'bold',
     color: '#ffffff',
+    ...(Platform.OS === 'web' && {
+      '@media (max-width: 360px)': {
+        fontSize: 16,
+      },
+      '@media (max-width: 480px)': {
+        fontSize: 17,
+      },
+      '@media (max-height: 500px) and (orientation: landscape)': {
+        fontSize: 16,
+      },
+    }),
   },
   // New menu navigation
   menuNavigation: {
@@ -403,6 +535,20 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     borderBottomWidth: 1,
     borderBottomColor: '#333333',
+    ...(Platform.OS === 'web' && {
+      '@media (max-width: 360px)': {
+        paddingHorizontal: 8,
+        paddingVertical: 6,
+      },
+      '@media (max-width: 480px)': {
+        paddingHorizontal: 12,
+        paddingVertical: 6,
+      },
+      '@media (max-height: 500px) and (orientation: landscape)': {
+        paddingVertical: 4,
+        paddingHorizontal: 12,
+      },
+    }),
   },
   menuButton: {
     flex: 1,
@@ -412,6 +558,24 @@ const styles = StyleSheet.create({
     marginHorizontal: 4,
     borderRadius: 8,
     position: 'relative',
+    ...(Platform.OS === 'web' && {
+      '@media (max-width: 360px)': {
+        paddingVertical: 8,
+        paddingHorizontal: 4,
+        marginHorizontal: 2,
+        borderRadius: 6,
+      },
+      '@media (max-width: 480px)': {
+        paddingVertical: 10,
+        paddingHorizontal: 6,
+        marginHorizontal: 3,
+      },
+      '@media (max-height: 500px) and (orientation: landscape)': {
+        paddingVertical: 6,
+        paddingHorizontal: 4,
+        marginHorizontal: 2,
+      },
+    }),
   },
   activeMenuButton: {
     backgroundColor: '#2a2a2a',
@@ -422,6 +586,21 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#888888',
     fontWeight: '500',
+    textAlign: 'center',
+    ...(Platform.OS === 'web' && {
+      '@media (max-width: 360px)': {
+        fontSize: 11,
+      },
+      '@media (max-width: 480px)': {
+        fontSize: 12,
+      },
+      '@media (max-height: 500px) and (orientation: landscape)': {
+        fontSize: 11,
+      },
+      '@media (min-resolution: 3dppx)': {
+        fontSize: 13,
+      },
+    }),
   },
   activeMenuButtonText: {
     color: '#00ff88',
@@ -453,11 +632,37 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#0a0a0a',
     ...(Platform.OS === 'web' && {
+      // Móviles muy pequeños
+      '@media (max-width: 360px)': {
+        minHeight: '50vh',
+      },
+      // Móviles estándar
+      '@media (max-width: 480px)': {
+        minHeight: '55vh',
+      },
+      // Móviles grandes / Tablets pequeñas
       '@media (max-width: 768px)': {
         minHeight: '60vh',
       },
-      '@media (min-width: 769px)': {
+      // Tablets medianas
+      '@media (min-width: 769px) and (max-width: 1024px)': {
+        minHeight: '65vh',
+      },
+      // Escritorio
+      '@media (min-width: 1025px)': {
         minHeight: '70vh',
+      },
+      // Landscape en móviles (altura limitada)
+      '@media (max-height: 500px) and (orientation: landscape)': {
+        minHeight: '40vh',
+      },
+      // Tablets en landscape
+      '@media (min-width: 768px) and (max-width: 1024px) and (orientation: landscape)': {
+        minHeight: '55vh',
+      },
+      // Dispositivos con alta densidad
+      '@media (min-resolution: 2dppx)': {
+        minHeight: '62vh',
       },
     }),
   },

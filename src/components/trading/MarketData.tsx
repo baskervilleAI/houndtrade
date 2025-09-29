@@ -85,6 +85,20 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     borderBottomWidth: 1,
     borderBottomColor: '#333333',
+    ...(Platform.OS === 'web' && {
+      // Dispositivos muy pequeños o con zoom alto
+      '@media (max-width: 360px), (max-height: 640px)': {
+        paddingVertical: 8,
+      },
+      // Móviles con escalado de texto alto
+      '@media (min-resolution: 2dppx), (-webkit-min-device-pixel-ratio: 2)': {
+        paddingVertical: 10,
+      },
+      // Landscape en móviles
+      '@media (max-height: 500px) and (orientation: landscape)': {
+        paddingVertical: 6,
+      },
+    }),
   },
   headerContainer: {
     flexDirection: 'row',
@@ -92,11 +106,36 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 16,
     marginBottom: 8,
+    ...(Platform.OS === 'web' && {
+      '@media (max-width: 360px)': {
+        paddingHorizontal: 12,
+        marginBottom: 6,
+      },
+      '@media (max-width: 480px)': {
+        paddingHorizontal: 14,
+      },
+      '@media (max-height: 500px) and (orientation: landscape)': {
+        marginBottom: 4,
+        paddingHorizontal: 12,
+      },
+    }),
   },
   title: {
     fontSize: 16,
     fontWeight: 'bold',
     color: '#ffffff',
+    ...(Platform.OS === 'web' && {
+      '@media (max-width: 360px)': {
+        fontSize: 14,
+      },
+      '@media (max-height: 500px) and (orientation: landscape)': {
+        fontSize: 14,
+      },
+      // Escalar fuente en dispositivos de alta densidad
+      '@media (min-resolution: 3dppx)': {
+        fontSize: 15,
+      },
+    }),
   },
   liveIndicator: {
     flexDirection: 'row',
@@ -120,6 +159,14 @@ const styles = StyleSheet.create({
   },
   pairsList: {
     paddingHorizontal: 16,
+    ...(Platform.OS === 'web' && {
+      '@media (max-width: 360px)': {
+        paddingHorizontal: 12,
+      },
+      '@media (max-width: 480px)': {
+        paddingHorizontal: 14,
+      },
+    }),
   },
   pairItem: {
     backgroundColor: '#1a1a1a',
@@ -134,6 +181,28 @@ const styles = StyleSheet.create({
     // React Native Web compatible shadow
     ...(Platform.OS === 'web' ? {
       boxShadow: '0px 2px 3.84px rgba(0, 0, 0, 0.25)',
+      // Media queries para diferentes dispositivos
+      '@media (max-width: 360px)': {
+        minWidth: 85,
+        paddingHorizontal: 10,
+        paddingVertical: 6,
+        marginRight: 8,
+      },
+      '@media (max-width: 480px)': {
+        minWidth: 90,
+        paddingHorizontal: 10,
+        marginRight: 10,
+      },
+      '@media (max-height: 500px) and (orientation: landscape)': {
+        minWidth: 80,
+        paddingVertical: 4,
+        marginRight: 8,
+      },
+      // Dispositivos con alta densidad
+      '@media (min-resolution: 2dppx)': {
+        minWidth: 105,
+        paddingHorizontal: 13,
+      },
     } : {
       shadowColor: '#000',
       shadowOffset: {
@@ -162,6 +231,20 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: '#ffffff',
     marginBottom: 2,
+    textAlign: 'center',
+    ...(Platform.OS === 'web' && {
+      '@media (max-width: 360px)': {
+        fontSize: 10,
+        marginBottom: 1,
+      },
+      '@media (max-height: 500px) and (orientation: landscape)': {
+        fontSize: 10,
+        marginBottom: 1,
+      },
+      '@media (min-resolution: 3dppx)': {
+        fontSize: 11,
+      },
+    }),
   },
   selectedPairText: {
     color: '#000000',
@@ -171,10 +254,36 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#ffffff',
     marginBottom: 2,
+    textAlign: 'center',
+    ...(Platform.OS === 'web' && {
+      '@media (max-width: 360px)': {
+        fontSize: 12,
+        marginBottom: 1,
+      },
+      '@media (max-height: 500px) and (orientation: landscape)': {
+        fontSize: 12,
+        marginBottom: 1,
+      },
+      '@media (min-resolution: 3dppx)': {
+        fontSize: 13,
+      },
+    }),
   },
   pairChange: {
     fontSize: 11,
     fontWeight: '500',
+    textAlign: 'center',
+    ...(Platform.OS === 'web' && {
+      '@media (max-width: 360px)': {
+        fontSize: 9,
+      },
+      '@media (max-height: 500px) and (orientation: landscape)': {
+        fontSize: 9,
+      },
+      '@media (min-resolution: 3dppx)': {
+        fontSize: 10,
+      },
+    }),
   },
   updateIndicator: {
     position: 'absolute',
