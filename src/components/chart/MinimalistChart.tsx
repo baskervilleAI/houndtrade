@@ -50,6 +50,8 @@ import {
 
 interface MinimalistChartProps {
   symbol?: string;
+  showTradingOverlay?: boolean;
+  onTradingOverlayChange?: (show: boolean) => void;
 }
 
 const timeIntervals: { label: string; value: TimeInterval }[] = [
@@ -62,7 +64,9 @@ const timeIntervals: { label: string; value: TimeInterval }[] = [
 ];
 
 const MinimalistChart: React.FC<MinimalistChartProps> = ({
-  symbol = 'BTCUSDT'
+  symbol = 'BTCUSDT',
+  showTradingOverlay: externalShowTradingOverlay,
+  onTradingOverlayChange
 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const chartRef = useRef<any>(null);
@@ -97,7 +101,17 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
   const mouseTrackingTimeout = useRef<number | null>(null);
   
   // Estados para las mejoras de trading visual
-  const [showTradingOverlay, setShowTradingOverlay] = useState(false);
+  const [internalShowTradingOverlay, setInternalShowTradingOverlay] = useState(false);
+  // Usar el estado externo si está disponible, sino el interno
+  const showTradingOverlay = externalShowTradingOverlay !== undefined ? externalShowTradingOverlay : internalShowTradingOverlay;
+  const setShowTradingOverlay = (value: boolean) => {
+    if (onTradingOverlayChange) {
+      onTradingOverlayChange(value);
+    } else {
+      setInternalShowTradingOverlay(value);
+    }
+  };
+  
   const [takeProfitLevel, setTakeProfitLevel] = useState<number | null>(null);
   const [stopLossLevel, setStopLossLevel] = useState<number | null>(null);
   const [currentPriceLevel, setCurrentPriceLevel] = useState<number | null>(null);

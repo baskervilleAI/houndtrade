@@ -54,6 +54,9 @@ export const TradingScreen: React.FC = () => {
   
   // Order form modal state
   const [showOrderModal, setShowOrderModal] = useState(false);
+  
+  // Trading overlay state
+  const [showTradingOverlay, setShowTradingOverlay] = useState(false);
 
   // Estados para Take Profit y Stop Loss (mantenidos para funcionalidad del modal)
   const [overlayTakeProfit, setOverlayTakeProfit] = useState<number | null>(null);
@@ -108,6 +111,8 @@ export const TradingScreen: React.FC = () => {
             <View style={styles.chartWrapper}>
               <MinimalistChart 
                 symbol={selectedPair} 
+                showTradingOverlay={showTradingOverlay}
+                onTradingOverlayChange={setShowTradingOverlay}
               />
             </View>
           </View>
@@ -259,6 +264,25 @@ export const TradingScreen: React.FC = () => {
           onPress={() => setShowOrderModal(true)}
         >
           <Text style={styles.floatingOrderButtonText}>Nueva Orden</Text>
+        </TouchableOpacity>
+      )}
+
+      {/* Trading Overlay Toggle Button */}
+      {activeTab === 'trading' && (
+        <TouchableOpacity 
+          style={[
+            styles.floatingOverlayButton,
+            showTradingOverlay && styles.floatingOverlayButtonActive
+          ]}
+          onPress={() => setShowTradingOverlay(!showTradingOverlay)}
+          activeOpacity={0.8}
+        >
+          <Text style={[
+            styles.floatingOverlayButtonText,
+            showTradingOverlay && styles.floatingOverlayButtonTextActive
+          ]}>
+            {showTradingOverlay ? '✕ Cerrar' : '📊 Overlay'}
+          </Text>
         </TouchableOpacity>
       )}
 
@@ -691,6 +715,88 @@ const styles = StyleSheet.create({
     color: '#000000',
     fontSize: 14,
     fontWeight: 'bold',
+  },
+  // Trading overlay floating button
+  floatingOverlayButton: {
+    position: 'absolute',
+    bottom: 20,
+    right: 20,
+    backgroundColor: '#2a2a2a',
+    borderRadius: 25,
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    elevation: 8,
+    borderWidth: 2,
+    borderColor: '#444444',
+    zIndex: 1000,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    minWidth: 100,
+    // Animación suave en web
+    ...(Platform.OS === 'web' && {
+      transition: 'all 0.2s ease-in-out',
+      cursor: 'pointer',
+      // Móviles pequeños
+      '@media (max-width: 360px)': {
+        bottom: 15,
+        right: 15,
+        paddingVertical: 10,
+        paddingHorizontal: 16,
+        borderRadius: 20,
+        minWidth: 85,
+      },
+      // Móviles estándar
+      '@media (max-width: 480px)': {
+        bottom: 15,
+        right: 15,
+        paddingVertical: 10,
+        paddingHorizontal: 18,
+        minWidth: 90,
+      },
+      // Landscape móvil
+      '@media (max-height: 500px) and (orientation: landscape)': {
+        bottom: 10,
+        right: 15,
+        paddingVertical: 8,
+        paddingHorizontal: 16,
+        minWidth: 80,
+      },
+      // Shadow web
+      boxShadow: '0px 4px 12px rgba(0, 0, 0, 0.3)',
+      // Hover effect
+      ':hover': {
+        transform: 'translateY(-2px)',
+        boxShadow: '0px 6px 16px rgba(0, 0, 0, 0.4)',
+      },
+    }),
+  },
+  floatingOverlayButtonActive: {
+    backgroundColor: '#00ff88',
+    borderColor: '#00ff88',
+    ...(Platform.OS === 'web' && {
+      boxShadow: '0px 4px 12px rgba(0, 255, 136, 0.4)',
+      ':hover': {
+        boxShadow: '0px 6px 16px rgba(0, 255, 136, 0.5)',
+      },
+    }),
+  },
+  floatingOverlayButtonText: {
+    color: '#ffffff',
+    fontSize: 14,
+    fontWeight: 'bold',
+    textAlign: 'center',
+    ...(Platform.OS === 'web' && {
+      '@media (max-width: 360px)': {
+        fontSize: 12,
+      },
+      '@media (max-height: 500px) and (orientation: landscape)': {
+        fontSize: 12,
+      },
+    }),
+  },
+  floatingOverlayButtonTextActive: {
+    color: '#000000',
   },
   // Error banner
   errorBanner: {
