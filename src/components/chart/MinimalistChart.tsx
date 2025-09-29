@@ -52,6 +52,7 @@ interface MinimalistChartProps {
   symbol?: string;
   showTradingOverlay?: boolean;
   onTradingOverlayChange?: (show: boolean) => void;
+  activateOverlayWithPrice?: number | null; // Nuevo prop para activar overlay externamente
 }
 
 const timeIntervals: { label: string; value: TimeInterval }[] = [
@@ -66,7 +67,8 @@ const timeIntervals: { label: string; value: TimeInterval }[] = [
 const MinimalistChart: React.FC<MinimalistChartProps> = ({
   symbol = 'BTCUSDT',
   showTradingOverlay: externalShowTradingOverlay,
-  onTradingOverlayChange
+  onTradingOverlayChange,
+  activateOverlayWithPrice
 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const chartRef = useRef<any>(null);
@@ -1184,6 +1186,14 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
       }
     });
   }, [showTradingOverlay, currentPriceLevel, takeProfitLevel, stopLossLevel]);
+
+  // NUEVO: useEffect para activar overlay externamente con precio específico
+  useEffect(() => {
+    if (activateOverlayWithPrice && activateOverlayWithPrice > 0) {
+      console.log(`🟢 [EXTERNAL OVERLAY] Activando overlay desde botón con precio: $${activateOverlayWithPrice}`);
+      activateTradingOverlay(activateOverlayWithPrice);
+    }
+  }, [activateOverlayWithPrice, activateTradingOverlay]);
 
   // NUEVO: Función para limpiar completamente el chart y datos
   const clearChartCompletely = useCallback(() => {

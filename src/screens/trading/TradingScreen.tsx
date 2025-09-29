@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -57,6 +57,32 @@ export const TradingScreen: React.FC = () => {
   
   // Trading overlay state
   const [showTradingOverlay, setShowTradingOverlay] = useState(false);
+  const [overlayActivationPrice, setOverlayActivationPrice] = useState<number | null>(null);
+  
+  // Handler para el botón de overlay que también activa los niveles
+  const handleTradingOverlayToggle = useCallback(() => {
+    const newState = !showTradingOverlay;
+    setShowTradingOverlay(newState);
+    
+    // Si se está activando el overlay, obtener precio actual y enviarlo al chart
+    if (newState) {
+      const currentPrice = tickers[selectedPair]?.price;
+      if (currentPrice) {
+        console.log(`🟢 [OVERLAY BUTTON] Activando overlay con precio actual: $${currentPrice}`);
+        setOverlayActivationPrice(currentPrice);
+        // Reset el precio después de un momento para que pueda activarse nuevamente
+        setTimeout(() => setOverlayActivationPrice(null), 100);
+      } else {
+        console.log(`🔴 [OVERLAY BUTTON] No se pudo obtener precio actual para ${selectedPair}`);
+        // Si no hay precio actual, intentar usar precio de la última vela o un precio por defecto
+        setOverlayActivationPrice(111000); // Precio por defecto temporal
+        setTimeout(() => setOverlayActivationPrice(null), 100);
+      }
+    } else {
+      console.log(`🔴 [OVERLAY BUTTON] Desactivando overlay`);
+      setOverlayActivationPrice(null);
+    }
+  }, [showTradingOverlay, selectedPair, tickers]);
 
   // Estados para Take Profit y Stop Loss (mantenidos para funcionalidad del modal)
   const [overlayTakeProfit, setOverlayTakeProfit] = useState<number | null>(null);
@@ -113,6 +139,7 @@ export const TradingScreen: React.FC = () => {
                 symbol={selectedPair} 
                 showTradingOverlay={showTradingOverlay}
                 onTradingOverlayChange={setShowTradingOverlay}
+                activateOverlayWithPrice={overlayActivationPrice}
               />
             </View>
           </View>
@@ -274,7 +301,7 @@ export const TradingScreen: React.FC = () => {
             styles.floatingOverlayButton,
             showTradingOverlay && styles.floatingOverlayButtonActive
           ]}
-          onPress={() => setShowTradingOverlay(!showTradingOverlay)}
+          onPress={handleTradingOverlayToggle}
           activeOpacity={0.8}
         >
           <Text style={[
