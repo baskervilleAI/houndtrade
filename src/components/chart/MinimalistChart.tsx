@@ -415,19 +415,20 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
     persistentIndicatorConfigsRef.current = configs;
     setPersistentIndicatorConfigs(configs);
     
-    // También guardar en localStorage para persistencia entre sesiones
+    // Guardar configuraciones de indicadores en localStorage pero NO guardar indicadores activos
     try {
       const storageKey = `houndtrade_indicators_${currentSymbol}_${currentInterval}`;
-      const configsWithActiveIndicators = {
+      const configsOnly = {
         configs,
-        activeIndicators: Array.from(activeIndicators)
+        activeIndicators: [] // Siempre guardar sin indicadores activos
       };
-      localStorage.setItem(storageKey, JSON.stringify(configsWithActiveIndicators));
+      localStorage.setItem(storageKey, JSON.stringify(configsOnly));
       
       logChart('INDICATOR_CONFIGS_SAVED_TO_STORAGE', {
         storageKey,
         configCount: Object.keys(configs).length,
-        activeIndicators: Array.from(activeIndicators)
+        activeIndicators: [], // Los indicadores no se guardan como activos
+        note: 'Indicadores se guardarán desactivados por diseño'
       });
     } catch (error) {
       logError('Failed to save indicator configs to localStorage', { error });
@@ -521,22 +522,30 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
       
       if (stored) {
         const parsedData = JSON.parse(stored);
-        const { configs, activeIndicators: storedActiveIndicators } = parsedData;
+        const { configs } = parsedData;
         
-        if (configs && storedActiveIndicators) {
+        if (configs) {
           persistentIndicatorConfigsRef.current = configs;
           setPersistentIndicatorConfigs(configs);
           
-          // Restaurar indicadores activos
-          setActiveIndicators(new Set(storedActiveIndicators));
+          // SIEMPRE comenzar con indicadores desactivados
+          setActiveIndicators(new Set()); 
+          
+          // Limpiar y re-guardar la configuración sin indicadores activos
+          const cleanConfig = {
+            configs,
+            activeIndicators: [] // Asegurar que no hay indicadores activos guardados
+          };
+          localStorage.setItem(storageKey, JSON.stringify(cleanConfig));
           
           logChart('INDICATOR_CONFIGS_LOADED_FROM_STORAGE', {
             storageKey,
             configCount: Object.keys(configs).length,
-            activeIndicators: storedActiveIndicators
+            activeIndicators: [], // Los indicadores comienzan desactivados
+            note: 'Indicadores comenzarán desactivados por diseño'
           });
           
-          return { configs, activeIndicators: storedActiveIndicators };
+          return { configs, activeIndicators: [] }; // Siempre devolver sin indicadores activos
         }
       }
     } catch (error) {
@@ -1305,6 +1314,15 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
         timestamp: new Date().toLocaleTimeString()
       });
     }
+
+    // NUEVO: Resetear indicadores activos al cambiar de símbolo/intervalo
+    setActiveIndicators(new Set());
+    logCryptoChange('ACTIVE_INDICATORS_RESET_FOR_CRYPTO_CHANGE', {
+      reason: 'cryptocurrency_change_preparation',
+      previousSymbol: previousSymbolRef.current,
+      newSymbol: currentSymbol,
+      note: 'Indicadores reseteados para empezar desactivados'
+    });
 
     // 1. Detener streaming anterior inmediatamente y limpiar listeners
     if (isStreaming) {
@@ -2835,6 +2853,9 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
     clearChartCompletely();
     setCurrentInterval(newInterval);
     setStatus('Cambiando intervalo...');
+    
+    // NUEVO: Resetear indicadores activos al cambiar intervalo
+    setActiveIndicators(new Set());
     
     // Resetear bandera para permitir nuevo viewport completo
     hasAppliedFullViewportAfterChange.current = false;
