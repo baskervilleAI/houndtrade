@@ -83,7 +83,7 @@ class BinanceService {
   // Polling fallback system
   private pollingIntervals: Map<string, NodeJS.Timeout> = new Map();
   private pollingCallbacks: Map<string, Set<(data: any) => void>> = new Map();
-  private readonly POLLING_INTERVAL = 2000; // 2 seconds polling
+  private readonly POLLING_INTERVAL = 1000; // 1 second polling - optimized for faster updates
   
   // Cache for storing candle data to avoid unnecessary requests
   private candleCache: Map<string, { data: CandleData[], lastUpdate: number }> = new Map();
@@ -865,7 +865,7 @@ class BinanceService {
             ws.close();
             switchToPolling();
           }
-        }, 3000); // Reduced from 5000 to 3000 for faster fallback
+        }, 1500); // Reduced from 3000 to 1500 for faster fallback
 
       } catch (error) {
         debugLogger.error(`Error creating WebSocket for ${streamName}:`, error);

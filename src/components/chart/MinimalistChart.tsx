@@ -53,6 +53,7 @@ interface MinimalistChartProps {
   showTradingOverlay?: boolean;
   onTradingOverlayChange?: (show: boolean) => void;
   activateOverlayWithPrice?: number | null; // Nuevo prop para activar overlay externamente
+  forceDeactivateOverlay?: boolean; // Nuevo prop para forzar desactivación completa
 }
 
 const timeIntervals: { label: string; value: TimeInterval }[] = [
@@ -68,7 +69,8 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
   symbol = 'BTCUSDT',
   showTradingOverlay: externalShowTradingOverlay,
   onTradingOverlayChange,
-  activateOverlayWithPrice
+  activateOverlayWithPrice,
+  forceDeactivateOverlay
 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const chartRef = useRef<any>(null);
@@ -1195,6 +1197,14 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
     }
   }, [activateOverlayWithPrice, activateTradingOverlay]);
 
+  // NUEVO: useEffect para forzar desactivación completa del overlay
+  useEffect(() => {
+    if (forceDeactivateOverlay) {
+      console.log(`🔴 [EXTERNAL OVERLAY] Forzando desactivación completa desde botón`);
+      deactivateTradingOverlay();
+    }
+  }, [forceDeactivateOverlay, deactivateTradingOverlay]);
+
   // NUEVO: Función para limpiar completamente el chart y datos
   const clearChartCompletely = useCallback(() => {
     logLifecycle('CLEARING_CHART_COMPLETELY', 'MinimalistChart', {
@@ -1821,7 +1831,7 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
     plugins: {
       title: {
         display: true,
-        text: `${currentSymbol} - ${currentInterval.toUpperCase()} ${isStreaming ? '🔴 LIVE' : ''}`,
+        text: `${currentSymbol} - ${currentInterval.toUpperCase()}`,
         color: '#ffffff',
         font: { 
           size: 16 // Tamaño normal del título
@@ -4343,53 +4353,6 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
                   BB
                 </Text>
               </TouchableOpacity>
-
-              {/* Botón de reset de cámara con estado visual */}
-              <TouchableOpacity
-                style={[
-                  styles.indicatorButton, 
-                  responsiveStyles.indicatorButton,
-                  simpleCamera.isLocked() ? styles.cameraManualButton : styles.cameraResetButton
-                ]}
-                onPress={() => {
-                  logUserInteractionDetailed('CAMERA_RESET_BUTTON_PRESSED', {
-                    currentMode: simpleCamera.getCurrentState().mode,
-                    wasLocked: simpleCamera.isLocked(),
-                    userAction: 'manual_reset_request'
-                  });
-                  
-                  const preResetState = simpleCamera.getCurrentState();
-                  logViewportState(preResetState, 'PRE_RESET');
-                  
-                  initialViewportSet.current = false; // Reset flag para permitir nuevo viewport inicial
-                  simpleCamera.resetToLatest(); // Limpia estado persistido
-                  persistentViewport.resetZoom('none'); // Reset usando Chart.js oficial
-                  persistentViewport.clearSnapshot(); // Limpia snapshot guardado
-                  
-                  logLifecycle('CAMERA_RESET_COMPLETE', 'MinimalistChart', {
-                    flagReset: true,
-                    stateCleared: true,
-                    snapshotCleared: true
-                  });
-                  
-                  // El gráfico se reiniciará automáticamente con el próximo useEffect
-                }}
-              >
-                <Text style={[styles.indicatorButtonText, responsiveStyles.indicatorButtonText]}>
-                  {simpleCamera.isLocked() ? '📷 Reset' : '📷 Auto'}
-                </Text>
-              </TouchableOpacity>
-
-              {/* Estado LIVE al final */}
-              <View style={styles.liveIndicatorInline}>
-                <View style={[
-                  styles.liveDot,
-                  { backgroundColor: isStreaming ? '#00ff88' : '#666' }
-                ]} />
-                <Text style={styles.liveText}>
-                  {isStreaming ? 'LIVE' : 'PAUSED'}
-                </Text>
-              </View>
             </View>
           </View>
         </View>
@@ -4505,36 +4468,10 @@ const styles = StyleSheet.create({
   indicatorButtonActive: {
     backgroundColor: '#ff6600',
   },
-  cameraResetButton: {
-    backgroundColor: '#0088ff',
-  },
-  cameraManualButton: {
-    backgroundColor: '#ff6600',
-  },
   indicatorButtonText: {
     color: '#fff',
     fontSize: 10,
     fontWeight: '500',
-  },
-  liveIndicatorInline: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginLeft: 12,
-    paddingHorizontal: 6,
-    paddingVertical: 3,
-    backgroundColor: '#222',
-    borderRadius: 3,
-  },
-  liveDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    marginRight: 4,
-  },
-  liveText: {
-    color: '#ccc',
-    fontSize: 10,
-    fontWeight: 'bold',
   },
   statusBelow: {
     backgroundColor: '#0a0a0a',

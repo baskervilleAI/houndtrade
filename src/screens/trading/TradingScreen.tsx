@@ -58,6 +58,7 @@ export const TradingScreen: React.FC = () => {
   // Trading overlay state
   const [showTradingOverlay, setShowTradingOverlay] = useState(false);
   const [overlayActivationPrice, setOverlayActivationPrice] = useState<number | null>(null);
+  const [forceDeactivate, setForceDeactivate] = useState(false);
   
   // Handler para el botón de overlay que también activa los niveles
   const handleTradingOverlayToggle = useCallback(() => {
@@ -70,17 +71,22 @@ export const TradingScreen: React.FC = () => {
       if (currentPrice) {
         console.log(`🟢 [OVERLAY BUTTON] Activando overlay con precio actual: $${currentPrice}`);
         setOverlayActivationPrice(currentPrice);
+        setForceDeactivate(false); // Asegurar que no esté en modo desactivación
         // Reset el precio después de un momento para que pueda activarse nuevamente
         setTimeout(() => setOverlayActivationPrice(null), 100);
       } else {
         console.log(`🔴 [OVERLAY BUTTON] No se pudo obtener precio actual para ${selectedPair}`);
         // Si no hay precio actual, intentar usar precio de la última vela o un precio por defecto
         setOverlayActivationPrice(111000); // Precio por defecto temporal
+        setForceDeactivate(false); // Asegurar que no esté en modo desactivación
         setTimeout(() => setOverlayActivationPrice(null), 100);
       }
     } else {
-      console.log(`🔴 [OVERLAY BUTTON] Desactivando overlay`);
+      console.log(`🔴 [OVERLAY BUTTON] Desactivando overlay - LIMPIEZA COMPLETA`);
       setOverlayActivationPrice(null);
+      setForceDeactivate(true); // Forzar desactivación completa
+      // Reset después de un momento
+      setTimeout(() => setForceDeactivate(false), 100);
     }
   }, [showTradingOverlay, selectedPair, tickers]);
 
@@ -88,11 +94,11 @@ export const TradingScreen: React.FC = () => {
   const [overlayTakeProfit, setOverlayTakeProfit] = useState<number | null>(null);
   const [overlayStopLoss, setOverlayStopLoss] = useState<number | null>(null);
 
-  // Initialize market data at the screen level
+  // Initialize market data at the screen level - optimized for faster updates
   const { isInitialized, getStatus } = useMarketData({
     autoStart: true,
     symbols: TRADING_SYMBOLS,
-    refreshInterval: 30000,
+    refreshInterval: 10000, // 10 seconds - optimized for more frequent updates
   });
 
   // Update trading prices when market data changes
@@ -140,6 +146,7 @@ export const TradingScreen: React.FC = () => {
                 showTradingOverlay={showTradingOverlay}
                 onTradingOverlayChange={setShowTradingOverlay}
                 activateOverlayWithPrice={overlayActivationPrice}
+                forceDeactivateOverlay={forceDeactivate}
               />
             </View>
           </View>

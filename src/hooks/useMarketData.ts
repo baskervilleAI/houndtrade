@@ -4,7 +4,7 @@ import { streamingService } from '../services/streamingService';
 import { binanceService, TickerData } from '../services/binanceService';
 
 const POPULAR_PAIRS = ['BTCUSDT', 'ETHUSDT', 'ADAUSDT', 'BNBUSDT', 'SOLUSDT'];
-const INITIAL_FETCH_INTERVAL = 30000; // 30 seconds
+const INITIAL_FETCH_INTERVAL = 5000; // 5 seconds - optimized for faster updates
 
 interface UseMarketDataOptions {
   autoStart?: boolean;
@@ -68,7 +68,7 @@ export const useMarketData = (options: UseMarketDataOptions = {}) => {
       const dataPromises = symbols.map(async (symbol) => {
         try {
           const timeoutPromise = new Promise<never>((_, reject) => 
-            setTimeout(() => reject(new Error('Timeout')), 10000)
+            setTimeout(() => reject(new Error('Timeout')), 3000)
           );
           
           const dataPromise = binanceService.getTicker24hr(symbol);
