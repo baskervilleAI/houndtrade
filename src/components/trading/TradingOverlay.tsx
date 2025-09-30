@@ -346,7 +346,7 @@ const styles = StyleSheet.create({
   overlay: {
     position: 'absolute',
     backgroundColor: 'transparent',
-    zIndex: 1000,
+    zIndex: 100, // Reducido para estar por debajo de controles del gráfico
     overflow: 'visible',
   },
   closeButton: {
@@ -361,7 +361,7 @@ const styles = StyleSheet.create({
     borderColor: '#ffffff',
     alignItems: 'center',
     justifyContent: 'center',
-    zIndex: 1001,
+    zIndex: 101, // Reducido para estar por debajo de controles del gráfico
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.25,
@@ -412,7 +412,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 4,
-    zIndex: 1002,
+    zIndex: 102, // Reducido para estar por debajo de controles del gráfico
   },
   entryLabel: {
     // backgroundColor set dynamically
@@ -437,7 +437,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    zIndex: 1003,
+    zIndex: 103, // Reducido para estar por debajo de controles del gráfico
   },
   positionNavigationButton: {
     backgroundColor: 'rgba(42, 42, 42, 0.9)',

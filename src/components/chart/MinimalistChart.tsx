@@ -48,12 +48,25 @@ import {
   logCryptoChange
 } from '../../utils/debugLogger';
 
+interface PositionData {
+  id: string;
+  symbol: string;
+  side: 'BUY' | 'SELL';
+  entryPrice: number;
+  takeProfitPrice?: number;
+  stopLossPrice?: number;
+  quantity: number;
+  unrealizedPnL: number;
+}
+
 interface MinimalistChartProps {
   symbol?: string;
   showTradingOverlay?: boolean;
   onTradingOverlayChange?: (show: boolean) => void;
   activateOverlayWithPrice?: number | null; // Nuevo prop para activar overlay externamente
   forceDeactivateOverlay?: boolean; // Nuevo prop para forzar desactivación completa
+  activePositions?: PositionData[]; // Posiciones activas para detectar clics
+  onPositionPress?: (position: PositionData) => void; // Callback cuando se hace clic en una posición
 }
 
 const timeIntervals: { label: string; value: TimeInterval }[] = [
@@ -70,7 +83,9 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
   showTradingOverlay: externalShowTradingOverlay,
   onTradingOverlayChange,
   activateOverlayWithPrice,
-  forceDeactivateOverlay
+  forceDeactivateOverlay,
+  activePositions = [],
+  onPositionPress
 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const chartRef = useRef<any>(null);
@@ -254,6 +269,7 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
     needsRedraw: boolean;
     isDrawing: boolean;
     currentPrice: number | null;
+    entryPrice: number | null; // NUEVO: Precio de entrada como centro
     takeProfitLevel: number | null;
     stopLossLevel: number | null;
   }>({
@@ -262,6 +278,7 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
     needsRedraw: false,
     isDrawing: false,
     currentPrice: null,
+    entryPrice: null,
     takeProfitLevel: null,
     stopLossLevel: null
   });
@@ -275,17 +292,20 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
   const hasLoadedOnceRef = useRef<boolean>(false);
 
   // NUEVO: Funciones para controlar el estado de trading de manera estable - CON DEBUG
-  const activateTradingOverlay = useCallback((currentPrice: number) => {
+  const activateTradingOverlay = useCallback((entryPrice: number) => {
     const now = Date.now();
     
-    console.log(`🟢 [OVERLAY DEBUG] ACTIVANDO overlay - Precio: $${currentPrice.toFixed(2)}`);
+    console.log(`🟢 [OVERLAY DEBUG] ACTIVANDO overlay - Entry Price: $${entryPrice.toFixed(2)}`);
     
-    // Configurar niveles iniciales
-    const initialSpread = currentPrice * 0.02;
-    const newTpLevel = currentPrice + initialSpread;
-    const newSlLevel = currentPrice - initialSpread;
+    // Configurar niveles iniciales basados en el entry price
+    const initialSpread = entryPrice * 0.02; // 2% spread desde entry price
+    const newTpLevel = entryPrice + initialSpread;
+    const newSlLevel = entryPrice - initialSpread;
     
-    console.log(`🎯 [OVERLAY DEBUG] Niveles calculados - TP: $${newTpLevel.toFixed(2)}, SL: $${newSlLevel.toFixed(2)}`);
+    console.log(`🎯 [OVERLAY DEBUG] Niveles calculados desde entry - TP: $${newTpLevel.toFixed(2)}, SL: $${newSlLevel.toFixed(2)}`);
+    
+    // Obtener precio actual para el overlay
+    const currentPrice = candleData.length > 0 ? candleData[candleData.length - 1].c : entryPrice;
     
     // Actualizar estado interno
     tradingOverlayState.current = {
@@ -294,6 +314,7 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
       needsRedraw: true,
       isDrawing: false,
       currentPrice,
+      entryPrice, // NUEVO: Guardar entry price como centro
       takeProfitLevel: newTpLevel,
       stopLossLevel: newSlLevel
     };
@@ -304,11 +325,11 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
     setTakeProfitLevel(newTpLevel);
     setStopLossLevel(newSlLevel);
     
-    console.log(`✅ [OVERLAY DEBUG] Estados actualizados - showTradingOverlay: true`);
+    console.log(`✅ [OVERLAY DEBUG] Estados actualizados - showTradingOverlay: true, entryPrice: $${entryPrice.toFixed(2)}`);
     
     // Marcar para redibujado inmediato
     requestTradingRedraw();
-  }, []);
+  }, [candleData]);
   
   const deactivateTradingOverlay = useCallback(() => {
     console.log(`🔴 [OVERLAY DEBUG] DESACTIVANDO overlay`);
@@ -320,6 +341,7 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
       needsRedraw: false,
       isDrawing: false,
       currentPrice: null,
+      entryPrice: null, // NUEVO: Resetear entry price
       takeProfitLevel: null,
       stopLossLevel: null
     };
@@ -618,85 +640,99 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
     }
   }, [simpleCamera]);
 
-  // Funciones para el trading overlay - DEBUGGING ESPECÍFICO PARA CLICKS
+  // Función para detectar si un clic está cerca de una línea de posición
+  const getPositionAtClick = useCallback((x: number, y: number): PositionData | null => {
+    if (!chartRef.current || !activePositions.length) return null;
+    
+    const chart = chartRef.current;
+    const yScale = chart.scales.y;
+    if (!yScale) return null;
+    
+    const clickPrice = yScale.getValueForPixel(y);
+    const tolerancePercent = 0.005; // 0.5% de tolerancia
+    
+    // Buscar posición cuyo entry price esté cerca del clic
+    for (const position of activePositions) {
+      const entryPriceTolerance = position.entryPrice * tolerancePercent;
+      
+      if (Math.abs(clickPrice - position.entryPrice) <= entryPriceTolerance) {
+        console.log(`🎯 [POSITION CLICK] Detectada posición ${position.symbol} - Entry: $${position.entryPrice.toFixed(2)}, Click: $${clickPrice.toFixed(2)}`);
+        return position;
+      }
+      
+      // También detectar clics en TP/SL si existen
+      if (position.takeProfitPrice) {
+        const tpTolerance = position.takeProfitPrice * tolerancePercent;
+        if (Math.abs(clickPrice - position.takeProfitPrice) <= tpTolerance) {
+          console.log(`🎯 [POSITION CLICK] Detectada posición ${position.symbol} via TP - Entry: $${position.entryPrice.toFixed(2)}`);
+          return position;
+        }
+      }
+      
+      if (position.stopLossPrice) {
+        const slTolerance = position.stopLossPrice * tolerancePercent;
+        if (Math.abs(clickPrice - position.stopLossPrice) <= slTolerance) {
+          console.log(`🎯 [POSITION CLICK] Detectada posición ${position.symbol} via SL - Entry: $${position.entryPrice.toFixed(2)}`);
+          return position;
+        }
+      }
+    }
+    
+    return null;
+  }, [activePositions]);
+
+  // Funciones para el trading overlay - MEJORADO PARA DETECTAR POSICIONES
   const handleChartClick = useCallback((event: MouseEvent | TouchEvent) => {
     if (!chartRef.current || !canvasRef.current) {
       console.log('🔴 [CLICK DEBUG] Chart o canvas no disponible');
       return;
     }
 
-    const now = Date.now();
+    // Obtener coordenadas del clic
+    const rect = canvasRef.current.getBoundingClientRect();
+    let x: number, y: number;
     
-    // MEJORADO: Verificar si hubo movimiento antes del click (indica drag/pan)
-    if (hasMouseMoved.current) {
-      console.log('🔴 [CLICK DEBUG] Click bloqueado - se detectó movimiento (drag/pan)');
-      hasMouseMoved.current = false; // Reset para próximo click
-      return;
-    }
-    
-    // MEJORADO: Verificar cooldown después de interacciones de cámara
-    const timeSinceLastCameraInteraction = now - lastCameraInteractionTime.current;
-    if (timeSinceLastCameraInteraction < cameraInteractionCooldown) {
-      console.log(`🔴 [CLICK DEBUG] Click bloqueado - interacción reciente (${timeSinceLastCameraInteraction}ms < ${cameraInteractionCooldown}ms)`);
-      return;
-    }
-    
-    // NUEVO: Verificar que el click no fue inmediatamente después de mousedown (indica possible drag)
-    const timeSinceMouseDown = now - lastMouseDownTime.current;
-    if (timeSinceMouseDown < 100) { // Si el click fue menos de 100ms después de mousedown
-      console.log(`🔴 [CLICK DEBUG] Click bloqueado - muy rápido después de mousedown (${timeSinceMouseDown}ms)`);
-      return;
-    }
-    
-    // NUEVO: Limpiar variables de tracking después del click exitoso
-    const resetTrackingVariables = () => {
-      if (mouseTrackingTimeout.current) {
-        clearTimeout(mouseTrackingTimeout.current);
-      }
-      mouseTrackingTimeout.current = window.setTimeout(() => {
-        hasMouseMoved.current = false;
-        mouseStartPosition.current = null;
-        lastMouseDownTime.current = 0;
-      }, 100);
-    };
-
-    const chart = chartRef.current;
-    const canvas = canvasRef.current;
-    const rect = canvas.getBoundingClientRect();
-    
-    // Obtener coordenadas del click/touch
-    const clientX = 'touches' in event ? event.touches[0].clientX : event.clientX;
-    const clientY = 'touches' in event ? event.touches[0].clientY : event.clientY;
-    
-    const x = clientX - rect.left;
-    const y = clientY - rect.top;
-
-    // Obtener el precio actual de la última vela
-    const dataset = chart.data.datasets[0];
-    if (!dataset || !dataset.data || dataset.data.length === 0) {
-      console.log('🔴 [CLICK DEBUG] No hay datos de velas disponibles');
-      return;
-    }
-    
-    const lastCandle = dataset.data[dataset.data.length - 1] as any;
-    const currentPrice = lastCandle.c;
-
-    console.log(`🎯 [CLICK DEBUG] Click detectado en (${x}, ${y}) - Precio actual: $${currentPrice.toFixed(2)} - Overlay activo: ${showTradingOverlay}`);
-
-    // TOGGLE: Activar/desactivar overlay según el estado actual
-    if (showTradingOverlay) {
-      // Si ya está activo, desactivarlo
-      console.log('🔴 [CLICK DEBUG] Desactivando trading overlay');
-      deactivateTradingOverlay();
-      resetTrackingVariables();
+    if ('touches' in event && event.touches.length > 0) {
+      x = event.touches[0].clientX - rect.left;
+      y = event.touches[0].clientY - rect.top;
+    } else if ('clientX' in event) {
+      x = event.clientX - rect.left;
+      y = event.clientY - rect.top;
     } else {
-      // Si está inactivo, activarlo
-      console.log('🟢 [CLICK DEBUG] Activando trading overlay con precio:', currentPrice.toFixed(2));
-      activateTradingOverlay(currentPrice);
-      resetTrackingVariables();
+      console.log('🔴 [CLICK DEBUG] No se pudieron obtener coordenadas del evento');
+      return;
+    }
+    
+    // Verificar si el clic está sobre una posición existente
+    const clickedPosition = getPositionAtClick(x, y);
+    
+    if (clickedPosition) {
+      console.log(`🟢 [POSITION CLICK] Clic en posición detectado:`, {
+        id: clickedPosition.id,
+        symbol: clickedPosition.symbol,
+        entryPrice: clickedPosition.entryPrice,
+        side: clickedPosition.side
+      });
+      
+      // Activar overlay con el precio de entrada de la posición clickeada
+      activateTradingOverlay(clickedPosition.entryPrice);
+      
+      // NOTE: onPositionPress callback removido - no se abre modal de detalles
+      // Solo se activa el trading overlay para visualización
+      if (onPositionPress) {
+        // Solo llamar si el callback está definido (por compatibilidad)
+        onPositionPress(clickedPosition);
+      }
+    } else {
+      // Solo permitir navegación si el overlay está activo
+      if (showTradingOverlay) {
+        console.log('🎯 [CLICK DEBUG] Click en gráfico - overlay activo, permitir navegación');
+      } else {
+        console.log('🔴 [CLICK DEBUG] Click en gráfico ignorado - overlay inactivo y no hay posición en este punto');
+      }
     }
 
-  }, [showTradingOverlay, activateTradingOverlay, deactivateTradingOverlay]);
+  }, [showTradingOverlay, getPositionAtClick, activateTradingOverlay, onPositionPress]);
 
   // Configurar los event listeners para el canvas
   useEffect(() => {
@@ -984,7 +1020,7 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
     }
   }, [candleData, showTradingOverlay, currentPriceLevel]);
 
-  // Función para dibujar los elementos de trading directamente en el canvas - OPTIMIZADA
+  // Función para dibujar los elementos de trading directamente en el canvas - OPTIMIZADA CON ENTRY PRICE
   const drawTradingElements = useCallback(() => {
     const state = tradingOverlayState.current;
     
@@ -997,8 +1033,8 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
       return;
     }
     
-    // Verificar que tenemos datos válidos
-    if (!state.currentPrice || !state.takeProfitLevel || !state.stopLossLevel) {
+    // Verificar que tenemos datos válidos incluyendo entryPrice
+    if (!state.currentPrice || !state.entryPrice || !state.takeProfitLevel || !state.stopLossLevel) {
       return;
     }
 
@@ -1016,6 +1052,7 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
     
     logChart('DRAWING_TRADING_ELEMENTS_CONTROLLED', {
       currentPrice: state.currentPrice,
+      entryPrice: state.entryPrice,
       takeProfitLevel: state.takeProfitLevel,
       stopLossLevel: state.stopLossLevel,
       timeSinceLastDraw: now - state.lastDrawTime,
@@ -1025,38 +1062,49 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
     try {
       ctx.save();
 
-      // Obtener la coordenada Y del precio actual
+      // CRÍTICO: Usar entryPrice como divisor de colores
+      const entryPriceY = yScale.getPixelForValue(state.entryPrice);
       const currentPriceY = yScale.getPixelForValue(state.currentPrice);
 
-      // 1. Dibujar área verde (para TP) arriba del precio actual
+      // 1. Dibujar área verde (para TP) arriba del entry price
       ctx.fillStyle = 'rgba(0, 255, 136, 0.15)';
       ctx.fillRect(
         chartArea.left,
         chartArea.top,
         chartArea.right - chartArea.left,
-        currentPriceY - chartArea.top
+        entryPriceY - chartArea.top
       );
 
-      // 2. Dibujar área roja (para SL) abajo del precio actual  
+      // 2. Dibujar área roja (para SL) abajo del entry price
       ctx.fillStyle = 'rgba(255, 68, 68, 0.15)';
       ctx.fillRect(
         chartArea.left,
-        currentPriceY,
+        entryPriceY,
         chartArea.right - chartArea.left,
-        chartArea.bottom - currentPriceY
+        chartArea.bottom - entryPriceY
       );
 
-      // 3. Dibujar línea horizontal del precio actual
+      // 3. Dibujar línea horizontal del entry price (línea principal)
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 3;
+      ctx.setLineDash([6, 6]);
+      ctx.beginPath();
+      ctx.moveTo(chartArea.left, entryPriceY);
+      ctx.lineTo(chartArea.right, entryPriceY);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      // 4. Dibujar línea del precio actual (más fina)
       ctx.strokeStyle = '#ffff00';
-      ctx.lineWidth = 2;
-      ctx.setLineDash([8, 4]);
+      ctx.lineWidth = 1;
+      ctx.setLineDash([4, 2]);
       ctx.beginPath();
       ctx.moveTo(chartArea.left, currentPriceY);
       ctx.lineTo(chartArea.right, currentPriceY);
       ctx.stroke();
       ctx.setLineDash([]);
 
-      // 4. Dibujar líneas de TP y SL
+      // 5. Dibujar líneas de TP y SL
       const tpY = yScale.getPixelForValue(state.takeProfitLevel);
       ctx.strokeStyle = '#00ff88';
       ctx.lineWidth = 3;
@@ -1100,7 +1148,17 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
       ctx.strokeText(slText, chartArea.right + 5, slY + 15);
       ctx.fillText(slText, chartArea.right + 5, slY + 15);
 
-      // 5. Dibujar barras de control interactivas
+      // 6. Etiqueta del entry price
+      ctx.fillStyle = '#ffffff';
+      ctx.font = 'bold 14px Arial';
+      ctx.textAlign = 'left';
+      ctx.strokeStyle = '#000000';
+      ctx.lineWidth = 3;
+      const entryText = `ENTRY: $${(state.entryPrice/1000).toFixed(1)}k`;
+      ctx.strokeText(entryText, chartArea.right + 5, entryPriceY + 5);
+      ctx.fillText(entryText, chartArea.right + 5, entryPriceY + 5);
+
+      // 7. Dibujar barras de control interactivas
       const barWidth = 20;
       const barHeight = 30;
       const barX = chartArea.right + 80;
@@ -2059,9 +2117,10 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
           }
           
           // Verificar que tenemos todos los datos necesarios
-          if (!state.currentPrice || !state.takeProfitLevel || !state.stopLossLevel) {
+          if (!state.currentPrice || !state.entryPrice || !state.takeProfitLevel || !state.stopLossLevel) {
             console.log(`❌ [PLUGIN DEBUG] No dibujando - datos incompletos:`, {
               currentPrice: state.currentPrice,
+              entryPrice: state.entryPrice,
               takeProfitLevel: state.takeProfitLevel,
               stopLossLevel: state.stopLossLevel
             });
@@ -2071,7 +2130,7 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
           // Solo logear inicio de dibujado cada 2 segundos para evitar spam
           const now = Date.now();
           if (now - lastPluginDrawTime.current > 2000) {
-            console.log(`✅ [PLUGIN DEBUG] Iniciando dibujado - Precio: $${state.currentPrice.toFixed(2)}, TP: $${state.takeProfitLevel.toFixed(2)}, SL: $${state.stopLossLevel.toFixed(2)}`);
+            console.log(`✅ [PLUGIN DEBUG] Iniciando dibujado - Entry: $${state.entryPrice.toFixed(2)}, Current: $${state.currentPrice.toFixed(2)}, TP: $${state.takeProfitLevel.toFixed(2)}, SL: $${state.stopLossLevel.toFixed(2)}`);
             lastPluginDrawTime.current = now;
           }
           
@@ -2094,31 +2153,52 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
           try {
             ctx.save();
 
-            // Obtener la coordenada Y del precio actual
+            // CRÍTICO: Usar entryPrice como divisor de colores en lugar de currentPrice
+            const entryPriceY = yScale.getPixelForValue(state.entryPrice);
             const currentPriceY = yScale.getPixelForValue(state.currentPrice);
 
-            // Área verde (para TP) arriba del precio actual
+            // Área verde (para TP) arriba del entry price
             ctx.fillStyle = 'rgba(0, 255, 136, 0.15)';
             ctx.fillRect(
               chartArea.left,
               chartArea.top,
               chartArea.right - chartArea.left,
-              currentPriceY - chartArea.top
+              entryPriceY - chartArea.top
             );
 
-            // Área roja (para SL) abajo del precio actual
+            // Área roja (para SL) abajo del entry price
             ctx.fillStyle = 'rgba(255, 68, 68, 0.15)';
             ctx.fillRect(
               chartArea.left,
-              currentPriceY,
+              entryPriceY,
               chartArea.right - chartArea.left,
-              chartArea.bottom - currentPriceY
+              chartArea.bottom - entryPriceY
             );
 
-            // Línea del precio actual
+            // Línea del entry price (divisor principal)
+            ctx.strokeStyle = '#ffffff';
+            ctx.lineWidth = 3;
+            ctx.setLineDash([6, 6]);
+            ctx.beginPath();
+            ctx.moveTo(chartArea.left, entryPriceY);
+            ctx.lineTo(chartArea.right, entryPriceY);
+            ctx.stroke();
+            ctx.setLineDash([]);
+            
+            // Etiqueta del entry price
+            ctx.fillStyle = '#ffffff';
+            ctx.font = 'bold 14px Arial';
+            ctx.textAlign = 'left';
+            ctx.strokeStyle = '#000000';
+            ctx.lineWidth = 3;
+            const entryText = `ENTRY: $${(state.entryPrice/1000).toFixed(1)}k`;
+            ctx.strokeText(entryText, chartArea.right + 5, entryPriceY + 5);
+            ctx.fillText(entryText, chartArea.right + 5, entryPriceY + 5);
+
+            // Línea del precio actual (línea fina amarilla)
             ctx.strokeStyle = '#ffff00';
-            ctx.lineWidth = 2;
-            ctx.setLineDash([8, 4]);
+            ctx.lineWidth = 1;
+            ctx.setLineDash([4, 2]);
             ctx.beginPath();
             ctx.moveTo(chartArea.left, currentPriceY);
             ctx.lineTo(chartArea.right, currentPriceY);

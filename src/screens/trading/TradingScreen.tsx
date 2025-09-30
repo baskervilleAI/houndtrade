@@ -166,9 +166,9 @@ export const TradingScreen: React.FC = () => {
     await refreshPortfolio();
   };
 
-  // Handle navigation to chart from position
+  // Handle navigation to chart from position - MEJORADO con visualización de TP/SL
   const handleGoToChart = useCallback((symbol: string, position: any) => {
-    console.log(`🎯 [GO TO CHART] Navegando a ${symbol} con overlay activado`);
+    console.log(`🎯 [GO TO CHART] Navegando a ${symbol} con overlay activado y visualización TP/SL`);
     
     // Switch to trading tab
     setActiveTab('trading');
@@ -183,16 +183,58 @@ export const TradingScreen: React.FC = () => {
       currentPrice = tradingPrice || position.entryPrice;
     }
     
+    console.log(`🎯 [GO TO CHART] Precio actual: $${currentPrice}, Precio entrada: $${position.entryPrice}`);
+    
     setOverlayActivationPrice(currentPrice);
     setForceDeactivate(false);
     
+    // NUEVO: Convertir TP/SL de PnL a precio si es necesario y establecer visualización
+    let takeProfitPrice = null;
+    let stopLossPrice = null;
+    
+    if (position.takeProfitPrice !== undefined && position.takeProfitPrice !== null) {
+      if (position.takeProfitPrice > 0 && position.takeProfitPrice < 1) {
+        // Es un porcentaje o PnL, convertir a precio
+        const tpMultiplier = position.side === 'BUY' ? (1 + position.takeProfitPrice) : (1 - position.takeProfitPrice);
+        takeProfitPrice = position.entryPrice * tpMultiplier;
+        console.log(`🎯 [TP CONVERSION] TP de PnL ${position.takeProfitPrice} a precio $${takeProfitPrice.toFixed(2)}`);
+      } else {
+        // Ya es un precio
+        takeProfitPrice = position.takeProfitPrice;
+        console.log(`🎯 [TP PRICE] TP ya es precio: $${takeProfitPrice.toFixed(2)}`);
+      }
+    }
+    
+    if (position.stopLossPrice !== undefined && position.stopLossPrice !== null) {
+      if (position.stopLossPrice > 0 && position.stopLossPrice < 1) {
+        // Es un porcentaje o PnL, convertir a precio
+        const slMultiplier = position.side === 'BUY' ? (1 - position.stopLossPrice) : (1 + position.stopLossPrice);
+        stopLossPrice = position.entryPrice * slMultiplier;
+        console.log(`🎯 [SL CONVERSION] SL de PnL ${position.stopLossPrice} a precio $${stopLossPrice.toFixed(2)}`);
+      } else {
+        // Ya es un precio
+        stopLossPrice = position.stopLossPrice;
+        console.log(`🎯 [SL PRICE] SL ya es precio: $${stopLossPrice.toFixed(2)}`);
+      }
+    }
+    
     // Set overlay TP/SL from position
-    if (position.takeProfitPrice) {
-      setOverlayTakeProfit(position.takeProfitPrice);
+    if (takeProfitPrice) {
+      setOverlayTakeProfit(takeProfitPrice);
+      console.log(`🟢 [OVERLAY TP] Establecido TP en $${takeProfitPrice.toFixed(2)}`);
     }
-    if (position.stopLossPrice) {
-      setOverlayStopLoss(position.stopLossPrice);
+    if (stopLossPrice) {
+      setOverlayStopLoss(stopLossPrice);
+      console.log(`🔴 [OVERLAY SL] Establecido SL en $${stopLossPrice.toFixed(2)}`);
     }
+    
+    // Colores basados en el precio de entrada como divisor
+    const entryPrice = position.entryPrice;
+    const side = position.side;
+    
+    console.log(`🎨 [COLOR LOGIC] Posición ${side} con entrada $${entryPrice.toFixed(2)}`);
+    console.log(`🎨 [COLOR LOGIC] TP: ${takeProfitPrice ? '$' + takeProfitPrice.toFixed(2) : 'N/A'}`);
+    console.log(`🎨 [COLOR LOGIC] SL: ${stopLossPrice ? '$' + stopLossPrice.toFixed(2) : 'N/A'}`);
     
     setTimeout(() => setOverlayActivationPrice(null), 100);
   }, [tickers, getCurrentPrice]);
@@ -226,11 +268,23 @@ export const TradingScreen: React.FC = () => {
           <View style={styles.chartContainer}>
             <View style={styles.chartWrapper}>
               <MinimalistChart 
-                symbol={selectedPair} 
+                symbol={selectedPair}
                 showTradingOverlay={showTradingOverlay}
                 onTradingOverlayChange={setShowTradingOverlay}
                 activateOverlayWithPrice={overlayActivationPrice}
                 forceDeactivateOverlay={forceDeactivate}
+                activePositions={activeOrders.map(order => ({
+                  id: order.id,
+                  symbol: order.symbol,
+                  side: order.side,
+                  entryPrice: order.entryPrice,
+                  takeProfitPrice: order.takeProfitPrice || undefined,
+                  stopLossPrice: order.stopLossPrice || undefined,
+                  quantity: order.quantity,
+                  unrealizedPnL: calculateUnrealizedPnL(order, currentPrice),
+                }))}
+                // DESHABILITADO: No pasar onPositionPress para evitar que se abra el modal
+                // onPositionPress={handlePositionPress}
               />
               <TradingOverlay
                 chartDimensions={{

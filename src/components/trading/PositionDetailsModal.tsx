@@ -87,20 +87,33 @@ export const PositionDetailsModal: React.FC<PositionDetailsModalProps> = ({
     return null;
   }
 
-  const isProfitable = currentPosition.unrealizedPnL >= 0;
-  const isLong = currentPosition.side === OrderSide.BUY;
+  // Validar y asegurar que todos los campos numéricos existan
+  const safeCurrentPosition = {
+    ...currentPosition,
+    currentPrice: currentPosition.currentPrice || currentPosition.entryPrice || 0,
+    unrealizedPnL: currentPosition.unrealizedPnL || 0,
+    unrealizedPnLPercentage: currentPosition.unrealizedPnLPercentage || 0,
+    priceChange: currentPosition.priceChange || 0,
+    priceChangePercentage: currentPosition.priceChangePercentage || 0,
+    quantity: currentPosition.quantity || 0,
+    entryPrice: currentPosition.entryPrice || 0,
+    usdtAmount: currentPosition.usdtAmount || 0,
+  };
+
+  const isProfitable = safeCurrentPosition.unrealizedPnL >= 0;
+  const isLong = safeCurrentPosition.side === OrderSide.BUY;
 
   const handleClosePosition = () => {
     Alert.alert(
       'Cerrar Posición',
-      `¿Estás seguro de que quieres cerrar la posición en ${currentPosition.symbol}?\n\nPnL actual: ${isProfitable ? '+' : ''}$${formatCurrency(Math.abs(currentPosition.unrealizedPnL))}`,
+      `¿Estás seguro de que quieres cerrar la posición en ${safeCurrentPosition.symbol}?\n\nPnL actual: ${isProfitable ? '+' : ''}$${formatCurrency(Math.abs(safeCurrentPosition.unrealizedPnL))}`,
       [
         { text: 'Cancelar', style: 'cancel' },
         {
           text: 'Cerrar Posición',
           style: 'destructive',
           onPress: () => {
-            onClosePosition?.(currentPosition.id);
+            onClosePosition?.(safeCurrentPosition.id);
             onClose();
           }
         }
@@ -109,12 +122,12 @@ export const PositionDetailsModal: React.FC<PositionDetailsModalProps> = ({
   };
 
   const handleGoToChart = () => {
-    onGoToChart?.(currentPosition.symbol, currentPosition);
+    onGoToChart?.(safeCurrentPosition.symbol, safeCurrentPosition);
     onClose();
   };
 
-  const profitLossPercentage = ((currentPosition.currentPrice - currentPosition.entryPrice) / currentPosition.entryPrice) * 100;
-  const timeHeld = new Date().getTime() - currentPosition.createdAt;
+  const profitLossPercentage = ((safeCurrentPosition.currentPrice - safeCurrentPosition.entryPrice) / safeCurrentPosition.entryPrice) * 100;
+  const timeHeld = new Date().getTime() - safeCurrentPosition.createdAt;
   const hoursHeld = Math.floor(timeHeld / (1000 * 60 * 60));
   const minutesHeld = Math.floor((timeHeld % (1000 * 60 * 60)) / (1000 * 60));
 
@@ -139,12 +152,12 @@ export const PositionDetailsModal: React.FC<PositionDetailsModalProps> = ({
           {/* Symbol and Side */}
           <View style={styles.symbolSection}>
             <View style={styles.symbolHeader}>
-              <Text style={styles.symbolText}>{currentPosition.symbol}</Text>
+              <Text style={styles.symbolText}>{safeCurrentPosition.symbol}</Text>
               <View style={[
                 styles.sideIndicator,
                 { backgroundColor: isLong ? '#00ff88' : '#ff4444' }
               ]}>
-                <Text style={styles.sideText}>{currentPosition.side}</Text>
+                <Text style={styles.sideText}>{safeCurrentPosition.side}</Text>
               </View>
             </View>
             <Text style={styles.symbolSubtext}>
@@ -157,7 +170,7 @@ export const PositionDetailsModal: React.FC<PositionDetailsModalProps> = ({
             <View style={styles.currentPriceContainer}>
               <Text style={styles.currentPriceLabel}>Precio Actual</Text>
               <Text style={styles.currentPriceValue}>
-                ${formatPrice(currentPosition.currentPrice, currentPosition.symbol)}
+                ${formatPrice(safeCurrentPosition.currentPrice, safeCurrentPosition.symbol)}
               </Text>
             </View>
             
@@ -166,13 +179,13 @@ export const PositionDetailsModal: React.FC<PositionDetailsModalProps> = ({
                 styles.pnlAmount,
                 { color: isProfitable ? '#00ff88' : '#ff4444' }
               ]}>
-                {isProfitable ? '+' : ''}${formatCurrency(Math.abs(currentPosition.unrealizedPnL))}
+                {isProfitable ? '+' : ''}${formatCurrency(Math.abs(safeCurrentPosition.unrealizedPnL))}
               </Text>
               <Text style={[
                 styles.pnlPercentage,
                 { color: isProfitable ? '#00ff88' : '#ff4444' }
               ]}>
-                {isProfitable ? '+' : ''}{formatPercentage(currentPosition.unrealizedPnLPercentage)}
+                {isProfitable ? '+' : ''}{formatPercentage(safeCurrentPosition.unrealizedPnLPercentage)}
               </Text>
             </View>
           </View>
@@ -184,28 +197,28 @@ export const PositionDetailsModal: React.FC<PositionDetailsModalProps> = ({
             <View style={styles.detailRow}>
               <Text style={styles.detailLabel}>Precio de Entrada:</Text>
               <Text style={styles.detailValue}>
-                ${formatPrice(currentPosition.entryPrice, currentPosition.symbol)}
+                ${formatPrice(safeCurrentPosition.entryPrice, safeCurrentPosition.symbol)}
               </Text>
             </View>
 
             <View style={styles.detailRow}>
               <Text style={styles.detailLabel}>Cantidad:</Text>
               <Text style={styles.detailValue}>
-                {currentPosition.quantity.toFixed(6)} {currentPosition.symbol.replace('USDT', '')}
+                {(safeCurrentPosition.quantity || 0).toFixed(6)} {safeCurrentPosition.symbol.replace('USDT', '')}
               </Text>
             </View>
 
             <View style={styles.detailRow}>
               <Text style={styles.detailLabel}>Inversión Total:</Text>
               <Text style={styles.detailValue}>
-                ${formatCurrency(currentPosition.usdtAmount)}
+                ${formatCurrency(safeCurrentPosition.usdtAmount)}
               </Text>
             </View>
 
             <View style={styles.detailRow}>
               <Text style={styles.detailLabel}>Valor Actual:</Text>
               <Text style={styles.detailValue}>
-                ${formatCurrency(currentPosition.quantity * currentPosition.currentPrice)}
+                ${formatCurrency(safeCurrentPosition.quantity * safeCurrentPosition.currentPrice)}
               </Text>
             </View>
 
@@ -213,10 +226,10 @@ export const PositionDetailsModal: React.FC<PositionDetailsModalProps> = ({
               <Text style={styles.detailLabel}>Cambio de Precio:</Text>
               <Text style={[
                 styles.detailValue,
-                { color: currentPosition.priceChange >= 0 ? '#00ff88' : '#ff4444' }
+                { color: (safeCurrentPosition.priceChange || 0) >= 0 ? '#00ff88' : '#ff4444' }
               ]}>
-                {currentPosition.priceChange >= 0 ? '+' : ''}${Math.abs(currentPosition.priceChange).toFixed(6)}
-                {' '}({currentPosition.priceChange >= 0 ? '+' : ''}{currentPosition.priceChangePercentage.toFixed(2)}%)
+                {(safeCurrentPosition.priceChange || 0) >= 0 ? '+' : ''}${Math.abs(safeCurrentPosition.priceChange || 0).toFixed(6)}
+                {' '}({(safeCurrentPosition.priceChange || 0) >= 0 ? '+' : ''}{(safeCurrentPosition.priceChangePercentage || 0).toFixed(2)}%)
               </Text>
             </View>
 
@@ -229,42 +242,42 @@ export const PositionDetailsModal: React.FC<PositionDetailsModalProps> = ({
           </View>
 
           {/* TP/SL Section */}
-          {(currentPosition.takeProfitPrice || currentPosition.stopLossPrice) && (
+          {(safeCurrentPosition.takeProfitPrice || safeCurrentPosition.stopLossPrice) && (
             <View style={styles.tpslSection}>
               <Text style={styles.sectionTitle}>Take Profit / Stop Loss</Text>
               
-              {currentPosition.takeProfitPrice && (
+              {safeCurrentPosition.takeProfitPrice && (
                 <View style={styles.detailRow}>
                   <Text style={styles.detailLabel}>Take Profit:</Text>
                   <Text style={[styles.detailValue, { color: '#00ff88' }]}>
-                    ${formatPrice(currentPosition.takeProfitPrice, currentPosition.symbol)}
+                    ${formatPrice(safeCurrentPosition.takeProfitPrice, safeCurrentPosition.symbol)}
                   </Text>
                 </View>
               )}
 
-              {currentPosition.stopLossPrice && (
+              {safeCurrentPosition.stopLossPrice && (
                 <View style={styles.detailRow}>
                   <Text style={styles.detailLabel}>Stop Loss:</Text>
                   <Text style={[styles.detailValue, { color: '#ff4444' }]}>
-                    ${formatPrice(currentPosition.stopLossPrice, currentPosition.symbol)}
+                    ${formatPrice(safeCurrentPosition.stopLossPrice, safeCurrentPosition.symbol)}
                   </Text>
                 </View>
               )}
 
-              {currentPosition.takeProfitUSDT && (
+              {safeCurrentPosition.takeProfitUSDT && (
                 <View style={styles.detailRow}>
                   <Text style={styles.detailLabel}>TP en USDT:</Text>
                   <Text style={[styles.detailValue, { color: '#00ff88' }]}>
-                    +${formatCurrency(currentPosition.takeProfitUSDT)}
+                    +${formatCurrency(safeCurrentPosition.takeProfitUSDT)}
                   </Text>
                 </View>
               )}
 
-              {currentPosition.stopLossUSDT && (
+              {safeCurrentPosition.stopLossUSDT && (
                 <View style={styles.detailRow}>
                   <Text style={styles.detailLabel}>SL en USDT:</Text>
                   <Text style={[styles.detailValue, { color: '#ff4444' }]}>
-                    -${formatCurrency(currentPosition.stopLossUSDT)}
+                    -${formatCurrency(safeCurrentPosition.stopLossUSDT)}
                   </Text>
                 </View>
               )}
@@ -278,28 +291,28 @@ export const PositionDetailsModal: React.FC<PositionDetailsModalProps> = ({
             <View style={styles.detailRow}>
               <Text style={styles.detailLabel}>ID de Orden:</Text>
               <Text style={[styles.detailValue, styles.orderIdText]}>
-                {currentPosition.id.substring(0, 12)}...
+                {safeCurrentPosition.id.substring(0, 12)}...
               </Text>
             </View>
 
             <View style={styles.detailRow}>
               <Text style={styles.detailLabel}>Fecha de Apertura:</Text>
               <Text style={styles.detailValue}>
-                {new Date(currentPosition.createdAt).toLocaleDateString()} {new Date(currentPosition.createdAt).toLocaleTimeString()}
+                {new Date(safeCurrentPosition.createdAt).toLocaleDateString()} {new Date(safeCurrentPosition.createdAt).toLocaleTimeString()}
               </Text>
             </View>
 
             <View style={styles.detailRow}>
               <Text style={styles.detailLabel}>Estado:</Text>
               <Text style={[styles.detailValue, { color: '#00ff88' }]}>
-                {currentPosition.status === OrderStatus.ACTIVE ? 'Activa' : currentPosition.status}
+                {safeCurrentPosition.status === OrderStatus.ACTIVE ? 'Activa' : safeCurrentPosition.status}
               </Text>
             </View>
 
-            {currentPosition.notes && (
+            {safeCurrentPosition.notes && (
               <View style={styles.notesContainer}>
                 <Text style={styles.detailLabel}>Notas:</Text>
-                <Text style={styles.notesText}>{currentPosition.notes}</Text>
+                <Text style={styles.notesText}>{safeCurrentPosition.notes}</Text>
               </View>
             )}
           </View>
