@@ -125,6 +125,10 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
   
   // Estado para detectar el tamaño de pantalla
   const [screenSize, setScreenSize] = useState<'mobile' | 'tablet' | 'desktop'>('desktop');
+  // Estado para detectar el zoom/scale del viewport (browser zoom o device pixel ratio)
+  const [zoomScale, setZoomScale] = useState<number>(
+    (typeof window !== 'undefined' && (window.visualViewport?.scale || window.devicePixelRatio)) || 1
+  );
   
   // Hook para detectar cambios de tamaño de pantalla
   useEffect(() => {
@@ -142,9 +146,45 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
     updateScreenSize();
     window.addEventListener('resize', updateScreenSize);
     
-    return () => window.removeEventListener('resize', updateScreenSize);
+    // also listen for viewport/zoom changes
+    const onViewportChange = () => {
+      const newScale = window.visualViewport?.scale || window.devicePixelRatio || 1;
+      setZoomScale(prev => {
+        if (Math.abs(prev - newScale) > 0.01) return newScale;
+        return prev;
+      });
+      updateScreenSize();
+    };
+
+    if (window.visualViewport) {
+      window.visualViewport.addEventListener('resize', onViewportChange);
+      window.visualViewport.addEventListener('scroll', onViewportChange);
+    }
+
+    window.addEventListener('orientationchange', onViewportChange);
+
+    return () => {
+      window.removeEventListener('resize', updateScreenSize);
+      if (window.visualViewport) {
+        window.visualViewport.removeEventListener('resize', onViewportChange);
+        window.visualViewport.removeEventListener('scroll', onViewportChange);
+      }
+      window.removeEventListener('orientationchange', onViewportChange);
+    };
   }, []);
 
+  // Cuando zoomScale cambia, forzar el gráfico a redimensionarse y actualizar el diseño para que los ejes y etiquetas permanezcan visibles
+  useEffect(() => {
+    if (chartRef.current) {
+      try {
+        // Chart.js 4: llamar a resize luego actualizar
+        chartRef.current.resize();
+        chartRef.current.update('none');
+      } catch (e) {
+        // ignorar
+      }
+    }
+  }, [zoomScale]);
   // Función para obtener estilos responsivos
   const getResponsiveStyles = (screenSize: 'mobile' | 'tablet' | 'desktop') => {
     const baseStyles = {
@@ -1068,9 +1108,10 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
       ctx.stroke();
       ctx.shadowBlur = 0;
 
-      // Etiqueta TP
-      ctx.fillStyle = '#00ff88';
-      ctx.font = 'bold 14px Arial';
+  // Etiqueta TP (escalada según zoomScale)
+  ctx.fillStyle = '#00ff88';
+  const tpFontSize = Math.max(10, Math.round(14 * (zoomScale || 1)));
+  ctx.font = `bold ${tpFontSize}px Arial`;
       ctx.textAlign = 'left';
       ctx.strokeStyle = '#000000';
       ctx.lineWidth = 3;
@@ -1090,9 +1131,10 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
       ctx.stroke();
       ctx.shadowBlur = 0;
 
-      // Etiqueta SL
-      ctx.fillStyle = '#ff4444';
-      ctx.font = 'bold 14px Arial';
+  // Etiqueta SL (escalada según zoomScale)
+  ctx.fillStyle = '#ff4444';
+  const slFontSize = Math.max(10, Math.round(14 * (zoomScale || 1)));
+  ctx.font = `bold ${slFontSize}px Arial`;
       ctx.textAlign = 'left';
       ctx.strokeStyle = '#000000';
       ctx.lineWidth = 3;
@@ -1101,9 +1143,17 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
       ctx.fillText(slText, chartArea.right + 5, slY + 15);
 
       // 5. Dibujar barras de control interactivas
-      const barWidth = 20;
-      const barHeight = 30;
-      const barX = chartArea.right + 80;
+  // Barras de control escaladas con zoomScale
+  const baseBarWidth = 20;
+  const baseBarHeight = 30;
+  const baseBarOffset = 80;
+  const barWidth = Math.max(12, Math.round(baseBarWidth * (zoomScale || 1)));
+  const barHeight = Math.max(16, Math.round(baseBarHeight * (zoomScale || 1)));
+  let barX = chartArea.right + Math.round(baseBarOffset * (zoomScale || 1));
+  // Clamp barX so controls remain within a reasonable offset from chartArea.right
+  const minBarX = chartArea.right - Math.round( Math.max(40, 20 * (zoomScale || 1)) );
+  if (barX > chartArea.right + 20) barX = chartArea.right + 20; // keep small offset
+  if (barX < minBarX) barX = minBarX;
 
       // Barra TP
       ctx.shadowColor = 'rgba(0, 0, 0, 0.5)';
@@ -1115,7 +1165,7 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
       ctx.shadowBlur = 0;
       ctx.strokeStyle = '#ffffff';
       ctx.lineWidth = 2;
-      ctx.strokeRect(barX, tpY - barHeight/2, barWidth, barHeight);
+  ctx.strokeRect(barX, tpY - barHeight/2, barWidth, barHeight);
 
       // Barra SL
       ctx.shadowColor = 'rgba(0, 0, 0, 0.5)';
@@ -1127,11 +1177,13 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
       ctx.shadowBlur = 0;
       ctx.strokeStyle = '#ffffff';
       ctx.lineWidth = 2;
-      ctx.strokeRect(barX, slY - barHeight/2, barWidth, barHeight);
+  ctx.strokeRect(barX, slY - barHeight/2, barWidth, barHeight);
 
       ctx.restore();
       
-      // Actualizar estado después del dibujado exitoso
+  // Asegurar que las etiquetas no se dibujen fuera del canvas
+  const labelX = Math.min(chartArea.right + 5 + Math.round((zoomScale || 1) * 0), canvas.width / (window.devicePixelRatio || 1) - 10);
+  // Actualizar estado después del dibujado exitoso
       tradingOverlayState.current.lastDrawTime = now;
       tradingOverlayState.current.needsRedraw = false;
       
@@ -1272,7 +1324,19 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
 
     // 3. Limpiar canvas directamente como backup
     if (canvasRef.current) {
-      const ctx = canvasRef.current.getContext('2d');
+  // Ajustar dimensiones del canvas según devicePixelRatio y zoomScale para mantener proporciones
+  const dpr = Math.max(1, Math.min(2.5, window.devicePixelRatio || 1));
+  const effectiveDpr = dpr * (zoomScale || 1);
+  const canvas = canvasRef.current;
+  // Set physical size
+  const rect = canvas.getBoundingClientRect();
+  canvas.width = Math.round(rect.width * effectiveDpr);
+  canvas.height = Math.round(rect.height * effectiveDpr);
+  // Set CSS size (keeps canvas visually same size)
+  canvas.style.width = `${rect.width}px`;
+  canvas.style.height = `${rect.height}px`;
+
+  const ctx = canvas.getContext('2d');
       if (ctx) {
         ctx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
         ctx.fillStyle = '#000';
@@ -1809,7 +1873,8 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
           color: '#ffffff',
           maxTicksLimit: 12, // Volver al valor original
           font: {
-            size: 12 // Tamaño normal, no muy pequeño
+            // Escalar tamaño de fuente según zoomScale para mantener proporción
+            size: Math.max(9, Math.round(12 * (zoomScale || 1)))
           }
         },
         grid: {
@@ -1832,7 +1897,8 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
         ticks: {
           color: '#ffffff',
           font: {
-            size: 12 // Tamaño normal para buena legibilidad
+            // Escalar tamaño de fuente según zoomScale
+            size: Math.max(9, Math.round(12 * (zoomScale || 1)))
           },
           callback: function(value: any) {
             return '$' + (value / 1000).toFixed(2) + 'k';
@@ -1846,20 +1912,27 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
         }
       }
     },
+    // Añadir padding dinámico para dejar espacio a las etiquetas y controles a la derecha
+    layout: {
+      padding: {
+        right: Math.max(40, Math.round(100 * (zoomScale || 1)))
+      }
+    },
     plugins: {
       title: {
         display: true,
         text: `${currentSymbol} - ${currentInterval.toUpperCase()}`,
         color: '#ffffff',
         font: { 
-          size: 16 // Tamaño normal del título
+          // Escalar título para mantener proporción con zoom
+          size: Math.max(12, Math.round(16 * (zoomScale || 1)))
         }
       },
       legend: {
         labels: { 
           color: '#ffffff',
           font: {
-            size: 11 // Leyenda un poco más pequeña pero legible
+            size: Math.max(9, Math.round(11 * (zoomScale || 1))) // leyenda escalada
           }
         }
       },
@@ -2134,15 +2207,18 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
             ctx.lineTo(chartArea.right, tpY);
             ctx.stroke();
 
-            // Etiqueta TP
+            // Etiqueta TP (escalada según zoomScale)
             ctx.fillStyle = '#00ff88';
-            ctx.font = 'bold 14px Arial';
+            const pluginTpFont = Math.max(10, Math.round(14 * (zoomScale || 1)));
+            ctx.font = `bold ${pluginTpFont}px Arial`;
             ctx.textAlign = 'left';
             ctx.strokeStyle = '#000000';
             ctx.lineWidth = 3;
             const tpText = `TP: $${(state.takeProfitLevel/1000).toFixed(1)}k`;
-            ctx.strokeText(tpText, chartArea.right + 5, tpY - 5);
-            ctx.fillText(tpText, chartArea.right + 5, tpY - 5);
+          const canvasEl = chart.canvas as HTMLCanvasElement;
+          const tpLabelX = Math.min(chartArea.right + 5, (canvasEl?.width || 0) / (window.devicePixelRatio || 1) - 10);
+            ctx.strokeText(tpText, tpLabelX, tpY - 5);
+            ctx.fillText(tpText, tpLabelX, tpY - 5);
 
             const slY = yScale.getPixelForValue(state.stopLossLevel);
             ctx.strokeStyle = '#ff4444';
@@ -2152,15 +2228,18 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
             ctx.lineTo(chartArea.right, slY);
             ctx.stroke();
 
-            // Etiqueta SL
+            // Etiqueta SL (escalada según zoomScale)
             ctx.fillStyle = '#ff4444';
-            ctx.font = 'bold 14px Arial';
+            const pluginSlFont = Math.max(10, Math.round(14 * (zoomScale || 1)));
+            ctx.font = `bold ${pluginSlFont}px Arial`;
             ctx.textAlign = 'left';
             ctx.strokeStyle = '#000000';
             ctx.lineWidth = 3;
             const slText = `SL: $${(state.stopLossLevel/1000).toFixed(1)}k`;
-            ctx.strokeText(slText, chartArea.right + 5, slY + 15);
-            ctx.fillText(slText, chartArea.right + 5, slY + 15);
+            const canvasEl2 = chart.canvas as HTMLCanvasElement;
+            const slLabelX = Math.min(chartArea.right + 5, (canvasEl2?.width || 0) / (window.devicePixelRatio || 1) - 10);
+            ctx.strokeText(slText, slLabelX, slY + 15);
+            ctx.fillText(slText, slLabelX, slY + 15);
 
             ctx.restore();
             
