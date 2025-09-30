@@ -67,6 +67,10 @@ interface MinimalistChartProps {
   forceDeactivateOverlay?: boolean; // Nuevo prop para forzar desactivación completa
   activePositions?: PositionData[]; // Posiciones activas para detectar clics
   onPositionPress?: (position: PositionData) => void; // Callback cuando se hace clic en una posición
+  // New props for TP/SL visualization
+  visualizedPosition?: PositionData | null; // Position to visualize TP/SL lines for
+  showTpSlVisualization?: boolean; // Whether to show TP/SL lines
+  onClearTpSlVisualization?: () => void; // Callback to clear TP/SL visualization
 }
 
 const timeIntervals: { label: string; value: TimeInterval }[] = [
@@ -85,7 +89,10 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
   activateOverlayWithPrice,
   forceDeactivateOverlay,
   activePositions = [],
-  onPositionPress
+  onPositionPress,
+  visualizedPosition = null,
+  showTpSlVisualization = false,
+  onClearTpSlVisualization
 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const chartRef = useRef<any>(null);
@@ -724,6 +731,12 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
         onPositionPress(clickedPosition);
       }
     } else {
+      // Limpiar visualización de TP/SL si está activa y se hace clic en área vacía
+      if (showTpSlVisualization && onClearTpSlVisualization) {
+        console.log('🧹 [TP/SL CLEAR] Limpiando visualización TP/SL - clic en área vacía');
+        onClearTpSlVisualization();
+      }
+      
       // Solo permitir navegación si el overlay está activo
       if (showTradingOverlay) {
         console.log('🎯 [CLICK DEBUG] Click en gráfico - overlay activo, permitir navegación');
@@ -732,7 +745,7 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
       }
     }
 
-  }, [showTradingOverlay, getPositionAtClick, activateTradingOverlay, onPositionPress]);
+  }, [showTradingOverlay, getPositionAtClick, activateTradingOverlay, onPositionPress, showTpSlVisualization, onClearTpSlVisualization]);
 
   // Configurar los event listeners para el canvas
   useEffect(() => {
@@ -1271,6 +1284,18 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
       deactivateTradingOverlay();
     }
   }, [forceDeactivateOverlay, deactivateTradingOverlay]);
+
+  // useEffect para actualizar líneas TP/SL de posiciones visualizadas
+  useEffect(() => {
+    if (chartRef.current && (showTpSlVisualization || visualizedPosition)) {
+      console.log(`🎨 [TP/SL UPDATE] Actualizando gráfico para mostrar líneas TP/SL:`, {
+        showTpSlVisualization,
+        hasPosition: !!visualizedPosition,
+        positionId: visualizedPosition?.id
+      });
+      chartRef.current.update('none');
+    }
+  }, [showTpSlVisualization, visualizedPosition]);
 
   // NUEVO: Función para limpiar completamente el chart y datos
   const clearChartCompletely = useCallback(() => {
@@ -2100,50 +2125,136 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
         zoomPlugin.default
       );
 
-      // Plugin personalizado para elementos de trading persistentes - CON DEBUG
+      // Plugin personalizado para elementos de trading persistentes - MEJORADO PARA POSICIONES
       const tradingElementsPlugin = {
         id: 'tradingElements',
         afterDraw: (chart: any) => {
           const state = tradingOverlayState.current;
-          
-          // Solo dibujar si el overlay está activo y no estamos ya dibujando
-          if (!state.isActive || state.isDrawing) {
-            // Solo logear cambios de estado para evitar spam
-            if (lastPluginLogState.current !== state.isActive) {
-              console.log(`🎨 [PLUGIN DEBUG] Estado overlay cambió: ${state.isActive ? 'ACTIVO' : 'INACTIVO'}`);
-              lastPluginLogState.current = state.isActive;
-            }
-            return;
-          }
-          
-          // Verificar que tenemos todos los datos necesarios
-          if (!state.currentPrice || !state.entryPrice || !state.takeProfitLevel || !state.stopLossLevel) {
-            console.log(`❌ [PLUGIN DEBUG] No dibujando - datos incompletos:`, {
-              currentPrice: state.currentPrice,
-              entryPrice: state.entryPrice,
-              takeProfitLevel: state.takeProfitLevel,
-              stopLossLevel: state.stopLossLevel
-            });
-            return;
-          }
-          
-          // Solo logear inicio de dibujado cada 2 segundos para evitar spam
-          const now = Date.now();
-          if (now - lastPluginDrawTime.current > 2000) {
-            console.log(`✅ [PLUGIN DEBUG] Iniciando dibujado - Entry: $${state.entryPrice.toFixed(2)}, Current: $${state.currentPrice.toFixed(2)}, TP: $${state.takeProfitLevel.toFixed(2)}, SL: $${state.stopLossLevel.toFixed(2)}`);
-            lastPluginDrawTime.current = now;
-          }
           
           const ctx = chart.ctx;
           const chartArea = chart.chartArea;
           const yScale = chart.scales.y;
 
           if (!ctx || !yScale || !chartArea) {
-            console.log(`❌ [PLUGIN DEBUG] No dibujando - contextos no disponibles:`, {
-              ctx: !!ctx,
-              yScale: !!yScale,
-              chartArea: !!chartArea
-            });
+            return;
+          }
+
+          // PRIORIDAD 1: Dibujar líneas de posición visualizada si está activa
+          if (showTpSlVisualization && visualizedPosition) {
+            try {
+              console.log(`🎨 [PLUGIN] Dibujando posición visualizada: ${visualizedPosition.symbol}`);
+              
+              ctx.save();
+
+              const entryY = yScale.getPixelForValue(visualizedPosition.entryPrice);
+              const isLong = visualizedPosition.side === 'BUY';
+              
+              // Áreas de color basadas en el tipo de posición y entry price
+              if (isLong) {
+                // Para posición LONG (BUY): verde arriba del entry (ganancia), rojo abajo (pérdida)
+                ctx.fillStyle = 'rgba(0, 255, 136, 0.12)';
+                ctx.fillRect(chartArea.left, chartArea.top, chartArea.right - chartArea.left, entryY - chartArea.top);
+                ctx.fillStyle = 'rgba(255, 68, 68, 0.12)';
+                ctx.fillRect(chartArea.left, entryY, chartArea.right - chartArea.left, chartArea.bottom - entryY);
+              } else {
+                // Para posición SHORT (SELL): rojo arriba del entry (pérdida), verde abajo (ganancia)
+                ctx.fillStyle = 'rgba(255, 68, 68, 0.12)';
+                ctx.fillRect(chartArea.left, chartArea.top, chartArea.right - chartArea.left, entryY - chartArea.top);
+                ctx.fillStyle = 'rgba(0, 255, 136, 0.12)';
+                ctx.fillRect(chartArea.left, entryY, chartArea.right - chartArea.left, chartArea.bottom - entryY);
+              }
+
+              // Línea de entrada de la posición
+              ctx.strokeStyle = isLong ? '#00ff88' : '#ff4444';
+              ctx.lineWidth = 3;
+              ctx.setLineDash([8, 4]);
+              ctx.beginPath();
+              ctx.moveTo(chartArea.left, entryY);
+              ctx.lineTo(chartArea.right, entryY);
+              ctx.stroke();
+              ctx.setLineDash([]);
+
+              // Etiqueta de entrada
+              ctx.fillStyle = isLong ? '#00ff88' : '#ff4444';
+              ctx.font = 'bold 12px Arial';
+              ctx.textAlign = 'left';
+              ctx.strokeStyle = '#000000';
+              ctx.lineWidth = 2;
+              const entryText = `${visualizedPosition.side} ENTRY: $${visualizedPosition.entryPrice.toFixed(2)}`;
+              ctx.strokeText(entryText, chartArea.left + 10, entryY - 8);
+              ctx.fillText(entryText, chartArea.left + 10, entryY - 8);
+
+              // Línea de Take Profit si existe
+              if (visualizedPosition.takeProfitPrice) {
+                const tpY = yScale.getPixelForValue(visualizedPosition.takeProfitPrice);
+                
+                ctx.strokeStyle = '#00ff88';
+                ctx.lineWidth = 4;
+                ctx.shadowColor = '#00ff88';
+                ctx.shadowBlur = 6;
+                ctx.setLineDash([10, 5]);
+                ctx.beginPath();
+                ctx.moveTo(chartArea.left, tpY);
+                ctx.lineTo(chartArea.right, tpY);
+                ctx.stroke();
+                ctx.setLineDash([]);
+                ctx.shadowBlur = 0;
+
+                // Etiqueta TP
+                ctx.fillStyle = '#00ff88';
+                ctx.font = 'bold 14px Arial';
+                ctx.textAlign = 'left';
+                ctx.strokeStyle = '#000000';
+                ctx.lineWidth = 3;
+                const tpText = `TP: $${visualizedPosition.takeProfitPrice.toFixed(2)}`;
+                ctx.strokeText(tpText, chartArea.right - 150, tpY - 8);
+                ctx.fillText(tpText, chartArea.right - 150, tpY - 8);
+              }
+
+              // Línea de Stop Loss si existe
+              if (visualizedPosition.stopLossPrice) {
+                const slY = yScale.getPixelForValue(visualizedPosition.stopLossPrice);
+                
+                ctx.strokeStyle = '#ff4444';
+                ctx.lineWidth = 4;
+                ctx.shadowColor = '#ff4444';
+                ctx.shadowBlur = 6;
+                ctx.setLineDash([10, 5]);
+                ctx.beginPath();
+                ctx.moveTo(chartArea.left, slY);
+                ctx.lineTo(chartArea.right, slY);
+                ctx.stroke();
+                ctx.setLineDash([]);
+                ctx.shadowBlur = 0;
+
+                // Etiqueta SL
+                ctx.fillStyle = '#ff4444';
+                ctx.font = 'bold 14px Arial';
+                ctx.textAlign = 'left';
+                ctx.strokeStyle = '#000000';
+                ctx.lineWidth = 3;
+                const slText = `SL: $${visualizedPosition.stopLossPrice.toFixed(2)}`;
+                ctx.strokeText(slText, chartArea.right - 150, slY + 18);
+                ctx.fillText(slText, chartArea.right - 150, slY + 18);
+              }
+
+              ctx.restore();
+              
+            } catch (error) {
+              console.error('❌ [PLUGIN] Error dibujando posición visualizada:', error);
+            }
+            
+            // Si estamos mostrando una posición específica, no dibujar el overlay de trading genérico
+            return;
+          }
+
+          // PRIORIDAD 2: Trading overlay genérico (solo si no hay posición visualizada)
+          if (!state.isActive || state.isDrawing) {
+            return;
+          }
+          
+          // Verificar que tenemos todos los datos necesarios para trading overlay
+          if (!state.currentPrice || !state.entryPrice || !state.takeProfitLevel || !state.stopLossLevel) {
             return;
           }
 
@@ -2153,7 +2264,7 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
           try {
             ctx.save();
 
-            // CRÍTICO: Usar entryPrice como divisor de colores en lugar de currentPrice
+            // CRÍTICO: Usar entryPrice como divisor de colores
             const entryPriceY = yScale.getPixelForValue(state.entryPrice);
             const currentPriceY = yScale.getPixelForValue(state.currentPrice);
 
@@ -2182,7 +2293,6 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
             ctx.beginPath();
             ctx.moveTo(chartArea.left, entryPriceY);
             ctx.lineTo(chartArea.right, entryPriceY);
-            ctx.stroke();
             ctx.setLineDash([]);
             
             // Etiqueta del entry price

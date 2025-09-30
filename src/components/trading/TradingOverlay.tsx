@@ -46,6 +46,8 @@ interface TradingOverlayProps {
   currentPositionIndex?: number;
   onPositionChange?: (index: number) => void;
   onPositionPress?: (position: PositionOverlayData) => void;
+  // New prop for showing TP/SL lines instead of modal
+  onPositionTpSlVisualize?: (position: PositionOverlayData) => void;
 }
 
 const clamp = (value: number, min: number, max: number) =>
@@ -64,6 +66,7 @@ const TradingOverlay: React.FC<TradingOverlayProps> = ({
   currentPositionIndex = 0,
   onPositionChange,
   onPositionPress,
+  onPositionTpSlVisualize, // New prop for TP/SL visualization
 }) => {
   const height = chartDimensions.height;
 
@@ -261,15 +264,8 @@ const TradingOverlay: React.FC<TradingOverlayProps> = ({
       ]}
       onTouchEnd={handleTouchEnd}
     >
-      {/* Close Button */}
-      <TouchableOpacity
-        style={styles.closeButton}
-        onPress={onClose}
-        hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-      >
-        <Text style={styles.closeButtonText}>✕</Text>
-      </TouchableOpacity>
-
+      {/* No close button needed - overlay shows when there are positions */}
+      
       {symbolPositions.length === 0 && (
         <View style={styles.noDataContainer}>
           <Text style={styles.noDataText}>No hay posiciones abiertas para {symbol}</Text>
@@ -309,7 +305,23 @@ const TradingOverlay: React.FC<TradingOverlayProps> = ({
           {currentPosition && (
             <TouchableOpacity
               style={styles.positionInfo}
-              onPress={() => onPositionPress?.(currentPosition)}
+              onPress={() => {
+                // Activar visualización de TP/SL en lugar del modal
+                if (onPositionTpSlVisualize && currentPosition) {
+                  console.log(`🎯 [POSITION VISUALIZE] Activando visualización TP/SL para posición:`, {
+                    id: currentPosition.id,
+                    symbol: currentPosition.symbol,
+                    side: currentPosition.side,
+                    entryPrice: currentPosition.entryPrice,
+                    takeProfitPrice: currentPosition.takeProfitPrice,
+                    stopLossPrice: currentPosition.stopLossPrice
+                  });
+                  onPositionTpSlVisualize(currentPosition);
+                } else if (onPositionPress && currentPosition) {
+                  // Fallback al comportamiento anterior si no hay función de visualización
+                  onPositionPress(currentPosition);
+                }
+              }}
             >
               <Text style={styles.positionInfoText}>
                 {currentPosition.side} • ${formatPrice(currentPosition.entryPrice, symbol)}
@@ -348,31 +360,6 @@ const styles = StyleSheet.create({
     backgroundColor: 'transparent',
     zIndex: 100, // Reducido para estar por debajo de controles del gráfico
     overflow: 'visible',
-  },
-  closeButton: {
-    position: 'absolute',
-    top: 8,
-    right: 8,
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
-    borderWidth: 1,
-    borderColor: '#ffffff',
-    alignItems: 'center',
-    justifyContent: 'center',
-    zIndex: 101, // Reducido para estar por debajo de controles del gráfico
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.25,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  closeButtonText: {
-    color: '#ffffff',
-    fontSize: 18,
-    fontWeight: 'bold',
-    lineHeight: 18,
   },
   noDataContainer: {
     flex: 1,

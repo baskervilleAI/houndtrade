@@ -61,62 +61,12 @@ export const TradingScreen: React.FC = () => {
   const [showPositionModal, setShowPositionModal] = useState(false);
   const [selectedPosition, setSelectedPosition] = useState<any>(null);
   
-  // Trading overlay state
+  // Trading overlay state - now controlled automatically by positions
   const [showTradingOverlay, setShowTradingOverlay] = useState(false);
-  const [overlayActivationPrice, setOverlayActivationPrice] = useState<number | null>(null);
-  const [forceDeactivate, setForceDeactivate] = useState(false);
   
-  // Handler para el botón de overlay que también activa los niveles
-  const handleTradingOverlayToggle = useCallback(() => {
-    const newState = !showTradingOverlay;
-    setShowTradingOverlay(newState);
-    
-    // Si se está activando el overlay, obtener precio actual y enviarlo al chart
-    if (newState) {
-      // Intentar múltiples fuentes para obtener el precio actual
-      let currentPrice = tickers[selectedPair]?.price; // Precio del ticker
-      
-      if (!currentPrice) {
-        // Fallback 1: Precio del trading hook
-        const tradingPrice = getCurrentPrice(selectedPair);
-        if (tradingPrice) {
-          currentPrice = tradingPrice;
-        }
-      }
-      
-      if (!currentPrice) {
-        // Fallback 2: Precio base según el símbolo
-        const basePrices: Record<string, number> = {
-          'BTCUSDT': 114000,
-          'ETHUSDT': 4200,
-          'BNBUSDT': 1000,
-          'ADAUSDT': 0.8,
-          'SOLUSDT': 210,
-          'XRPUSDT': 2.8,
-          'DOTUSDT': 4.0,
-          'LINKUSDT': 22,
-          'MATICUSDT': 0.38,
-          'AVAXUSDT': 30,
-          'ATOMUSDT': 4.1,
-          'UNIUSDT': 7.7,
-          'LTCUSDT': 107
-        };
-        currentPrice = basePrices[selectedPair] || 100;
-      }
-      
-      console.log(`� [OVERLAY BUTTON] Activando overlay con precio actual: $${currentPrice}`);
-      setOverlayActivationPrice(currentPrice);
-      setForceDeactivate(false); // Asegurar que no esté en modo desactivación
-      // Reset el precio después de un momento para que pueda activarse nuevamente
-      setTimeout(() => setOverlayActivationPrice(null), 100);
-    } else {
-      console.log(`🔴 [OVERLAY BUTTON] Desactivando overlay - LIMPIEZA COMPLETA`);
-      setOverlayActivationPrice(null);
-      setForceDeactivate(true); // Forzar desactivación completa
-      // Reset después de un momento
-      setTimeout(() => setForceDeactivate(false), 100);
-    }
-  }, [showTradingOverlay, selectedPair, tickers, getCurrentPrice]);
+  // TP/SL visualization state for chart
+  const [visualizedPosition, setVisualizedPosition] = useState<any>(null);
+  const [showTpSlLines, setShowTpSlLines] = useState(false);
 
   // Estados para Take Profit y Stop Loss (mantenidos para funcionalidad del modal)
   const [overlayTakeProfit, setOverlayTakeProfit] = useState<number | null>(null);
@@ -142,6 +92,12 @@ export const TradingScreen: React.FC = () => {
       }
     });
   }, [tickers, getCurrentPrice, updatePrice]);
+
+  // Automatically show overlay when there are active positions
+  useEffect(() => {
+    const hasActivePositions = activeOrders.length > 0;
+    setShowTradingOverlay(hasActivePositions);
+  }, [activeOrders.length]);
 
   // Only log once when status changes
   useEffect(() => {
@@ -184,9 +140,6 @@ export const TradingScreen: React.FC = () => {
     }
     
     console.log(`🎯 [GO TO CHART] Precio actual: $${currentPrice}, Precio entrada: $${position.entryPrice}`);
-    
-    setOverlayActivationPrice(currentPrice);
-    setForceDeactivate(false);
     
     // NUEVO: Convertir TP/SL de PnL a precio si es necesario y establecer visualización
     let takeProfitPrice = null;
@@ -235,8 +188,6 @@ export const TradingScreen: React.FC = () => {
     console.log(`🎨 [COLOR LOGIC] Posición ${side} con entrada $${entryPrice.toFixed(2)}`);
     console.log(`🎨 [COLOR LOGIC] TP: ${takeProfitPrice ? '$' + takeProfitPrice.toFixed(2) : 'N/A'}`);
     console.log(`🎨 [COLOR LOGIC] SL: ${stopLossPrice ? '$' + stopLossPrice.toFixed(2) : 'N/A'}`);
-    
-    setTimeout(() => setOverlayActivationPrice(null), 100);
   }, [tickers, getCurrentPrice]);
 
   // Position navigation handlers
@@ -247,6 +198,33 @@ export const TradingScreen: React.FC = () => {
   const handlePositionPress = useCallback((position: any) => {
     setSelectedPosition(position);
     setShowPositionModal(true);
+  }, []);
+
+  // Handler for visualizing TP/SL lines when clicking position in overlay
+  const handlePositionTpSlVisualize = useCallback((position: any) => {
+    console.log(`🎯 [TP/SL VISUALIZE] Activando visualización para posición:`, {
+      id: position.id,
+      symbol: position.symbol,
+      side: position.side,
+      entryPrice: position.entryPrice,
+      takeProfitPrice: position.takeProfitPrice,
+      stopLossPrice: position.stopLossPrice
+    });
+    
+    setVisualizedPosition(position);
+    setShowTpSlLines(true);
+    
+    // También activar el trading overlay si no está activo
+    if (!showTradingOverlay) {
+      setShowTradingOverlay(true);
+    }
+  }, [showTradingOverlay]);
+
+  // Handler to clear TP/SL visualization
+  const handleClearTpSlVisualization = useCallback(() => {
+    console.log(`🧹 [TP/SL CLEAR] Limpiando visualización TP/SL`);
+    setShowTpSlLines(false);
+    setVisualizedPosition(null);
   }, []);
 
   // Calculate unrealized PnL for position
@@ -271,8 +249,6 @@ export const TradingScreen: React.FC = () => {
                 symbol={selectedPair}
                 showTradingOverlay={showTradingOverlay}
                 onTradingOverlayChange={setShowTradingOverlay}
-                activateOverlayWithPrice={overlayActivationPrice}
-                forceDeactivateOverlay={forceDeactivate}
                 activePositions={activeOrders.map(order => ({
                   id: order.id,
                   symbol: order.symbol,
@@ -283,8 +259,10 @@ export const TradingScreen: React.FC = () => {
                   quantity: order.quantity,
                   unrealizedPnL: calculateUnrealizedPnL(order, currentPrice),
                 }))}
-                // DESHABILITADO: No pasar onPositionPress para evitar que se abra el modal
-                // onPositionPress={handlePositionPress}
+                // New props for TP/SL visualization
+                visualizedPosition={visualizedPosition}
+                showTpSlVisualization={showTpSlLines}
+                onClearTpSlVisualization={handleClearTpSlVisualization}
               />
               <TradingOverlay
                 chartDimensions={{
@@ -294,7 +272,6 @@ export const TradingScreen: React.FC = () => {
                   y: 0,
                 }}
                 isVisible={showTradingOverlay}
-                onClose={() => setShowTradingOverlay(false)}
                 symbol={selectedPair}
                 latestPrice={currentPrice}
                 // Position visualization props
@@ -311,6 +288,7 @@ export const TradingScreen: React.FC = () => {
                 currentPositionIndex={currentPositionIndex}
                 onPositionChange={handlePositionChange}
                 onPositionPress={handlePositionPress}
+                onPositionTpSlVisualize={handlePositionTpSlVisualize}
               />
             </View>
           </View>
@@ -452,25 +430,6 @@ export const TradingScreen: React.FC = () => {
         </TouchableOpacity>
       )}
 
-      {/* Trading Overlay Toggle Button */}
-      {activeTab === 'trading' && (
-        <TouchableOpacity 
-          style={[
-            styles.floatingOverlayButton,
-            showTradingOverlay && styles.floatingOverlayButtonActive
-          ]}
-          onPress={handleTradingOverlayToggle}
-          activeOpacity={0.8}
-        >
-          <Text style={[
-            styles.floatingOverlayButtonText,
-            showTradingOverlay && styles.floatingOverlayButtonTextActive
-          ]}>
-            {showTradingOverlay ? '✕ Cerrar' : '📊 Overlay'}
-          </Text>
-        </TouchableOpacity>
-      )}
-
       {/* Order Form Modal */}
       <OrderFormModal
         visible={showOrderModal}
@@ -553,203 +512,50 @@ const styles = StyleSheet.create({
     paddingVertical: 16,
     borderBottomWidth: 1,
     borderBottomColor: '#333333',
-    ...(Platform.OS === 'web' && {
-      // Pequeños móviles y alta escala de texto
-      '@media (max-width: 360px), (max-height: 640px)': {
-        flexDirection: 'column',
-        gap: 6,
-        paddingVertical: 12,
-        paddingHorizontal: 12,
-      },
-      // Móviles estándar
-      '@media (max-width: 480px)': {
-        flexDirection: 'column',
-        gap: 8,
-        paddingVertical: 14,
-      },
-      // Tablets pequeñas en modo portrait
-      '@media (max-width: 600px) and (orientation: portrait)': {
-        flexDirection: 'row',
-        flexWrap: 'wrap',
-        gap: 8,
-      },
-      // Dispositivos con zoom alto o escalado de texto
-      '@media (min-resolution: 2dppx), (-webkit-min-device-pixel-ratio: 2)': {
-        paddingVertical: 14,
-        paddingHorizontal: 14,
-      },
-    }),
   },
   balanceContainer: {
     flex: 1,
     alignItems: 'center',
     minWidth: 100,
-    ...(Platform.OS === 'web' && {
-      // Pequeños móviles
-      '@media (max-width: 360px)': {
-        alignItems: 'flex-start',
-        paddingVertical: 6,
-        minWidth: 'auto',
-        width: '100%',
-      },
-      // Móviles estándar
-      '@media (max-width: 480px)': {
-        alignItems: 'flex-start',
-        paddingVertical: 8,
-        minWidth: 'auto',
-      },
-      // Tablets en portrait
-      '@media (max-width: 600px) and (orientation: portrait)': {
-        flex: '0 1 calc(50% - 8px)',
-        alignItems: 'center',
-      },
-      // Alto DPI / escalado
-      '@media (min-resolution: 2dppx)': {
-        minWidth: 110,
-      },
-    }),
   },
   balanceLabel: {
     fontSize: 14,
     color: '#888888',
     marginBottom: 4,
-    ...(Platform.OS === 'web' && {
-      '@media (max-width: 360px)': {
-        fontSize: 12,
-        marginBottom: 2,
-      },
-      '@media (max-height: 500px) and (orientation: landscape)': {
-        fontSize: 12,
-        marginBottom: 2,
-      },
-    }),
   },
   balanceValue: {
     fontSize: 18,
     fontWeight: 'bold',
     color: '#ffffff',
-    ...(Platform.OS === 'web' && {
-      '@media (max-width: 360px)': {
-        fontSize: 16,
-      },
-      '@media (max-width: 480px)': {
-        fontSize: 17,
-      },
-      '@media (max-height: 500px) and (orientation: landscape)': {
-        fontSize: 16,
-      },
-    }),
   },
   equityContainer: {
     flex: 1,
     alignItems: 'center',
     minWidth: 100,
-    ...(Platform.OS === 'web' && {
-      '@media (max-width: 360px)': {
-        alignItems: 'flex-start',
-        paddingVertical: 6,
-        minWidth: 'auto',
-        width: '100%',
-      },
-      '@media (max-width: 480px)': {
-        alignItems: 'flex-start',
-        paddingVertical: 8,
-        minWidth: 'auto',
-      },
-      '@media (max-width: 600px) and (orientation: portrait)': {
-        flex: '0 1 calc(50% - 8px)',
-        alignItems: 'center',
-      },
-      '@media (min-resolution: 2dppx)': {
-        minWidth: 110,
-      },
-    }),
   },
   equityLabel: {
     fontSize: 14,
     color: '#888888',
     marginBottom: 4,
-    ...(Platform.OS === 'web' && {
-      '@media (max-width: 360px)': {
-        fontSize: 12,
-        marginBottom: 2,
-      },
-      '@media (max-height: 500px) and (orientation: landscape)': {
-        fontSize: 12,
-        marginBottom: 2,
-      },
-    }),
   },
   equityValue: {
     fontSize: 18,
     fontWeight: 'bold',
-    ...(Platform.OS === 'web' && {
-      '@media (max-width: 360px)': {
-        fontSize: 16,
-      },
-      '@media (max-width: 480px)': {
-        fontSize: 17,
-      },
-      '@media (max-height: 500px) and (orientation: landscape)': {
-        fontSize: 16,
-      },
-    }),
   },
   pnlContainer: {
     flex: 1,
     alignItems: 'center',
     minWidth: 100,
-    ...(Platform.OS === 'web' && {
-      '@media (max-width: 360px)': {
-        alignItems: 'flex-start',
-        paddingVertical: 6,
-        minWidth: 'auto',
-        width: '100%',
-      },
-      '@media (max-width: 480px)': {
-        alignItems: 'flex-start',
-        paddingVertical: 8,
-        minWidth: 'auto',
-      },
-      '@media (max-width: 600px) and (orientation: portrait)': {
-        flex: '0 1 calc(50% - 8px)',
-        alignItems: 'center',
-      },
-      '@media (min-resolution: 2dppx)': {
-        minWidth: 110,
-      },
-    }),
   },
   pnlLabel: {
     fontSize: 14,
     color: '#888888',
     marginBottom: 4,
-    ...(Platform.OS === 'web' && {
-      '@media (max-width: 360px)': {
-        fontSize: 12,
-        marginBottom: 2,
-      },
-      '@media (max-height: 500px) and (orientation: landscape)': {
-        fontSize: 12,
-        marginBottom: 2,
-      },
-    }),
   },
   pnlValue: {
     fontSize: 18,
     fontWeight: 'bold',
     color: '#ffffff',
-    ...(Platform.OS === 'web' && {
-      '@media (max-width: 360px)': {
-        fontSize: 16,
-      },
-      '@media (max-width: 480px)': {
-        fontSize: 17,
-      },
-      '@media (max-height: 500px) and (orientation: landscape)': {
-        fontSize: 16,
-      },
-    }),
   },
   // New menu navigation
   menuNavigation: {
@@ -759,20 +565,6 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     borderBottomWidth: 1,
     borderBottomColor: '#333333',
-    ...(Platform.OS === 'web' && {
-      '@media (max-width: 360px)': {
-        paddingHorizontal: 8,
-        paddingVertical: 6,
-      },
-      '@media (max-width: 480px)': {
-        paddingHorizontal: 12,
-        paddingVertical: 6,
-      },
-      '@media (max-height: 500px) and (orientation: landscape)': {
-        paddingVertical: 4,
-        paddingHorizontal: 12,
-      },
-    }),
   },
   menuButton: {
     flex: 1,
@@ -782,24 +574,6 @@ const styles = StyleSheet.create({
     marginHorizontal: 4,
     borderRadius: 8,
     position: 'relative',
-    ...(Platform.OS === 'web' && {
-      '@media (max-width: 360px)': {
-        paddingVertical: 8,
-        paddingHorizontal: 4,
-        marginHorizontal: 2,
-        borderRadius: 6,
-      },
-      '@media (max-width: 480px)': {
-        paddingVertical: 10,
-        paddingHorizontal: 6,
-        marginHorizontal: 3,
-      },
-      '@media (max-height: 500px) and (orientation: landscape)': {
-        paddingVertical: 6,
-        paddingHorizontal: 4,
-        marginHorizontal: 2,
-      },
-    }),
   },
   activeMenuButton: {
     backgroundColor: '#2a2a2a',
@@ -811,20 +585,6 @@ const styles = StyleSheet.create({
     color: '#888888',
     fontWeight: '500',
     textAlign: 'center',
-    ...(Platform.OS === 'web' && {
-      '@media (max-width: 360px)': {
-        fontSize: 11,
-      },
-      '@media (max-width: 480px)': {
-        fontSize: 12,
-      },
-      '@media (max-height: 500px) and (orientation: landscape)': {
-        fontSize: 11,
-      },
-      '@media (min-resolution: 3dppx)': {
-        fontSize: 13,
-      },
-    }),
   },
   activeMenuButtonText: {
     color: '#00ff88',
@@ -855,40 +615,6 @@ const styles = StyleSheet.create({
   chartContainer: {
     flex: 1,
     backgroundColor: '#0a0a0a',
-    ...(Platform.OS === 'web' && {
-      // Móviles muy pequeños
-      '@media (max-width: 360px)': {
-        minHeight: '50vh',
-      },
-      // Móviles estándar
-      '@media (max-width: 480px)': {
-        minHeight: '55vh',
-      },
-      // Móviles grandes / Tablets pequeñas
-      '@media (max-width: 768px)': {
-        minHeight: '60vh',
-      },
-      // Tablets medianas
-      '@media (min-width: 769px) and (max-width: 1024px)': {
-        minHeight: '65vh',
-      },
-      // Escritorio
-      '@media (min-width: 1025px)': {
-        minHeight: '70vh',
-      },
-      // Landscape en móviles (altura limitada)
-      '@media (max-height: 500px) and (orientation: landscape)': {
-        minHeight: '40vh',
-      },
-      // Tablets en landscape
-      '@media (min-width: 768px) and (max-width: 1024px) and (orientation: landscape)': {
-        minHeight: '55vh',
-      },
-      // Dispositivos con alta densidad
-      '@media (min-resolution: 2dppx)': {
-        minHeight: '62vh',
-      },
-    }),
   },
   // Wrapper para gráfico y overlay
   chartWrapper: {
@@ -915,88 +641,6 @@ const styles = StyleSheet.create({
     color: '#000000',
     fontSize: 14,
     fontWeight: 'bold',
-  },
-  // Trading overlay floating button
-  floatingOverlayButton: {
-    position: 'absolute',
-    bottom: 20,
-    right: 20,
-    backgroundColor: '#2a2a2a',
-    borderRadius: 25,
-    paddingVertical: 12,
-    paddingHorizontal: 20,
-    elevation: 8,
-    borderWidth: 2,
-    borderColor: '#444444',
-    zIndex: 1000,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    minWidth: 100,
-    // Animación suave en web
-    ...(Platform.OS === 'web' && {
-      transition: 'all 0.2s ease-in-out',
-      cursor: 'pointer',
-      // Móviles pequeños
-      '@media (max-width: 360px)': {
-        bottom: 15,
-        right: 15,
-        paddingVertical: 10,
-        paddingHorizontal: 16,
-        borderRadius: 20,
-        minWidth: 85,
-      },
-      // Móviles estándar
-      '@media (max-width: 480px)': {
-        bottom: 15,
-        right: 15,
-        paddingVertical: 10,
-        paddingHorizontal: 18,
-        minWidth: 90,
-      },
-      // Landscape móvil
-      '@media (max-height: 500px) and (orientation: landscape)': {
-        bottom: 10,
-        right: 15,
-        paddingVertical: 8,
-        paddingHorizontal: 16,
-        minWidth: 80,
-      },
-      // Shadow web
-      boxShadow: '0px 4px 12px rgba(0, 0, 0, 0.3)',
-      // Hover effect
-      ':hover': {
-        transform: 'translateY(-2px)',
-        boxShadow: '0px 6px 16px rgba(0, 0, 0, 0.4)',
-      },
-    }),
-  },
-  floatingOverlayButtonActive: {
-    backgroundColor: '#00ff88',
-    borderColor: '#00ff88',
-    ...(Platform.OS === 'web' && {
-      boxShadow: '0px 4px 12px rgba(0, 255, 136, 0.4)',
-      ':hover': {
-        boxShadow: '0px 6px 16px rgba(0, 255, 136, 0.5)',
-      },
-    }),
-  },
-  floatingOverlayButtonText: {
-    color: '#ffffff',
-    fontSize: 14,
-    fontWeight: 'bold',
-    textAlign: 'center',
-    ...(Platform.OS === 'web' && {
-      '@media (max-width: 360px)': {
-        fontSize: 12,
-      },
-      '@media (max-height: 500px) and (orientation: landscape)': {
-        fontSize: 12,
-      },
-    }),
-  },
-  floatingOverlayButtonTextActive: {
-    color: '#000000',
   },
   // Error banner
   errorBanner: {
