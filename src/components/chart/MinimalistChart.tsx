@@ -103,7 +103,7 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
   const [isStreaming, setIsStreaming] = useState(false);
   const [activeIndicators, setActiveIndicators] = useState<Set<string>>(new Set());
   const [lastUpdateTime, setLastUpdateTime] = useState<number>(0);
-  const updateThrottleMs = 100; // Throttle updates to max 10fps for better performance
+  const updateThrottleMs = 50; // OPTIMIZED: Reduced from 100ms to 50ms for faster chart updates (20fps)
   
   // Estados para controlar interacciones de usuario y evitar race conditions
   const [isUserInteracting, setIsUserInteracting] = useState(false);
@@ -464,7 +464,7 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
     }
   }, [currentSymbol, currentInterval, activeIndicators]);
   
-  const restoreIndicatorConfigs = useCallback((chart: any, candleData: CandleData[]) => {
+  const restoreIndicatorConfigs = useCallback((chart: any, candleData: CandleData[], currentTechnicalIndicators: any) => {
     if (!chart?.data?.datasets || !persistentIndicatorConfigsRef.current) return;
     
     const configs = persistentIndicatorConfigsRef.current;
@@ -478,8 +478,12 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
       candleDataLength: candleData.length
     });
     
-    // Recalcular indicadores técnicos con datos actuales
-    const currentTechnicalIndicators = useTechnicalIndicators(candleData);
+    // FIXED: Remove existing indicator datasets before adding new ones
+    const candleDataset = chart.data.datasets.find((dataset: any) => dataset.type === 'candlestick');
+    chart.data.datasets = candleDataset ? [candleDataset] : [];
+    
+    // Usar indicadores técnicos ya calculados
+    // const currentTechnicalIndicators = useTechnicalIndicators(candleData); // REMOVED: Hook call in callback
     
     // Restaurar cada indicador preservando su configuración original
     configKeys.forEach(label => {
@@ -2554,7 +2558,7 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
             });
             
             // Restaurar directamente usando las configuraciones persistidas
-            restoreIndicatorConfigs(chartRef.current, candleData);
+            restoreIndicatorConfigs(chartRef.current, candleData, technicalIndicators);
           } else if (activeIndicators.size > 0) {
             // Usar indicadores activos actuales si no hay configuraciones guardadas
             logChart('APPLYING_CURRENT_ACTIVE_INDICATORS', {
@@ -2916,16 +2920,8 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
       
       const updateStartTime = Date.now();
       
-      // CRÍTICO: Restaurar indicadores técnicos ANTES de actualizar el gráfico
-      // para preservar los colores y configuraciones del usuario
-      if (persistentIndicatorConfigsRef.current && Object.keys(persistentIndicatorConfigsRef.current).length > 0) {
-        restoreIndicatorConfigs(chart, candleData);
-        logChart('INDICATORS_RESTORED_DURING_UPDATE', {
-          updateSequence: updateSequence.current,
-          indicatorCount: Object.keys(persistentIndicatorConfigsRef.current).length,
-          timestamp: new Date().toLocaleTimeString()
-        });
-      }
+      // REMOVED: Restaurar indicadores en cada update era innecesario y causaba duplicación
+      // Los indicadores se restauran solo en la inicialización del gráfico
       
       chart.update('none');
       const updateDuration = Date.now() - updateStartTime;

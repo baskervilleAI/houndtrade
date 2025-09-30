@@ -4,7 +4,7 @@ import { streamingService } from '../services/streamingService';
 import { binanceService, TickerData } from '../services/binanceService';
 
 const POPULAR_PAIRS = ['BTCUSDT', 'ETHUSDT', 'ADAUSDT', 'BNBUSDT', 'SOLUSDT'];
-const INITIAL_FETCH_INTERVAL = 5000; // 5 seconds - optimized for faster updates
+const INITIAL_FETCH_INTERVAL = 2000; // OPTIMIZED: Reduced from 5000ms to 2000ms for faster updates
 
 interface UseMarketDataOptions {
   autoStart?: boolean;
@@ -160,9 +160,9 @@ export const useMarketData = (options: UseMarketDataOptions = {}) => {
     }
     
     refreshInterval_ref.current = setInterval(() => {
-      // Silent refresh
+      // Silent refresh - but more frequent for better responsiveness
       initializeMarketData();
-    }, refreshInterval * 4); // Quadruple the interval for stability
+    }, refreshInterval * 2); // OPTIMIZED: Reduced from *4 to *2 for better updates
 
     if (process.env.NODE_ENV === 'development') {
       console.log('✅ Servicio de datos iniciado');

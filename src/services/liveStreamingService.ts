@@ -135,12 +135,12 @@ class LiveStreamingService extends SimpleEventEmitter {
   }
 
   private getBinanceWsUrl(): string {
-    // Intentar diferentes URLs de Binance para evitar bloqueos
+    // OPTIMIZED: Intentar primero las URLs más confiables
     const urls = [
-      'wss://stream.binance.com:9443/ws/',
-      'wss://stream.binance.com/ws/',
-      'wss://data-stream.binance.vision/ws/',
-      'wss://dstream.binance.com/ws/'
+      'wss://stream.binance.com/ws/',           // Más confiable, sin puerto específico
+      'wss://data-stream.binance.vision/ws/',   // URL alternativa oficial
+      'wss://stream.binance.com:9443/ws/',      // Puerto específico como fallback
+      'wss://dstream.binance.com/ws/'           // Última opción
     ];
     
     // Rotar URL basado en intentos de reconexión
@@ -153,7 +153,7 @@ class LiveStreamingService extends SimpleEventEmitter {
       totalUrls: urls.length,
       selectedUrl,
       allUrls: urls,
-      rotationStrategy: 'round-robin_by_reconnect_attempts'
+      rotationStrategy: 'optimized_order_by_reliability'
     });
     
     return selectedUrl;
@@ -216,12 +216,12 @@ class LiveStreamingService extends SimpleEventEmitter {
           readyStateText: this.getReadyStateText(this.ws.readyState)
         });
 
-        // Timeout para conexión
+        // OPTIMIZED: Timeout más corto para cambiar a polling más rápido
         const connectionTimeout = setTimeout(() => {
           if (this.ws && this.ws.readyState === WebSocket.CONNECTING) {
             const duration = Date.now() - connectStartTime;
             debugLogger.log('STREAMING', 'Connection timeout - switching to polling fallback', {
-              timeoutDuration: 10000,
+              timeoutDuration: 3000, // Reduced from 10000 to 3000ms
               actualDuration: duration,
               readyState: this.ws.readyState,
               readyStateText: this.getReadyStateText(this.ws.readyState)
@@ -233,7 +233,7 @@ class LiveStreamingService extends SimpleEventEmitter {
             this.startPollingFallback();
             reject(new Error('Connection timeout'));
           }
-        }, 10000); // 10 segundos timeout
+        }, 3000); // OPTIMIZED: Reduced from 10000ms to 3000ms // 10 segundos timeout
 
         this.ws.onopen = () => {
           const duration = Date.now() - connectStartTime;
@@ -416,7 +416,7 @@ class LiveStreamingService extends SimpleEventEmitter {
       reason: 'WebSocket_connection_failed_or_unavailable',
       activeStreams: this.activeStreams.size,
       streamKeys: Array.from(this.activeStreams.keys()),
-      pollingIntervalMs: 3000,
+      pollingIntervalMs: 1500, // OPTIMIZED: Reduced from 3000ms to 1500ms
       candlesPerPoll: 3,
       reconnectAttempts: this.reconnectAttempts,
       maxReconnectAttempts: this.maxReconnectAttempts
@@ -424,7 +424,7 @@ class LiveStreamingService extends SimpleEventEmitter {
     
     this.usePollingFallback = true;
     
-    // Polling cada 3 segundos para actualizar datos más frecuentemente
+    // OPTIMIZED: Polling cada 1.5 segundos para actualizaciones más rápidas
     this.pollingInterval = setInterval(async () => {
       const pollStartTime = Date.now();
       let successfulPolls = 0;
@@ -432,7 +432,7 @@ class LiveStreamingService extends SimpleEventEmitter {
       
       debugLogger.log('STREAMING', 'Starting polling cycle', {
         activeStreamsCount: this.activeStreams.size,
-        cycleNumber: Math.floor((Date.now() - this.connectionStartTime) / 3000),
+        cycleNumber: Math.floor((Date.now() - this.connectionStartTime) / 1500), // Updated interval
         timeSinceStarted: Date.now() - this.connectionStartTime
       });
       
@@ -524,7 +524,7 @@ class LiveStreamingService extends SimpleEventEmitter {
         totalStreams: this.activeStreams.size,
         successRate: this.activeStreams.size > 0 ? Math.round((successfulPolls / this.activeStreams.size) * 100) : 0
       });
-    }, 3000); // Reducido a 3 segundos para mejor responsividad
+    }, 1500); // OPTIMIZED: Reduced from 3000ms to 1500ms for faster updates
   }
 
   private isCandleLikelyFinalized(candle: CandleData, interval: string): boolean {

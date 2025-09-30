@@ -1,4 +1,4 @@
-import React, { useCallback } from 'react';
+import React, { useCallback, useMemo } from 'react';
 import {
   View,
   Text,
@@ -11,7 +11,7 @@ import { useMarket } from '../../context/AppContext';
 import { formatPrice, formatPercentage } from '../../utils/formatters';
 import { POPULAR_PAIRS } from '../../constants/tradingSymbols';
 
-export const MarketData: React.FC = () => {
+export const MarketData: React.FC = React.memo(() => {
   const { selectedPair, tickers, setSelectedPair } = useMarket();
   
   // Handle pair selection
@@ -21,19 +21,31 @@ export const MarketData: React.FC = () => {
     setSelectedPair(symbol);
   }, [selectedPair, setSelectedPair]);
 
+  // OPTIMIZED: Memoize ticker count to prevent unnecessary re-renders
+  const tickerCount = useMemo(() => Object.keys(tickers).length, [tickers]);
+  
+  // OPTIMIZED: Memoize ticker entries to avoid recalculating on each render
+  const tickerEntries = useMemo(() => {
+    return POPULAR_PAIRS.map(symbol => ({
+      symbol,
+      ticker: tickers[symbol],
+      isSelected: symbol === selectedPair,
+      priceChangeColor: tickers[symbol]?.changePercent24h >= 0 ? '#00ff88' : '#ff4444'
+    }));
+  }, [tickers, selectedPair]);
+
   // Debug: Log ticker data changes only when count changes
   React.useEffect(() => {
-    const tickerCount = Object.keys(tickers).length;
     if (tickerCount > 0) {
-      console.log(`� Datos de mercado actualizados: ${tickerCount} pares`);
+      console.log(`🔄 Datos de mercado actualizados: ${tickerCount} pares`);
     }
-  }, [Object.keys(tickers).length]); // Only re-run when count changes
+  }, [tickerCount]); // Only re-run when count changes
 
   return (
     <View style={styles.container}>
       <View style={styles.headerContainer}>
         <Text style={styles.title}>Pares de Trading</Text>
-        {Object.keys(tickers).length > 0 && (
+        {tickerCount > 0 && (
           <View style={styles.liveIndicator}>
             <View style={styles.liveDot} />
             <Text style={styles.liveText}>LIVE</Text>
@@ -41,11 +53,7 @@ export const MarketData: React.FC = () => {
         )}
       </View>
       <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.pairsList}>
-        {POPULAR_PAIRS.map(symbol => {
-          const ticker = tickers[symbol];
-          const isSelected = symbol === selectedPair;
-          const priceChangeColor = ticker?.changePercent24h >= 0 ? '#00ff88' : '#ff4444';
-          
+        {tickerEntries.map(({ symbol, ticker, isSelected, priceChangeColor }) => {
           return (
             <TouchableOpacity
               key={symbol}
@@ -78,7 +86,7 @@ export const MarketData: React.FC = () => {
       </ScrollView>
     </View>
   );
-};
+}); // Close React.memo
 
 const styles = StyleSheet.create({
   container: {

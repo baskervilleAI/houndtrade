@@ -79,7 +79,7 @@ export const TradingScreen: React.FC = () => {
   const { isInitialized, getStatus } = useMarketData({
     autoStart: true,
     symbols: TRADING_SYMBOLS,
-    refreshInterval: 10000, // 10 seconds - optimized for more frequent updates
+    refreshInterval: 3000, // OPTIMIZED: Reduced from 10000ms to 3000ms for faster updates
   });
 
   // Update trading prices when market data changes
