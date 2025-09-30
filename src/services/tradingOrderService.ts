@@ -1,5 +1,7 @@
 import { TradingOrder, OrderCreationParams, OrderStatus, OrderSide, OrderType, OrderValidation, MarketPrice } from '../types/trading';
 import { TradingStorageService } from './tradingStorageService';
+import { marketSimulationService, MarketData } from './marketSimulationService';
+import { tradingNotificationService } from './tradingNotificationService';
 import { debugLogger } from '../utils/debugLogger';
 
 /**
@@ -10,9 +12,12 @@ export class TradingOrderService {
   private storageService: TradingStorageService;
   private marketPrices: Map<string, MarketPrice> = new Map();
   private priceMonitoringInterval: NodeJS.Timeout | null = null;
+  private priceSubscriptions: Map<string, () => void> = new Map();
+  private onPriceUpdateCallbacks: Set<(symbol: string, price: number) => void> = new Set();
 
   private constructor() {
     this.storageService = TradingStorageService.getInstance();
+    this.initializeMarketSimulation();
   }
 
   public static getInstance(): TradingOrderService {
@@ -20,6 +25,65 @@ export class TradingOrderService {
       TradingOrderService.instance = new TradingOrderService();
     }
     return TradingOrderService.instance;
+  }
+
+  /**
+   * Inicializa la simulación de mercado para símbolos comunes y los conecta con precios reales
+   */
+  private initializeMarketSimulation(): void {
+    const commonSymbols = [
+      'BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'ADAUSDT', 'SOLUSDT',
+      'DOTUSDT', 'LINKUSDT', 'MATICUSDT', 'XRPUSDT', 'AVAXUSDT',
+      'DOGEUSDT', 'ATOMUSDT', 'BCHUSDT', 'FILUSDT', 'OPUSDT',
+      'UNIUSDT', 'LTCUSDT', 'TRXUSDT', 'APTUSDT', 'ICPUSDT',
+      'ETCUSDT', 'NEARUSDT', 'XLMUSDT', 'ARBUSDT', 'VETUSDT'
+    ];
+
+    commonSymbols.forEach(symbol => {
+      // Suscribirse a actualizaciones de precio
+      const unsubscribe = marketSimulationService.subscribe(symbol, (marketData: MarketData) => {
+        this.updateMarketPrice(symbol, marketData.price);
+      });
+      
+      this.priceSubscriptions.set(symbol, unsubscribe);
+      
+      // Iniciar simulación
+      marketSimulationService.startSimulation(symbol, 2000); // Cada 2 segundos
+    });
+
+    debugLogger.debug('Simulación de mercado inicializada para trading');
+  }
+
+  /**
+   * Actualiza el precio de mercado interno y notifica callbacks
+   */
+  private updateMarketPrice(symbol: string, price: number): void {
+    this.marketPrices.set(symbol, {
+      symbol,
+      price,
+      timestamp: Date.now()
+    });
+
+    // Notificar callbacks de actualización de precios
+    this.onPriceUpdateCallbacks.forEach(callback => {
+      try {
+        callback(symbol, price);
+      } catch (error) {
+        debugLogger.error('Error en callback de actualización de precio:', error);
+      }
+    });
+  }
+
+  /**
+   * Agrega un callback que se ejecuta cuando se actualiza cualquier precio
+   */
+  public onPriceUpdate(callback: (symbol: string, price: number) => void): () => void {
+    this.onPriceUpdateCallbacks.add(callback);
+    
+    // Retorna función para desuscribirse
+    return () => {
+      this.onPriceUpdateCallbacks.delete(callback);
+    };
   }
 
   /**
@@ -132,37 +196,42 @@ export class TradingOrderService {
   }
 
   /**
-   * Obtiene el precio actual de un símbolo (simulado por ahora)
+   * Obtiene el precio actual de un símbolo (conectado con simulación)
    */
   private async getCurrentPrice(symbol: string): Promise<number> {
-    // Por ahora devolvemos un precio simulado
-    // En una implementación real, esto se conectaría a la API de Binance
+    // Primero intentar obtener de la simulación en tiempo real
+    const simulatedPrice = marketSimulationService.getCurrentPrice(symbol);
+    if (simulatedPrice) {
+      this.updateMarketPrice(symbol, simulatedPrice);
+      return simulatedPrice;
+    }
+
+    // Fallback a precios cacheados
     const cached = this.marketPrices.get(symbol);
     if (cached && Date.now() - cached.timestamp < 10000) { // Cache por 10 segundos
       return cached.price;
     }
 
-    // Precios simulados para testing
-    const simulatedPrices: Record<string, number> = {
-      'BTCUSDT': 45000 + (Math.random() - 0.5) * 2000,
-      'ETHUSDT': 3000 + (Math.random() - 0.5) * 200,
-      'BNBUSDT': 350 + (Math.random() - 0.5) * 30,
-      'ADAUSDT': 0.5 + (Math.random() - 0.5) * 0.1,
-      'SOLUSDT': 100 + (Math.random() - 0.5) * 20,
-      'DOTUSDT': 8 + (Math.random() - 0.5) * 2,
-      'LINKUSDT': 15 + (Math.random() - 0.5) * 3,
-      'MATICUSDT': 1.2 + (Math.random() - 0.5) * 0.3,
+    // Últimos valores predeterminados si no hay nada más
+    const defaultPrices: Record<string, number> = {
+      'BTCUSDT': 45000,
+      'ETHUSDT': 3000,
+      'BNBUSDT': 350,
+      'ADAUSDT': 0.5,
+      'SOLUSDT': 100,
+      'DOTUSDT': 8,
+      'LINKUSDT': 15,
+      'MATICUSDT': 1.2,
     };
 
-    const price = simulatedPrices[symbol] || 1000;
+    const price = defaultPrices[symbol] || 1000;
     
-    this.marketPrices.set(symbol, {
-      symbol,
-      price,
-      timestamp: Date.now()
-    });
-
-    debugLogger.debug(`Precio simulado para ${symbol}: $${price.toFixed(2)}`);
+    // Inicializar símbolo en simulación si no existe
+    marketSimulationService.initializeSymbol(symbol, price);
+    marketSimulationService.startSimulation(symbol, 2000);
+    
+    this.updateMarketPrice(symbol, price);
+    debugLogger.debug(`Precio inicializado para ${symbol}: $${price.toFixed(2)}`);
     return price;
   }
 
@@ -253,6 +322,14 @@ export class TradingOrderService {
       // Iniciar monitoreo de precios si no está activo
       this.startPriceMonitoring();
 
+      // Enviar notificación de orden creada
+      tradingNotificationService.notifyOrderCreated(
+        order.id,
+        order.symbol,
+        order.side,
+        order.usdtAmount
+      );
+
       return {
         success: true,
         order
@@ -319,6 +396,14 @@ export class TradingOrderService {
         reason
       });
 
+      // Enviar notificación de cierre manual
+      tradingNotificationService.notifyManualClose(
+        order.id,
+        order.symbol,
+        currentPrice,
+        pnl
+      );
+
       return {
         success: true,
         order: updatedOrder
@@ -373,6 +458,13 @@ export class TradingOrderService {
       orderId: order.id,
       reason
     });
+
+    // Enviar notificación de cancelación
+    tradingNotificationService.notifyOrderCancelled(
+      order.id,
+      order.symbol,
+      reason
+    );
 
     return {
       success: true,
@@ -451,6 +543,23 @@ export class TradingOrderService {
         pnl: pnl.toFixed(2)
       });
 
+      // Enviar notificación apropiada
+      if (newStatus === OrderStatus.FILLED_TP) {
+        tradingNotificationService.notifyTakeProfitHit(
+          order.id,
+          order.symbol,
+          currentPrice,
+          pnl
+        );
+      } else {
+        tradingNotificationService.notifyStopLossHit(
+          order.id,
+          order.symbol,
+          currentPrice,
+          pnl
+        );
+      }
+
       return true;
     }
 
@@ -458,14 +567,14 @@ export class TradingOrderService {
   }
 
   /**
-   * Inicia el monitoreo de precios para órdenes activas
+   * Inicia el monitoreo de precios para órdenes activas con verificación más frecuente
    */
   private startPriceMonitoring(): void {
     if (this.priceMonitoringInterval) {
       return; // Ya está activo
     }
 
-    debugLogger.debug('Iniciando monitoreo de precios para TP/SL');
+    debugLogger.debug('Iniciando monitoreo intensivo de precios para TP/SL');
 
     this.priceMonitoringInterval = setInterval(async () => {
       const activeOrders = this.getActiveOrders();
@@ -483,7 +592,7 @@ export class TradingOrderService {
           debugLogger.error(`Error al verificar TP/SL para orden ${order.id}`, error);
         }
       }
-    }, 5000); // Verificar cada 5 segundos
+    }, 1000); // Verificar cada 1 segundo para mayor precisión
   }
 
   /**
@@ -529,19 +638,26 @@ export class TradingOrderService {
    * Obtiene el precio actual cacheado de un símbolo
    */
   getCurrentPriceSync(symbol: string): number | null {
+    // Primero intentar obtener de la simulación
+    const simulatedPrice = marketSimulationService.getCurrentPrice(symbol);
+    if (simulatedPrice) {
+      return simulatedPrice;
+    }
+    
+    // Fallback al cache local
     const cached = this.marketPrices.get(symbol);
     return cached ? cached.price : null;
   }
 
   /**
-   * Actualiza manualmente el precio de un símbolo (para testing)
+   * Actualiza manualmente el precio de un símbolo (para testing o correcciones)
    */
   updatePrice(symbol: string, price: number): void {
-    this.marketPrices.set(symbol, {
-      symbol,
-      price,
-      timestamp: Date.now()
-    });
+    // Actualizar en simulación de mercado
+    marketSimulationService.updatePriceManually(symbol, price);
+    
+    // Actualizar cache local
+    this.updateMarketPrice(symbol, price);
     
     debugLogger.debug(`Precio actualizado manualmente para ${symbol}: $${price.toFixed(2)}`);
   }
@@ -573,7 +689,17 @@ export class TradingOrderService {
    */
   cleanup(): void {
     this.stopPriceMonitoring();
+    
+    // Cancelar suscripciones de precio
+    this.priceSubscriptions.forEach((unsubscribe, symbol) => {
+      unsubscribe();
+    });
+    this.priceSubscriptions.clear();
+    
+    // Limpiar callbacks
+    this.onPriceUpdateCallbacks.clear();
+    
     this.marketPrices.clear();
-    debugLogger.debug('TradingOrderService limpiado');
+    debugLogger.debug('TradingOrderService limpiado completamente');
   }
 }

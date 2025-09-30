@@ -1,14 +1,24 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useMemo } from 'react';
 import {
   View,
   StyleSheet,
   GestureResponderEvent,
   Text,
-  PanResponder,
-  PanResponderInstance,
   TouchableOpacity,
 } from 'react-native';
 import { formatPrice } from '../../utils/formatters';
+import { OrderSide } from '../../types/trading';
+
+interface PositionOverlayData {
+  id: string;
+  symbol: string;
+  side: OrderSide;
+  entryPrice: number;
+  takeProfitPrice?: number;
+  stopLossPrice?: number;
+  quantity: number;
+  unrealizedPnL: number;
+}
 
 interface TradingOverlayProps {
   chartDimensions: {
@@ -31,13 +41,12 @@ interface TradingOverlayProps {
   initialStopLoss?: number | null;
   onTakeProfitChange?: (price: number | null) => void;
   onStopLossChange?: (price: number | null) => void;
+  // New props for position visualization
+  activePositions?: PositionOverlayData[];
+  currentPositionIndex?: number;
+  onPositionChange?: (index: number) => void;
+  onPositionPress?: (position: PositionOverlayData) => void;
 }
-
-const PRICE_AXIS_OFFSET = 68;
-const SLIDER_RAIL_WIDTH = 48;
-const HANDLE_SIZE = 44;
-const HANDLE_RADIUS = HANDLE_SIZE / 2;
-const EDGE_THRESHOLD = 12;
 
 const clamp = (value: number, min: number, max: number) =>
   Math.min(Math.max(value, min), max);
@@ -50,23 +59,23 @@ const TradingOverlay: React.FC<TradingOverlayProps> = ({
   symbol = 'BTCUSDT',
   priceScale,
   latestPrice,
-  initialTakeProfit = null,
-  initialStopLoss = null,
-  onTakeProfitChange,
-  onStopLossChange,
+  // Position props
+  activePositions = [],
+  currentPositionIndex = 0,
+  onPositionChange,
+  onPositionPress,
 }) => {
-  const [tpHandleY, setTpHandleY] = useState(0);
-  const [slHandleY, setSlHandleY] = useState(chartDimensions.height);
-  const tpHandleRef = useRef(tpHandleY);
-  const slHandleRef = useRef(slHandleY);
-  const tpStartRef = useRef(0);
-  const slStartRef = useRef(0);
-  const tpPanResponderRef = useRef<PanResponderInstance | null>(null);
-  const slPanResponderRef = useRef<PanResponderInstance | null>(null);
-  const previousTpPrice = useRef<number | null>(null);
-  const previousSlPrice = useRef<number | null>(null);
-
   const height = chartDimensions.height;
+
+  // Filter positions for current symbol
+  const symbolPositions = useMemo(() => {
+    return activePositions.filter(pos => pos.symbol === symbol);
+  }, [activePositions, symbol]);
+
+  // Get current position for display
+  const currentPosition = useMemo(() => {
+    return symbolPositions[currentPositionIndex] || null;
+  }, [symbolPositions, currentPositionIndex]);
 
   const priceRange = useMemo(() => {
     if (!priceScale) return null;
@@ -86,19 +95,6 @@ const TradingOverlay: React.FC<TradingOverlayProps> = ({
     [priceScale, priceRange, height]
   );
 
-  const offsetToPrice = useCallback(
-    (offset: number) => {
-      if (!priceScale || !priceRange || priceRange === 0) {
-        return null;
-      }
-
-      const ratio = clamp(offset / height, 0, 1);
-      const price = priceScale.max - ratio * priceRange;
-      return clamp(price, priceScale.min, priceScale.max);
-    },
-    [priceScale, priceRange, height]
-  );
-
   const latestPriceOffset = useMemo(() => {
     if (!priceScale || latestPrice === undefined || latestPrice === null) {
       return height / 2;
@@ -106,124 +102,141 @@ const TradingOverlay: React.FC<TradingOverlayProps> = ({
     return priceToOffset(latestPrice);
   }, [priceScale, latestPrice, priceToOffset, height]);
 
-  const tpActivePrice = useMemo(() => {
-    if (!priceScale) return null;
-    if (tpHandleY <= EDGE_THRESHOLD) return null;
-
-    const price = offsetToPrice(tpHandleY);
-    if (price === null) return null;
-    if (latestPrice !== undefined && latestPrice !== null) {
-      return Math.max(price, latestPrice);
+  // Position navigation handlers
+  const handlePreviousPosition = useCallback(() => {
+    if (symbolPositions.length > 1) {
+      const newIndex = currentPositionIndex > 0 ? currentPositionIndex - 1 : symbolPositions.length - 1;
+      onPositionChange?.(newIndex);
     }
-    return price;
-  }, [tpHandleY, priceScale, offsetToPrice, latestPrice]);
+  }, [symbolPositions.length, currentPositionIndex, onPositionChange]);
 
-  const slActivePrice = useMemo(() => {
-    if (!priceScale) return null;
-    if (height - slHandleY <= EDGE_THRESHOLD) return null;
-
-    const price = offsetToPrice(slHandleY);
-    if (price === null) return null;
-    if (latestPrice !== undefined && latestPrice !== null) {
-      return Math.min(price, latestPrice);
+  const handleNextPosition = useCallback(() => {
+    if (symbolPositions.length > 1) {
+      const newIndex = currentPositionIndex < symbolPositions.length - 1 ? currentPositionIndex + 1 : 0;
+      onPositionChange?.(newIndex);
     }
-    return price;
-  }, [slHandleY, priceScale, offsetToPrice, latestPrice, height]);
+  }, [symbolPositions.length, currentPositionIndex, onPositionChange]);
 
-  useEffect(() => {
-    tpHandleRef.current = tpHandleY;
-  }, [tpHandleY]);
+  // Render position lines for all positions
+  const renderPositionLines = useCallback(() => {
+    if (!priceScale || symbolPositions.length === 0) return null;
 
-  useEffect(() => {
-    slHandleRef.current = slHandleY;
-  }, [slHandleY]);
+    return symbolPositions.map((position, index) => {
+      const isCurrentPosition = index === currentPositionIndex;
+      const entryOffset = priceToOffset(position.entryPrice);
+      const isLong = position.side === OrderSide.BUY;
+      
+      // Entry price line
+      const entryLine = (
+        <View
+          key={`entry-${position.id}`}
+          style={[
+            styles.horizontalLine,
+            styles.positionEntryLine,
+            {
+              top: clamp(entryOffset, 0, height),
+              borderColor: isLong ? '#00ff88' : '#ff4444',
+              opacity: isCurrentPosition ? 1 : 0.6,
+              borderWidth: isCurrentPosition ? 2 : 1,
+            },
+          ]}
+        />
+      );
 
-  useEffect(() => {
-    if (!priceScale || latestPrice === undefined || latestPrice === null) {
-      return;
-    }
+      // Entry price label
+      const entryLabel = (
+        <View
+          key={`entry-label-${position.id}`}
+          style={[
+            styles.positionLabel,
+            styles.entryLabel,
+            {
+              top: clamp(entryOffset, 0, height) - 12,
+              left: 8,
+              backgroundColor: isLong ? 'rgba(0, 255, 136, 0.9)' : 'rgba(255, 68, 68, 0.9)',
+              opacity: isCurrentPosition ? 1 : 0.8,
+            },
+          ]}
+        >
+          <Text style={styles.positionLabelText}>
+            ENTRY: ${formatPrice(position.entryPrice, symbol)}
+          </Text>
+        </View>
+      );
 
-    const lastPriceOffset = priceToOffset(latestPrice);
+      const lines = [entryLine, entryLabel];
 
-    if (initialTakeProfit !== null && initialTakeProfit !== undefined) {
-      const tpOffset = clamp(priceToOffset(initialTakeProfit), 0, lastPriceOffset);
-      setTpHandleY(tpOffset);
-    } else {
-      setTpHandleY(0);
-    }
+      // TP line if exists
+      if (position.takeProfitPrice) {
+        const tpOffset = priceToOffset(position.takeProfitPrice);
+        lines.push(
+          <View
+            key={`tp-${position.id}`}
+            style={[
+              styles.horizontalLine,
+              styles.positionTpLine,
+              {
+                top: clamp(tpOffset, 0, height),
+                opacity: isCurrentPosition ? 1 : 0.6,
+              },
+            ]}
+          />,
+          <View
+            key={`tp-label-${position.id}`}
+            style={[
+              styles.positionLabel,
+              styles.tpLabel,
+              {
+                top: clamp(tpOffset, 0, height) - 12,
+                left: 8,
+                opacity: isCurrentPosition ? 1 : 0.8,
+              },
+            ]}
+          >
+            <Text style={styles.positionLabelText}>
+              TP: ${formatPrice(position.takeProfitPrice, symbol)}
+            </Text>
+          </View>
+        );
+      }
 
-    if (initialStopLoss !== null && initialStopLoss !== undefined) {
-      const slOffset = clamp(priceToOffset(initialStopLoss), lastPriceOffset, height);
-      setSlHandleY(slOffset);
-    } else {
-      setSlHandleY(height);
-    }
-  }, [
-    priceScale,
-    latestPrice,
-    initialTakeProfit,
-    initialStopLoss,
-    priceToOffset,
-    height,
-  ]);
+      // SL line if exists
+      if (position.stopLossPrice) {
+        const slOffset = priceToOffset(position.stopLossPrice);
+        lines.push(
+          <View
+            key={`sl-${position.id}`}
+            style={[
+              styles.horizontalLine,
+              styles.positionSlLine,
+              {
+                top: clamp(slOffset, 0, height),
+                opacity: isCurrentPosition ? 1 : 0.6,
+              },
+            ]}
+          />,
+          <View
+            key={`sl-label-${position.id}`}
+            style={[
+              styles.positionLabel,
+              styles.slLabel,
+              {
+                top: clamp(slOffset, 0, height) - 12,
+                left: 8,
+                opacity: isCurrentPosition ? 1 : 0.8,
+              },
+            ]}
+          >
+            <Text style={styles.positionLabelText}>
+              SL: ${formatPrice(position.stopLossPrice, symbol)}
+            </Text>
+          </View>
+        );
+      }
 
-  useEffect(() => {
-    if (tpActivePrice !== previousTpPrice.current) {
-      previousTpPrice.current = tpActivePrice ?? null;
-      onTakeProfitChange?.(tpActivePrice ?? null);
-    }
-  }, [tpActivePrice, onTakeProfitChange]);
-
-  useEffect(() => {
-    if (slActivePrice !== previousSlPrice.current) {
-      previousSlPrice.current = slActivePrice ?? null;
-      onStopLossChange?.(slActivePrice ?? null);
-    }
-  }, [slActivePrice, onStopLossChange]);
-
-  const createTpPanResponder = useCallback((): PanResponderInstance =>
-    PanResponder.create({
-      onStartShouldSetPanResponder: () => true,
-      onPanResponderGrant: () => {
-        tpStartRef.current = tpHandleRef.current;
-      },
-      onPanResponderMove: (_, gestureState) => {
-        const maxY = latestPriceOffset;
-        const next = clamp(tpStartRef.current + gestureState.dy, 0, maxY);
-        setTpHandleY(next);
-      },
-      onPanResponderRelease: (_, gestureState) => {
-        const maxY = latestPriceOffset;
-        const next = clamp(tpStartRef.current + gestureState.dy, 0, maxY);
-        setTpHandleY(next);
-      },
-    }), [latestPriceOffset]);
-
-  const createSlPanResponder = useCallback((): PanResponderInstance =>
-    PanResponder.create({
-      onStartShouldSetPanResponder: () => true,
-      onPanResponderGrant: () => {
-        slStartRef.current = slHandleRef.current;
-      },
-      onPanResponderMove: (_, gestureState) => {
-        const minY = latestPriceOffset;
-        const next = clamp(slStartRef.current + gestureState.dy, minY, height);
-        setSlHandleY(next);
-      },
-      onPanResponderRelease: (_, gestureState) => {
-        const minY = latestPriceOffset;
-        const next = clamp(slStartRef.current + gestureState.dy, minY, height);
-        setSlHandleY(next);
-      },
-    }), [latestPriceOffset, height]);
-
-  useEffect(() => {
-    tpPanResponderRef.current = createTpPanResponder();
-  }, [createTpPanResponder]);
-
-  useEffect(() => {
-    slPanResponderRef.current = createSlPanResponder();
-  }, [createSlPanResponder]);
+      return lines;
+    }).flat();
+  }, [priceScale, symbolPositions, currentPositionIndex, priceToOffset, height, symbol]);
 
   if (!isVisible) {
     return null;
@@ -234,10 +247,6 @@ const TradingOverlay: React.FC<TradingOverlayProps> = ({
   };
 
   const hasScale = !!priceScale && latestPrice !== undefined && latestPrice !== null;
-  const formattedTp = tpActivePrice ? formatPrice(tpActivePrice, symbol) : '∞';
-  const formattedSl = slActivePrice ? formatPrice(slActivePrice, symbol) : '0.00';
-  const tpHandlers = tpPanResponderRef.current?.panHandlers ?? {};
-  const slHandlers = slPanResponderRef.current?.panHandlers ?? {};
 
   return (
     <View
@@ -261,34 +270,15 @@ const TradingOverlay: React.FC<TradingOverlayProps> = ({
         <Text style={styles.closeButtonText}>✕</Text>
       </TouchableOpacity>
 
-      {!hasScale && (
+      {symbolPositions.length === 0 && (
         <View style={styles.noDataContainer}>
-          <Text style={styles.noDataText}>Sin datos de precio para configurar TP/SL</Text>
+          <Text style={styles.noDataText}>No hay posiciones abiertas para {symbol}</Text>
         </View>
       )}
 
-      {hasScale && (
+      {hasScale && symbolPositions.length > 0 && (
         <>
-          {tpActivePrice && (
-            <View
-              style={[
-                styles.horizontalLine,
-                styles.tpLine,
-                { top: clamp(tpHandleY, 0, height) },
-              ]}
-            />
-          )}
-
-          {slActivePrice && (
-            <View
-              style={[
-                styles.horizontalLine,
-                styles.slLine,
-                { top: clamp(slHandleY, 0, height) },
-              ]}
-            />
-          )}
-
+          {/* Current price line */}
           <View
             style={[
               styles.horizontalLine,
@@ -297,72 +287,56 @@ const TradingOverlay: React.FC<TradingOverlayProps> = ({
             ]}
           />
 
-          <View
-            style={[
-              styles.sliderRail,
-              {
-                height,
-                right: -PRICE_AXIS_OFFSET,
-              },
-            ]}
-            pointerEvents="box-none"
-          >
-            <View
-              style={[
-                styles.sliderTrack,
-                styles.tpTrack,
-                { height: clamp(latestPriceOffset, 0, height) },
-              ]}
-            />
-            <View
-              style={[
-                styles.sliderTrack,
-                styles.slTrack,
-                {
-                  top: clamp(latestPriceOffset, 0, height),
-                  height: clamp(height - latestPriceOffset, 0, height),
-                },
-              ]}
-            />
-
-            <View
-              style={[
-                styles.sliderHandle,
-                styles.tpHandle,
-                {
-                  transform: [
-                    {
-                      translateY: clamp(tpHandleY, 0, latestPriceOffset) - HANDLE_RADIUS,
-                    },
-                  ],
-                },
-              ]}
-              {...tpHandlers}
-            >
-              <Text style={styles.handleLabel}>TP</Text>
-              <Text style={styles.handleValue}>{formattedTp}</Text>
-            </View>
-
-            <View
-              style={[
-                styles.sliderHandle,
-                styles.slHandle,
-                {
-                  transform: [
-                    {
-                      translateY:
-                        clamp(slHandleY, latestPriceOffset, height) - HANDLE_RADIUS,
-                    },
-                  ],
-                },
-              ]}
-              {...slHandlers}
-            >
-              <Text style={styles.handleLabel}>SL</Text>
-              <Text style={styles.handleValue}>{formattedSl}</Text>
-            </View>
-          </View>
+          {/* Render all position lines */}
+          {renderPositionLines()}
         </>
+      )}
+
+      {/* Position Navigation - Moved to bottom */}
+      {symbolPositions.length > 0 && (
+        <View style={styles.positionNavigationBottom}>
+          <TouchableOpacity
+            style={[
+              styles.positionNavigationButton,
+              { opacity: symbolPositions.length > 1 ? 1 : 0.3 }
+            ]}
+            onPress={handlePreviousPosition}
+            disabled={symbolPositions.length <= 1}
+          >
+            <Text style={styles.positionNavigationText}>‹</Text>
+          </TouchableOpacity>
+
+          {currentPosition && (
+            <TouchableOpacity
+              style={styles.positionInfo}
+              onPress={() => onPositionPress?.(currentPosition)}
+            >
+              <Text style={styles.positionInfoText}>
+                {currentPosition.side} • ${formatPrice(currentPosition.entryPrice, symbol)}
+              </Text>
+              <Text style={[
+                styles.positionPnlText,
+                { color: currentPosition.unrealizedPnL >= 0 ? '#00ff88' : '#ff4444' }
+              ]}>
+                {currentPosition.unrealizedPnL >= 0 ? '+' : ''}${currentPosition.unrealizedPnL.toFixed(2)}
+              </Text>
+              <Text style={styles.positionCountText}>
+                {currentPositionIndex + 1} de {symbolPositions.length}
+              </Text>
+            </TouchableOpacity>
+          )}
+
+          <TouchableOpacity
+            style={[
+              styles.positionNavigationButton,
+              { opacity: symbolPositions.length > 1 ? 1 : 0.3 }
+            ]}
+            onPress={handleNextPosition}
+            disabled={symbolPositions.length <= 1}
+          >
+            <Text style={styles.positionNavigationText}>›</Text>
+          </TouchableOpacity>
+        </View>
       )}
     </View>
   );
@@ -371,11 +345,8 @@ const TradingOverlay: React.FC<TradingOverlayProps> = ({
 const styles = StyleSheet.create({
   overlay: {
     position: 'absolute',
-    backgroundColor: 'rgba(0, 0, 0, 0.05)',
-    borderWidth: 1,
-    borderColor: '#00ff88',
-    borderRadius: 8,
-    zIndex: 1000,
+    backgroundColor: 'transparent',
+    zIndex: 100, // Reducido para estar por debajo de controles del gráfico
     overflow: 'visible',
   },
   closeButton: {
@@ -390,7 +361,7 @@ const styles = StyleSheet.create({
     borderColor: '#ffffff',
     alignItems: 'center',
     justifyContent: 'center',
-    zIndex: 1001,
+    zIndex: 101, // Reducido para estar por debajo de controles del gráfico
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.25,
@@ -421,70 +392,89 @@ const styles = StyleSheet.create({
     right: 0,
     borderTopWidth: 1,
   },
-  tpLine: {
+  positionEntryLine: {
+    borderStyle: 'solid',
+  },
+  positionTpLine: {
     borderStyle: 'dashed',
     borderColor: '#00ff88',
   },
-  slLine: {
+  positionSlLine: {
     borderStyle: 'dashed',
-    borderColor: '#ff5c5c',
+    borderColor: '#ff4444',
   },
   currentPriceLine: {
     borderColor: '#ffffff',
     opacity: 0.3,
   },
-  sliderRail: {
+  positionLabel: {
     position: 'absolute',
-    width: SLIDER_RAIL_WIDTH,
-    alignItems: 'center',
-  },
-  sliderTrack: {
-    position: 'absolute',
-    width: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
     borderRadius: 4,
-    backgroundColor: 'rgba(255,255,255,0.08)',
-    left: (SLIDER_RAIL_WIDTH - 8) / 2,
+    zIndex: 102, // Reducido para estar por debajo de controles del gráfico
   },
-  tpTrack: {
-    backgroundColor: 'rgba(0, 255, 136, 0.15)',
+  entryLabel: {
+    // backgroundColor set dynamically
   },
-  slTrack: {
-    backgroundColor: 'rgba(255, 68, 68, 0.15)',
+  tpLabel: {
+    backgroundColor: 'rgba(0, 255, 136, 0.9)',
   },
-  sliderHandle: {
+  slLabel: {
+    backgroundColor: 'rgba(255, 68, 68, 0.9)',
+  },
+  positionLabelText: {
+    color: '#ffffff',
+    fontSize: 11,
+    fontWeight: 'bold',
+  },
+  // Position navigation styles - moved to bottom
+  positionNavigationBottom: {
     position: 'absolute',
-    top: 0,
-    width: HANDLE_SIZE,
-    height: HANDLE_SIZE,
-    borderRadius: HANDLE_RADIUS,
+    bottom: 20,
+    left: 8,
+    right: 8,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
     alignItems: 'center',
+    zIndex: 103, // Reducido para estar por debajo de controles del gráfico
+  },
+  positionNavigationButton: {
+    backgroundColor: 'rgba(42, 42, 42, 0.9)',
+    borderRadius: 20,
+    width: 40,
+    height: 40,
     justifyContent: 'center',
-    shadowColor: '#000',
-    shadowOpacity: 0.3,
-    shadowOffset: { width: 0, height: 4 },
-    shadowRadius: 6,
-    elevation: 4,
-  },
-  tpHandle: {
-    backgroundColor: '#00ff8820',
+    alignItems: 'center',
     borderWidth: 1,
-    borderColor: '#00ff88',
+    borderColor: '#444444',
   },
-  slHandle: {
-    backgroundColor: '#ff444420',
+  positionNavigationText: {
+    color: '#ffffff',
+    fontSize: 18,
+    fontWeight: 'bold',
+  },
+  positionInfo: {
+    backgroundColor: 'rgba(26, 26, 26, 0.9)',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
     borderWidth: 1,
-    borderColor: '#ff4444',
+    borderColor: '#333333',
   },
-  handleLabel: {
+  positionInfoText: {
+    color: '#ffffff',
     fontSize: 12,
-    fontWeight: '600',
-    color: '#ffffff',
-    marginBottom: 2,
+    fontWeight: 'bold',
   },
-  handleValue: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: '#ffffff',
+  positionPnlText: {
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  positionCountText: {
+    fontSize: 10,
+    color: '#888888',
+    marginTop: 2,
   },
 });
 

@@ -15,10 +15,12 @@ import { formatPrice, formatPercentage, formatCurrency } from '../../utils/forma
 import { TRADING_SYMBOLS } from '../../constants/tradingSymbols';
 import MinimalistChart from '../../components/chart/MinimalistChart';
 import { MarketData } from '../../components/trading/MarketData';
-import { PositionsGrid } from '../../components/trading/PositionsGrid';
+import { RealTimePositionsGrid } from '../../components/trading/RealTimePositionsGrid';
+import { PositionDetailsModal } from '../../components/trading/PositionDetailsModal';
 import { OrderForm } from '../../components/trading/OrderForm';
 import { OrderFormModal } from '../../components/trading/OrderFormModal';
 import { OrderHistory } from '../../components/trading/OrderHistory';
+import TradingOverlay from '../../components/trading/TradingOverlay';
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
 
@@ -55,6 +57,10 @@ export const TradingScreen: React.FC = () => {
   // Order form modal state
   const [showOrderModal, setShowOrderModal] = useState(false);
   
+  // Position details modal state
+  const [showPositionModal, setShowPositionModal] = useState(false);
+  const [selectedPosition, setSelectedPosition] = useState<any>(null);
+  
   // Trading overlay state
   const [showTradingOverlay, setShowTradingOverlay] = useState(false);
   const [overlayActivationPrice, setOverlayActivationPrice] = useState<number | null>(null);
@@ -67,20 +73,42 @@ export const TradingScreen: React.FC = () => {
     
     // Si se está activando el overlay, obtener precio actual y enviarlo al chart
     if (newState) {
-      const currentPrice = tickers[selectedPair]?.price;
-      if (currentPrice) {
-        console.log(`🟢 [OVERLAY BUTTON] Activando overlay con precio actual: $${currentPrice}`);
-        setOverlayActivationPrice(currentPrice);
-        setForceDeactivate(false); // Asegurar que no esté en modo desactivación
-        // Reset el precio después de un momento para que pueda activarse nuevamente
-        setTimeout(() => setOverlayActivationPrice(null), 100);
-      } else {
-        console.log(`🔴 [OVERLAY BUTTON] No se pudo obtener precio actual para ${selectedPair}`);
-        // Si no hay precio actual, intentar usar precio de la última vela o un precio por defecto
-        setOverlayActivationPrice(111000); // Precio por defecto temporal
-        setForceDeactivate(false); // Asegurar que no esté en modo desactivación
-        setTimeout(() => setOverlayActivationPrice(null), 100);
+      // Intentar múltiples fuentes para obtener el precio actual
+      let currentPrice = tickers[selectedPair]?.price; // Precio del ticker
+      
+      if (!currentPrice) {
+        // Fallback 1: Precio del trading hook
+        const tradingPrice = getCurrentPrice(selectedPair);
+        if (tradingPrice) {
+          currentPrice = tradingPrice;
+        }
       }
+      
+      if (!currentPrice) {
+        // Fallback 2: Precio base según el símbolo
+        const basePrices: Record<string, number> = {
+          'BTCUSDT': 114000,
+          'ETHUSDT': 4200,
+          'BNBUSDT': 1000,
+          'ADAUSDT': 0.8,
+          'SOLUSDT': 210,
+          'XRPUSDT': 2.8,
+          'DOTUSDT': 4.0,
+          'LINKUSDT': 22,
+          'MATICUSDT': 0.38,
+          'AVAXUSDT': 30,
+          'ATOMUSDT': 4.1,
+          'UNIUSDT': 7.7,
+          'LTCUSDT': 107
+        };
+        currentPrice = basePrices[selectedPair] || 100;
+      }
+      
+      console.log(`� [OVERLAY BUTTON] Activando overlay con precio actual: $${currentPrice}`);
+      setOverlayActivationPrice(currentPrice);
+      setForceDeactivate(false); // Asegurar que no esté en modo desactivación
+      // Reset el precio después de un momento para que pueda activarse nuevamente
+      setTimeout(() => setOverlayActivationPrice(null), 100);
     } else {
       console.log(`🔴 [OVERLAY BUTTON] Desactivando overlay - LIMPIEZA COMPLETA`);
       setOverlayActivationPrice(null);
@@ -88,11 +116,14 @@ export const TradingScreen: React.FC = () => {
       // Reset después de un momento
       setTimeout(() => setForceDeactivate(false), 100);
     }
-  }, [showTradingOverlay, selectedPair, tickers]);
+  }, [showTradingOverlay, selectedPair, tickers, getCurrentPrice]);
 
   // Estados para Take Profit y Stop Loss (mantenidos para funcionalidad del modal)
   const [overlayTakeProfit, setOverlayTakeProfit] = useState<number | null>(null);
   const [overlayStopLoss, setOverlayStopLoss] = useState<number | null>(null);
+
+  // Position navigation state
+  const [currentPositionIndex, setCurrentPositionIndex] = useState(0);
 
   // Initialize market data at the screen level - optimized for faster updates
   const { isInitialized, getStatus } = useMarketData({
@@ -135,6 +166,101 @@ export const TradingScreen: React.FC = () => {
     await refreshPortfolio();
   };
 
+  // Handle navigation to chart from position - MEJORADO con visualización de TP/SL
+  const handleGoToChart = useCallback((symbol: string, position: any) => {
+    console.log(`🎯 [GO TO CHART] Navegando a ${symbol} con overlay activado y visualización TP/SL`);
+    
+    // Switch to trading tab
+    setActiveTab('trading');
+    
+    // Activate trading overlay with position
+    setShowTradingOverlay(true);
+    
+    // Get current price for the symbol
+    let currentPrice = tickers[symbol]?.price;
+    if (!currentPrice) {
+      const tradingPrice = getCurrentPrice(symbol);
+      currentPrice = tradingPrice || position.entryPrice;
+    }
+    
+    console.log(`🎯 [GO TO CHART] Precio actual: $${currentPrice}, Precio entrada: $${position.entryPrice}`);
+    
+    setOverlayActivationPrice(currentPrice);
+    setForceDeactivate(false);
+    
+    // NUEVO: Convertir TP/SL de PnL a precio si es necesario y establecer visualización
+    let takeProfitPrice = null;
+    let stopLossPrice = null;
+    
+    if (position.takeProfitPrice !== undefined && position.takeProfitPrice !== null) {
+      if (position.takeProfitPrice > 0 && position.takeProfitPrice < 1) {
+        // Es un porcentaje o PnL, convertir a precio
+        const tpMultiplier = position.side === 'BUY' ? (1 + position.takeProfitPrice) : (1 - position.takeProfitPrice);
+        takeProfitPrice = position.entryPrice * tpMultiplier;
+        console.log(`🎯 [TP CONVERSION] TP de PnL ${position.takeProfitPrice} a precio $${takeProfitPrice.toFixed(2)}`);
+      } else {
+        // Ya es un precio
+        takeProfitPrice = position.takeProfitPrice;
+        console.log(`🎯 [TP PRICE] TP ya es precio: $${takeProfitPrice.toFixed(2)}`);
+      }
+    }
+    
+    if (position.stopLossPrice !== undefined && position.stopLossPrice !== null) {
+      if (position.stopLossPrice > 0 && position.stopLossPrice < 1) {
+        // Es un porcentaje o PnL, convertir a precio
+        const slMultiplier = position.side === 'BUY' ? (1 - position.stopLossPrice) : (1 + position.stopLossPrice);
+        stopLossPrice = position.entryPrice * slMultiplier;
+        console.log(`🎯 [SL CONVERSION] SL de PnL ${position.stopLossPrice} a precio $${stopLossPrice.toFixed(2)}`);
+      } else {
+        // Ya es un precio
+        stopLossPrice = position.stopLossPrice;
+        console.log(`🎯 [SL PRICE] SL ya es precio: $${stopLossPrice.toFixed(2)}`);
+      }
+    }
+    
+    // Set overlay TP/SL from position
+    if (takeProfitPrice) {
+      setOverlayTakeProfit(takeProfitPrice);
+      console.log(`🟢 [OVERLAY TP] Establecido TP en $${takeProfitPrice.toFixed(2)}`);
+    }
+    if (stopLossPrice) {
+      setOverlayStopLoss(stopLossPrice);
+      console.log(`🔴 [OVERLAY SL] Establecido SL en $${stopLossPrice.toFixed(2)}`);
+    }
+    
+    // Colores basados en el precio de entrada como divisor
+    const entryPrice = position.entryPrice;
+    const side = position.side;
+    
+    console.log(`🎨 [COLOR LOGIC] Posición ${side} con entrada $${entryPrice.toFixed(2)}`);
+    console.log(`🎨 [COLOR LOGIC] TP: ${takeProfitPrice ? '$' + takeProfitPrice.toFixed(2) : 'N/A'}`);
+    console.log(`🎨 [COLOR LOGIC] SL: ${stopLossPrice ? '$' + stopLossPrice.toFixed(2) : 'N/A'}`);
+    
+    setTimeout(() => setOverlayActivationPrice(null), 100);
+  }, [tickers, getCurrentPrice]);
+
+  // Position navigation handlers
+  const handlePositionChange = useCallback((index: number) => {
+    setCurrentPositionIndex(index);
+  }, []);
+
+  const handlePositionPress = useCallback((position: any) => {
+    setSelectedPosition(position);
+    setShowPositionModal(true);
+  }, []);
+
+  // Calculate unrealized PnL for position
+  const calculateUnrealizedPnL = useCallback((order: any, currentPrice: number) => {
+    if (!currentPrice || currentPrice === 0) return 0;
+    
+    const priceChange = currentPrice - order.entryPrice;
+    const pnl = order.side === 'BUY' 
+      ? priceChange * order.quantity 
+      : -priceChange * order.quantity;
+    
+    return pnl;
+  }, []);
+
   const renderTabContent = () => {
     switch (activeTab) {
       case 'trading':
@@ -142,49 +268,74 @@ export const TradingScreen: React.FC = () => {
           <View style={styles.chartContainer}>
             <View style={styles.chartWrapper}>
               <MinimalistChart 
-                symbol={selectedPair} 
+                symbol={selectedPair}
                 showTradingOverlay={showTradingOverlay}
                 onTradingOverlayChange={setShowTradingOverlay}
                 activateOverlayWithPrice={overlayActivationPrice}
                 forceDeactivateOverlay={forceDeactivate}
+                activePositions={activeOrders.map(order => ({
+                  id: order.id,
+                  symbol: order.symbol,
+                  side: order.side,
+                  entryPrice: order.entryPrice,
+                  takeProfitPrice: order.takeProfitPrice || undefined,
+                  stopLossPrice: order.stopLossPrice || undefined,
+                  quantity: order.quantity,
+                  unrealizedPnL: calculateUnrealizedPnL(order, currentPrice),
+                }))}
+                // DESHABILITADO: No pasar onPositionPress para evitar que se abra el modal
+                // onPositionPress={handlePositionPress}
+              />
+              <TradingOverlay
+                chartDimensions={{
+                  width: screenWidth,
+                  height: 400, // Chart height
+                  x: 0,
+                  y: 0,
+                }}
+                isVisible={showTradingOverlay}
+                onClose={() => setShowTradingOverlay(false)}
+                symbol={selectedPair}
+                latestPrice={currentPrice}
+                // Position visualization props
+                activePositions={activeOrders.map(order => ({
+                  id: order.id,
+                  symbol: order.symbol,
+                  side: order.side,
+                  entryPrice: order.entryPrice,
+                  takeProfitPrice: order.takeProfitPrice || undefined,
+                  stopLossPrice: order.stopLossPrice || undefined,
+                  quantity: order.quantity,
+                  unrealizedPnL: calculateUnrealizedPnL(order, currentPrice),
+                }))}
+                currentPositionIndex={currentPositionIndex}
+                onPositionChange={handlePositionChange}
+                onPositionPress={handlePositionPress}
               />
             </View>
           </View>
         );
       
       case 'posiciones':
-        // Convert trading orders to positions format
-        const positions = activeOrders.map(order => {
-          const currentPrice = tickers[order.symbol]?.price || order.entryPrice;
-          const currentValue = order.quantity * currentPrice;
-          const pnl = currentValue - order.usdtAmount;
-          
-          return {
-            id: order.id,
-            symbol: order.symbol,
-            side: order.side,
-            quantity: order.quantity,
-            entryPrice: order.entryPrice,
-            currentPrice: currentPrice,
-            stopLoss: order.stopLossPrice || undefined,
-            takeProfit: order.takeProfitPrice || undefined,
-            pnl: pnl,
-            pnlPercentage: (pnl / order.usdtAmount) * 100,
-            usdtAmount: order.usdtAmount,
-            timestamp: order.createdAt,
-          };
-        });
-
         return (
-          <PositionsGrid 
-            positions={positions}
+          <RealTimePositionsGrid 
+            orders={activeOrders}
             onAddPosition={() => setShowOrderModal(true)}
-            onPositionPress={(position) => {
+            onPositionPress={(position: any) => {
               console.log('Position pressed:', position);
+              setSelectedPosition(position);
+              setShowPositionModal(true);
             }}
-            onClosePosition={(positionId) => {
+            onClosePosition={(positionId: string) => {
               closeOrder(positionId, 'Cerrado desde posiciones');
             }}
+            getCurrentPrice={getCurrentPrice}
+            onPriceUpdate={(callback: any) => {
+              // Subscribe to price updates from the trading service
+              const tradingOrderService = require('../../services/tradingOrderService').TradingOrderService.getInstance();
+              return tradingOrderService.onPriceUpdate(callback);
+            }}
+            isLoading={isLoading}
           />
         );
       
@@ -329,6 +480,21 @@ export const TradingScreen: React.FC = () => {
         defaultSymbol={selectedPair}
         defaultTakeProfitPrice={overlayTakeProfit}
         defaultStopLossPrice={overlayStopLoss}
+      />
+
+      {/* Position Details Modal */}
+      <PositionDetailsModal
+        visible={showPositionModal}
+        position={selectedPosition}
+        onClose={() => {
+          setShowPositionModal(false);
+          setSelectedPosition(null);
+        }}
+        onClosePosition={(positionId: string) => {
+          closeOrder(positionId, 'Cerrado desde detalles de posición');
+        }}
+        onGoToChart={handleGoToChart}
+        getCurrentPrice={getCurrentPrice}
       />
 
       {/* Error display */}
