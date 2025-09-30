@@ -67,20 +67,42 @@ export const TradingScreen: React.FC = () => {
     
     // Si se está activando el overlay, obtener precio actual y enviarlo al chart
     if (newState) {
-      const currentPrice = tickers[selectedPair]?.price;
-      if (currentPrice) {
-        console.log(`🟢 [OVERLAY BUTTON] Activando overlay con precio actual: $${currentPrice}`);
-        setOverlayActivationPrice(currentPrice);
-        setForceDeactivate(false); // Asegurar que no esté en modo desactivación
-        // Reset el precio después de un momento para que pueda activarse nuevamente
-        setTimeout(() => setOverlayActivationPrice(null), 100);
-      } else {
-        console.log(`🔴 [OVERLAY BUTTON] No se pudo obtener precio actual para ${selectedPair}`);
-        // Si no hay precio actual, intentar usar precio de la última vela o un precio por defecto
-        setOverlayActivationPrice(111000); // Precio por defecto temporal
-        setForceDeactivate(false); // Asegurar que no esté en modo desactivación
-        setTimeout(() => setOverlayActivationPrice(null), 100);
+      // Intentar múltiples fuentes para obtener el precio actual
+      let currentPrice = tickers[selectedPair]?.price; // Precio del ticker
+      
+      if (!currentPrice) {
+        // Fallback 1: Precio del trading hook
+        const tradingPrice = getCurrentPrice(selectedPair);
+        if (tradingPrice) {
+          currentPrice = tradingPrice;
+        }
       }
+      
+      if (!currentPrice) {
+        // Fallback 2: Precio base según el símbolo
+        const basePrices: Record<string, number> = {
+          'BTCUSDT': 114000,
+          'ETHUSDT': 4200,
+          'BNBUSDT': 1000,
+          'ADAUSDT': 0.8,
+          'SOLUSDT': 210,
+          'XRPUSDT': 2.8,
+          'DOTUSDT': 4.0,
+          'LINKUSDT': 22,
+          'MATICUSDT': 0.38,
+          'AVAXUSDT': 30,
+          'ATOMUSDT': 4.1,
+          'UNIUSDT': 7.7,
+          'LTCUSDT': 107
+        };
+        currentPrice = basePrices[selectedPair] || 100;
+      }
+      
+      console.log(`� [OVERLAY BUTTON] Activando overlay con precio actual: $${currentPrice}`);
+      setOverlayActivationPrice(currentPrice);
+      setForceDeactivate(false); // Asegurar que no esté en modo desactivación
+      // Reset el precio después de un momento para que pueda activarse nuevamente
+      setTimeout(() => setOverlayActivationPrice(null), 100);
     } else {
       console.log(`🔴 [OVERLAY BUTTON] Desactivando overlay - LIMPIEZA COMPLETA`);
       setOverlayActivationPrice(null);
@@ -88,7 +110,7 @@ export const TradingScreen: React.FC = () => {
       // Reset después de un momento
       setTimeout(() => setForceDeactivate(false), 100);
     }
-  }, [showTradingOverlay, selectedPair, tickers]);
+  }, [showTradingOverlay, selectedPair, tickers, getCurrentPrice]);
 
   // Estados para Take Profit y Stop Loss (mantenidos para funcionalidad del modal)
   const [overlayTakeProfit, setOverlayTakeProfit] = useState<number | null>(null);

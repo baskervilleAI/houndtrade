@@ -10,6 +10,7 @@ import {
 import { TradingStorageService } from '../services/tradingStorageService';
 import { TradingOrderService } from '../services/tradingOrderService';
 import { PortfolioCalculatorService } from '../services/portfolioCalculatorService';
+import { useIntegratedMarketData } from './useIntegratedMarketData';
 import { debugLogger } from '../utils/debugLogger';
 
 interface UseTradingState {
@@ -61,6 +62,12 @@ export function useTrading(): UseTradingState {
   const storageService = useRef(TradingStorageService.getInstance());
   const orderService = useRef(TradingOrderService.getInstance());
   const portfolioService = useRef(PortfolioCalculatorService.getInstance());
+  
+  // Hook de datos de mercado integrados
+  const { getBestPrice, subscribeToSymbol, isInitialized: marketInitialized } = useIntegratedMarketData();
+  
+  // Referencia para desuscribirse de actualizaciones de precios
+  const priceUpdateUnsubscribe = useRef<(() => void) | null>(null);
   
   // Estados principales
   const [orders, setOrders] = useState<TradingOrder[]>([]);
@@ -124,13 +131,6 @@ export function useTrading(): UseTradingState {
   }, []);
 
   /**
-   * Refresca todos los datos
-   */
-  const refreshData = useCallback(async () => {
-    await loadInitialData();
-  }, [loadInitialData]);
-
-  /**
    * Refresca solo el portfolio
    */
   const refreshPortfolio = useCallback(async () => {
@@ -146,6 +146,39 @@ export function useTrading(): UseTradingState {
       debugLogger.error('Error al refrescar portfolio', err);
     }
   }, []);
+
+  /**
+   * Configura actualizaciones de portfolio en tiempo real
+   */
+  const setupRealTimeUpdates = useCallback(() => {
+    // Limpiar suscripción anterior si existe
+    if (priceUpdateUnsubscribe.current) {
+      priceUpdateUnsubscribe.current();
+    }
+
+    // Suscribirse a actualizaciones de precios
+    priceUpdateUnsubscribe.current = orderService.current.onPriceUpdate((symbol, price) => {
+      // Solo actualizar si tenemos órdenes activas con este símbolo
+      const hasActiveOrdersForSymbol = activeOrders.some(order => order.symbol === symbol);
+      
+      if (hasActiveOrdersForSymbol) {
+        // Actualizar portfolio cuando cambie el precio de un símbolo con órdenes activas
+        // Usar setTimeout para evitar demasiadas actualizaciones consecutivas
+        setTimeout(() => {
+          refreshPortfolio();
+        }, 100);
+      }
+    });
+
+    debugLogger.debug('Actualizaciones de portfolio en tiempo real configuradas');
+  }, [activeOrders, refreshPortfolio]);
+
+  /**
+   * Refresca todos los datos
+   */
+  const refreshData = useCallback(async () => {
+    await loadInitialData();
+  }, [loadInitialData]);
 
   /**
    * Crea una nueva orden
@@ -294,18 +327,15 @@ export function useTrading(): UseTradingState {
    * Obtiene el precio actual de un símbolo
    */
   const getCurrentPrice = useCallback((symbol: string) => {
-    return orderService.current.getCurrentPriceSync(symbol);
-  }, []);
+    return getBestPrice(symbol);
+  }, [getBestPrice]);
 
   /**
    * Actualiza manualmente el precio de un símbolo
    */
   const updatePrice = useCallback((symbol: string, price: number) => {
     orderService.current.updatePrice(symbol, price);
-    
-    // Refrescar portfolio para recalcular PnL no realizado
-    refreshPortfolio();
-  }, [refreshPortfolio]);
+  }, []);
 
   /**
    * Obtiene el resumen del portfolio
@@ -341,17 +371,34 @@ export function useTrading(): UseTradingState {
     
     // Limpiar servicios al desmontar
     return () => {
+      // Limpiar suscripción de tiempo real
+      if (priceUpdateUnsubscribe.current) {
+        priceUpdateUnsubscribe.current();
+      }
       orderService.current.cleanup();
     };
   }, [loadInitialData]);
 
-  // Auto-refresh del portfolio cada 30 segundos si hay órdenes activas
+  // Configurar actualizaciones en tiempo real cuando hay órdenes activas y el mercado está inicializado
+  useEffect(() => {
+    if (activeOrders.length > 0 && marketInitialized) {
+      setupRealTimeUpdates();
+    } else {
+      // Si no hay órdenes activas, limpiar suscripciones
+      if (priceUpdateUnsubscribe.current) {
+        priceUpdateUnsubscribe.current();
+        priceUpdateUnsubscribe.current = null;
+      }
+    }
+  }, [activeOrders.length, marketInitialized, setupRealTimeUpdates]);
+
+  // Auto-refresh del portfolio cada 30 segundos como respaldo (reducido de importancia)
   useEffect(() => {
     if (activeOrders.length === 0) return;
 
     const interval = setInterval(() => {
       refreshPortfolio();
-    }, 30000); // 30 segundos
+    }, 30000); // 30 segundos como respaldo
 
     return () => clearInterval(interval);
   }, [activeOrders.length, refreshPortfolio]);
