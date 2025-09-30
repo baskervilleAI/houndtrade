@@ -7,6 +7,7 @@ import {
   TouchableOpacity,
   Dimensions,
   Platform,
+  Image,
 } from 'react-native';
 import { useAuth, useMarket } from '../../context/AppContext';
 import { useMarketData } from '../../hooks/useMarketData';
@@ -296,25 +297,28 @@ export const TradingScreen: React.FC = () => {
       
       case 'posiciones':
         return (
-          <RealTimePositionsGrid 
-            orders={activeOrders}
-            onAddPosition={() => setShowOrderModal(true)}
-            onPositionPress={(position: any) => {
-              console.log('Position pressed:', position);
-              setSelectedPosition(position);
-              setShowPositionModal(true);
-            }}
-            onClosePosition={(positionId: string) => {
-              closeOrder(positionId, 'Cerrado desde posiciones');
-            }}
-            getCurrentPrice={getCurrentPrice}
-            onPriceUpdate={(callback: any) => {
-              // Subscribe to price updates from the trading service
-              const tradingOrderService = require('../../services/tradingOrderService').TradingOrderService.getInstance();
-              return tradingOrderService.onPriceUpdate(callback);
-            }}
-            isLoading={isLoading}
-          />
+          <View style={styles.positionsContainer}>
+            <View style={styles.positionsTopSpacer} />
+            <RealTimePositionsGrid 
+              orders={activeOrders}
+              onAddPosition={() => setShowOrderModal(true)}
+              onPositionPress={(position: any) => {
+                console.log('Position pressed:', position);
+                setSelectedPosition(position);
+                setShowPositionModal(true);
+              }}
+              onClosePosition={(positionId: string) => {
+                closeOrder(positionId, 'Cerrado desde posiciones');
+              }}
+              getCurrentPrice={getCurrentPrice}
+              onPriceUpdate={(callback: any) => {
+                // Subscribe to price updates from the trading service
+                const tradingOrderService = require('../../services/tradingOrderService').TradingOrderService.getInstance();
+                return tradingOrderService.onPriceUpdate(callback);
+              }}
+              isLoading={isLoading}
+            />
+          </View>
         );
       
       case 'trades':
@@ -335,7 +339,14 @@ export const TradingScreen: React.FC = () => {
       {/* Header */}
       <View style={styles.header}>
         <View style={styles.headerLeft}>
-          <Text style={styles.appName}>HoundTrade</Text>
+          <View style={styles.logoContainer}>
+            <Image 
+              source={require('../../../assets/logo.png')} 
+              style={styles.logo}
+              resizeMode="contain"
+            />
+            <Text style={styles.appName}>HoundTrade</Text>
+          </View>
           <Text style={styles.userName}>
             Trading Simulado - {user?.displayName}
           </Text>
@@ -423,7 +434,10 @@ export const TradingScreen: React.FC = () => {
       {/* Order Form Modal/Overlay */}
       {activeTab === 'posiciones' && (
         <TouchableOpacity 
-          style={styles.floatingOrderButton}
+          style={[
+            styles.floatingOrderButton,
+            activeTab === 'posiciones' && styles.floatingOrderButtonBottom
+          ]}
           onPress={() => setShowOrderModal(true)}
         >
           <Text style={styles.floatingOrderButtonText}>Nueva Orden</Text>
@@ -483,6 +497,16 @@ const styles = StyleSheet.create({
   },
   headerLeft: {
     flex: 1,
+  },
+  logoContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 2,
+  },
+  logo: {
+    width: isSmallMobile ? 24 : 28,
+    height: isSmallMobile ? 24 : 28,
+    marginRight: 8,
   },
   appName: {
     fontSize: isSmallMobile ? 18 : 20,
@@ -642,6 +666,9 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: 'bold',
   },
+  floatingOrderButtonBottom: {
+    bottom: 120, // Ajustar posición para no solaparse con las posiciones
+  },
   // Error banner
   errorBanner: {
     backgroundColor: '#ff4444',
@@ -658,5 +685,14 @@ const styles = StyleSheet.create({
     color: '#ffffff',
     textAlign: 'center',
     fontWeight: '600',
+  },
+  // Styles for bottom-aligned positions
+  positionsContainer: {
+    flex: 1,
+    justifyContent: 'flex-end',
+    backgroundColor: '#0a0a0a',
+  },
+  positionsTopSpacer: {
+    flex: 1,
   },
 });

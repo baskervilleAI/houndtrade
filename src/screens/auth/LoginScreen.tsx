@@ -8,6 +8,7 @@ import {
   Alert,
   KeyboardAvoidingView,
   Platform,
+  Image,
 } from 'react-native';
 import { useAuth } from '../../context/AppContext';
 
@@ -57,7 +58,14 @@ export const LoginScreen: React.FC = () => {
     >
       <View style={styles.content}>
         <View style={styles.header}>
-          <Text style={styles.title}>HoundTrade</Text>
+          <View style={styles.logoContainer}>
+            <Image 
+              source={require('../../../assets/logo.png')} 
+              style={styles.logo}
+              resizeMode="contain"
+            />
+            <Text style={styles.title}>HoundTrade</Text>
+          </View>
           <Text style={styles.subtitle}>Trading Simulator</Text>
         </View>
 
@@ -136,11 +144,20 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 48,
   },
+  logoContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  logo: {
+    width: 40,
+    height: 40,
+    marginRight: 12,
+  },
   title: {
     fontSize: 36,
     fontWeight: 'bold',
     color: '#ffffff',
-    marginBottom: 8,
   },
   subtitle: {
     fontSize: 18,

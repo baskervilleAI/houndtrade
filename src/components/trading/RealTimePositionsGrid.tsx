@@ -362,7 +362,7 @@ export const RealTimePositionsGrid: React.FC<RealTimePositionsGridProps> = ({
 
 const styles = StyleSheet.create({
   container: {
-    flex: 1,
+    maxHeight: '70%', // Limitar altura máxima para no ocupar toda la pantalla
     backgroundColor: '#0a0a0a',
   },
   loadingContainer: {
@@ -377,8 +377,10 @@ const styles = StyleSheet.create({
   },
   headerContainer: {
     padding: 16,
+    paddingBottom: 8, // Reducir padding bottom para optimizar espacio
     borderBottomWidth: 1,
     borderBottomColor: '#333333',
+    backgroundColor: '#0a0a0a', // Asegurar background sólido
   },
   headerTitle: {
     color: '#ffffff',
@@ -391,12 +393,14 @@ const styles = StyleSheet.create({
     fontSize: 12,
   },
   scrollView: {
-    flex: 1,
+    flexGrow: 0, // No expandir más allá del contenido
+    maxHeight: 400, // Altura máxima para el scroll
   },
   grid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     padding: 16,
+    paddingTop: 8, // Reducir padding top para optimizar espacio
     gap: 12,
   },
   positionCard: {
