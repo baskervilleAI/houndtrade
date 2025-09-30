@@ -142,6 +142,9 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
   const [stopLossLevel, setStopLossLevel] = useState<number | null>(null);
   const [currentPriceLevel, setCurrentPriceLevel] = useState<number | null>(null);
   
+  // NUEVO: Estado para rastrear qué posición tiene el overlay activo
+  const [activeOverlayPositionId, setActiveOverlayPositionId] = useState<string | null>(null);
+  
   // NUEVO: Estado para preservar configuración de indicadores técnicos persistentemente
   const [persistentIndicatorConfigs, setPersistentIndicatorConfigs] = useState<Record<string, any>>({});
   
@@ -361,7 +364,10 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
     setTakeProfitLevel(null);
     setStopLossLevel(null);
     
-    console.log(`✅ [OVERLAY DEBUG] Estados React actualizados - showTradingOverlay: false`);
+    // NUEVO: Resetear también el ID de la posición activa
+    setActiveOverlayPositionId(null);
+    
+    console.log(`✅ [OVERLAY DEBUG] Estados React actualizados - showTradingOverlay: false, activeOverlayPositionId: null`);
     
     // El plugin tradingElementsPlugin automáticamente no dibujará nada
     // cuando isActive sea false, limpiando el canvas automáticamente
@@ -656,7 +662,7 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
     if (!yScale) return null;
     
     const clickPrice = yScale.getValueForPixel(y);
-    const tolerancePercent = 0.005; // 0.5% de tolerancia
+    const tolerancePercent = 0.01; // AUMENTADO: 1% de tolerancia para facilitar clics
     
     // Buscar posición cuyo entry price esté cerca del clic
     for (const position of activePositions) {
@@ -671,7 +677,7 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
       if (position.takeProfitPrice) {
         const tpTolerance = position.takeProfitPrice * tolerancePercent;
         if (Math.abs(clickPrice - position.takeProfitPrice) <= tpTolerance) {
-          console.log(`🎯 [POSITION CLICK] Detectada posición ${position.symbol} via TP - Entry: $${position.entryPrice.toFixed(2)}`);
+          console.log(`🎯 [POSITION CLICK] Detectada posición ${position.symbol} via TP - Entry: $${position.entryPrice.toFixed(2)}, TP: $${position.takeProfitPrice.toFixed(2)}`);
           return position;
         }
       }
@@ -679,7 +685,7 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
       if (position.stopLossPrice) {
         const slTolerance = position.stopLossPrice * tolerancePercent;
         if (Math.abs(clickPrice - position.stopLossPrice) <= slTolerance) {
-          console.log(`🎯 [POSITION CLICK] Detectada posición ${position.symbol} via SL - Entry: $${position.entryPrice.toFixed(2)}`);
+          console.log(`🎯 [POSITION CLICK] Detectada posición ${position.symbol} via SL - Entry: $${position.entryPrice.toFixed(2)}, SL: $${position.stopLossPrice.toFixed(2)}`);
           return position;
         }
       }
@@ -718,16 +724,36 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
         id: clickedPosition.id,
         symbol: clickedPosition.symbol,
         entryPrice: clickedPosition.entryPrice,
-        side: clickedPosition.side
+        side: clickedPosition.side,
+        currentlyActive: activeOverlayPositionId === clickedPosition.id
       });
       
-      // Activar overlay con el precio de entrada de la posición clickeada
-      activateTradingOverlay(clickedPosition.entryPrice);
+      // NUEVA LÓGICA DE TOGGLE: Verificar si esta posición ya tiene el overlay activo
+      if (activeOverlayPositionId === clickedPosition.id) {
+        // Si la misma posición ya está activa, DESACTIVAR el overlay
+        console.log(`🔴 [TOGGLE OFF] Desactivando overlay para posición ${clickedPosition.id}`);
+        deactivateTradingOverlay();
+        setActiveOverlayPositionId(null);
+      } else {
+        // Si es una posición diferente o no hay overlay activo, ACTIVAR con esta posición
+        console.log(`🟢 [TOGGLE ON] Activando overlay para posición ${clickedPosition.id}`);
+        activateTradingOverlay(clickedPosition.entryPrice);
+        setActiveOverlayPositionId(clickedPosition.id);
+        
+        // Configurar TP y SL con los valores de la posición clickeada
+        if (clickedPosition.takeProfitPrice) {
+          setTakeProfitLevel(clickedPosition.takeProfitPrice);
+          tradingOverlayState.current.takeProfitLevel = clickedPosition.takeProfitPrice;
+        }
+        if (clickedPosition.stopLossPrice) {
+          setStopLossLevel(clickedPosition.stopLossPrice);
+          tradingOverlayState.current.stopLossLevel = clickedPosition.stopLossPrice;
+        }
+      }
       
-      // NOTE: onPositionPress callback removido - no se abre modal de detalles
-      // Solo se activa el trading overlay para visualización
-      if (onPositionPress) {
-        // Solo llamar si el callback está definido (por compatibilidad)
+      // Mantener callback por compatibilidad pero sin abrir modal de detalles
+      if (onPositionPress && activeOverlayPositionId !== clickedPosition.id) {
+        // Solo llamar si el callback está definido y no se está desactivando
         onPositionPress(clickedPosition);
       }
     } else {
@@ -737,15 +763,19 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
         onClearTpSlVisualization();
       }
       
-      // Solo permitir navegación si el overlay está activo
-      if (showTradingOverlay) {
+      // Clic en área vacía: desactivar overlay si está activo
+      if (showTradingOverlay && activeOverlayPositionId) {
+        console.log('🔴 [EMPTY AREA CLICK] Desactivando overlay por clic en área vacía');
+        deactivateTradingOverlay();
+        setActiveOverlayPositionId(null);
+      } else if (showTradingOverlay) {
         console.log('🎯 [CLICK DEBUG] Click en gráfico - overlay activo, permitir navegación');
       } else {
         console.log('🔴 [CLICK DEBUG] Click en gráfico ignorado - overlay inactivo y no hay posición en este punto');
       }
     }
 
-  }, [showTradingOverlay, getPositionAtClick, activateTradingOverlay, onPositionPress, showTpSlVisualization, onClearTpSlVisualization]);
+  }, [showTradingOverlay, getPositionAtClick, activateTradingOverlay, deactivateTradingOverlay, onPositionPress, showTpSlVisualization, onClearTpSlVisualization, activeOverlayPositionId]);
 
   // Configurar los event listeners para el canvas
   useEffect(() => {
@@ -1274,6 +1304,8 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
     if (activateOverlayWithPrice && activateOverlayWithPrice > 0) {
       console.log(`🟢 [EXTERNAL OVERLAY] Activando overlay desde botón con precio: $${activateOverlayWithPrice}`);
       activateTradingOverlay(activateOverlayWithPrice);
+      // Resetear ID de posición activa ya que es activación externa
+      setActiveOverlayPositionId(null);
     }
   }, [activateOverlayWithPrice, activateTradingOverlay]);
 

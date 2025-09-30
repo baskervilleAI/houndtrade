@@ -94,11 +94,11 @@ export const TradingScreen: React.FC = () => {
     });
   }, [tickers, getCurrentPrice, updatePrice]);
 
-  // Automatically show overlay when there are active positions
-  useEffect(() => {
-    const hasActivePositions = activeOrders.length > 0;
-    setShowTradingOverlay(hasActivePositions);
-  }, [activeOrders.length]);
+  // Automatically show overlay when there are active positions - DESHABILITADO para permitir toggle manual
+  // useEffect(() => {
+  //   const hasActivePositions = activeOrders.length > 0;
+  //   setShowTradingOverlay(hasActivePositions);
+  // }, [activeOrders.length]);
 
   // Only log once when status changes
   useEffect(() => {
@@ -290,6 +290,24 @@ export const TradingScreen: React.FC = () => {
                 onPositionChange={handlePositionChange}
                 onPositionPress={handlePositionPress}
                 onPositionTpSlVisualize={handlePositionTpSlVisualize}
+                // Nuevo prop para price scale - obtenerlo del chart
+                priceScale={(() => {
+                  // Este será calculado por el TradingOverlay internamente desde las posiciones
+                  if (activeOrders.length === 0) return undefined;
+                  const prices = activeOrders.flatMap(order => [
+                    order.entryPrice,
+                    ...(order.takeProfitPrice ? [order.takeProfitPrice] : []),
+                    ...(order.stopLossPrice ? [order.stopLossPrice] : [])
+                  ].filter(Boolean));
+                  if (prices.length === 0) return undefined;
+                  const min = Math.min(...prices) * 0.98; // 2% padding
+                  const max = Math.max(...prices) * 1.02; // 2% padding
+                  return {
+                    min,
+                    max,
+                    pixelsPerPrice: 400 / (max - min) // Chart height / price range
+                  };
+                })()}
               />
             </View>
           </View>

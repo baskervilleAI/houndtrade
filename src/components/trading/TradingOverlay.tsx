@@ -241,7 +241,10 @@ const TradingOverlay: React.FC<TradingOverlayProps> = ({
     }).flat();
   }, [priceScale, symbolPositions, currentPositionIndex, priceToOffset, height, symbol]);
 
-  if (!isVisible) {
+  // MODIFICADO: Siempre mostrar overlay si hay posiciones, pero solo contenido de trading cuando isVisible
+  const shouldShowOverlay = isVisible || symbolPositions.length > 0;
+  
+  if (!shouldShowOverlay) {
     return null;
   }
 
@@ -264,32 +267,33 @@ const TradingOverlay: React.FC<TradingOverlayProps> = ({
       ]}
       onTouchEnd={handleTouchEnd}
     >
-      {/* No close button needed - overlay shows when there are positions */}
-      
-      {symbolPositions.length === 0 && (
+      {/* Mostrar mensaje solo si no hay posiciones Y overlay está visible */}
+      {symbolPositions.length === 0 && isVisible && (
         <View style={styles.noDataContainer}>
           <Text style={styles.noDataText}>No hay posiciones abiertas para {symbol}</Text>
         </View>
       )}
 
-      {hasScale && symbolPositions.length > 0 && (
+      {hasScale && (
         <>
-          {/* Current price line */}
-          <View
-            style={[
-              styles.horizontalLine,
-              styles.currentPriceLine,
-              { top: clamp(latestPriceOffset, 0, height) },
-            ]}
-          />
+          {/* Current price line - solo cuando overlay está activo */}
+          {isVisible && (
+            <View
+              style={[
+                styles.horizontalLine,
+                styles.currentPriceLine,
+                { top: clamp(latestPriceOffset, 0, height) },
+              ]}
+            />
+          )}
 
-          {/* Render all position lines */}
-          {renderPositionLines()}
+          {/* Render all position lines - SIEMPRE mostrar cuando hay posiciones */}
+          {symbolPositions.length > 0 && renderPositionLines()}
         </>
       )}
 
-      {/* Position Navigation - Moved to bottom */}
-      {symbolPositions.length > 0 && (
+      {/* Position Navigation - solo cuando overlay está activo Y hay posiciones */}
+      {isVisible && symbolPositions.length > 0 && (
         <View style={styles.positionNavigationBottom}>
           <TouchableOpacity
             style={[
