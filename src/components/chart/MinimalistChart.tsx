@@ -694,88 +694,23 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
     return null;
   }, [activePositions]);
 
-  // Funciones para el trading overlay - MEJORADO PARA DETECTAR POSICIONES
+  // Funciones para el trading overlay - SIMPLIFICADO: Solo navegación, NO trading
   const handleChartClick = useCallback((event: MouseEvent | TouchEvent) => {
-    if (!chartRef.current || !canvasRef.current) {
-      console.log('🔴 [CLICK DEBUG] Chart o canvas no disponible');
-      return;
-    }
-
-    // Obtener coordenadas del clic
-    const rect = canvasRef.current.getBoundingClientRect();
-    let x: number, y: number;
+    console.log('� [CLICK DEBUG] Click en gráfico detectado - Solo navegación permitida');
     
-    if ('touches' in event && event.touches.length > 0) {
-      x = event.touches[0].clientX - rect.left;
-      y = event.touches[0].clientY - rect.top;
-    } else if ('clientX' in event) {
-      x = event.clientX - rect.left;
-      y = event.clientY - rect.top;
-    } else {
-      console.log('🔴 [CLICK DEBUG] No se pudieron obtener coordenadas del evento');
-      return;
+    // NUEVO: Los clicks en el gráfico ya NO activan overlays de trading
+    // Solo se permiten para navegación básica del gráfico
+    // Todo el control de trading se hace ahora mediante los botones de posiciones
+    
+    // Limpiar visualización de TP/SL si está activa
+    if (showTpSlVisualization && onClearTpSlVisualization) {
+      console.log('🧹 [TP/SL CLEAR] Limpiando visualización TP/SL - clic en gráfico');
+      onClearTpSlVisualization();
     }
     
-    // Verificar si el clic está sobre una posición existente
-    const clickedPosition = getPositionAtClick(x, y);
-    
-    if (clickedPosition) {
-      console.log(`🟢 [POSITION CLICK] Clic en posición detectado:`, {
-        id: clickedPosition.id,
-        symbol: clickedPosition.symbol,
-        entryPrice: clickedPosition.entryPrice,
-        side: clickedPosition.side,
-        currentlyActive: activeOverlayPositionId === clickedPosition.id
-      });
-      
-      // NUEVA LÓGICA DE TOGGLE: Verificar si esta posición ya tiene el overlay activo
-      if (activeOverlayPositionId === clickedPosition.id) {
-        // Si la misma posición ya está activa, DESACTIVAR el overlay
-        console.log(`🔴 [TOGGLE OFF] Desactivando overlay para posición ${clickedPosition.id}`);
-        deactivateTradingOverlay();
-        setActiveOverlayPositionId(null);
-      } else {
-        // Si es una posición diferente o no hay overlay activo, ACTIVAR con esta posición
-        console.log(`🟢 [TOGGLE ON] Activando overlay para posición ${clickedPosition.id}`);
-        activateTradingOverlay(clickedPosition.entryPrice);
-        setActiveOverlayPositionId(clickedPosition.id);
-        
-        // Configurar TP y SL con los valores de la posición clickeada
-        if (clickedPosition.takeProfitPrice) {
-          setTakeProfitLevel(clickedPosition.takeProfitPrice);
-          tradingOverlayState.current.takeProfitLevel = clickedPosition.takeProfitPrice;
-        }
-        if (clickedPosition.stopLossPrice) {
-          setStopLossLevel(clickedPosition.stopLossPrice);
-          tradingOverlayState.current.stopLossLevel = clickedPosition.stopLossPrice;
-        }
-      }
-      
-      // Mantener callback por compatibilidad pero sin abrir modal de detalles
-      if (onPositionPress && activeOverlayPositionId !== clickedPosition.id) {
-        // Solo llamar si el callback está definido y no se está desactivando
-        onPositionPress(clickedPosition);
-      }
-    } else {
-      // Limpiar visualización de TP/SL si está activa y se hace clic en área vacía
-      if (showTpSlVisualization && onClearTpSlVisualization) {
-        console.log('🧹 [TP/SL CLEAR] Limpiando visualización TP/SL - clic en área vacía');
-        onClearTpSlVisualization();
-      }
-      
-      // Clic en área vacía: desactivar overlay si está activo
-      if (showTradingOverlay && activeOverlayPositionId) {
-        console.log('🔴 [EMPTY AREA CLICK] Desactivando overlay por clic en área vacía');
-        deactivateTradingOverlay();
-        setActiveOverlayPositionId(null);
-      } else if (showTradingOverlay) {
-        console.log('🎯 [CLICK DEBUG] Click en gráfico - overlay activo, permitir navegación');
-      } else {
-        console.log('🔴 [CLICK DEBUG] Click en gráfico ignorado - overlay inactivo y no hay posición en este punto');
-      }
-    }
-
-  }, [showTradingOverlay, getPositionAtClick, activateTradingOverlay, deactivateTradingOverlay, onPositionPress, showTpSlVisualization, onClearTpSlVisualization, activeOverlayPositionId]);
+    // Los overlays de trading solo se controlan desde los botones de posiciones
+    console.log('ℹ️ [CLICK INFO] Para visualizar posiciones, usa los botones en la parte inferior');
+  }, [showTpSlVisualization, onClearTpSlVisualization]);
 
   // Configurar los event listeners para el canvas
   useEffect(() => {
@@ -1282,6 +1217,41 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
   const hideTradingOverlay = useCallback(() => {
     deactivateTradingOverlay();
   }, [deactivateTradingOverlay]);
+
+  // NUEVO: Función para manejar el toggle de visualización de posiciones desde botones
+  const handlePositionButtonPress = useCallback((position: PositionData) => {
+    console.log(`🔘 [POSITION BUTTON] Presionado botón de posición: ${position.symbol} - ${position.side}`);
+    
+    // Verificar si esta posición ya tiene el overlay activo
+    if (activeOverlayPositionId === position.id) {
+      // Si la misma posición ya está activa, DESACTIVAR el overlay
+      console.log(`🔴 [TOGGLE OFF] Desactivando overlay para posición ${position.id}`);
+      deactivateTradingOverlay();
+      setActiveOverlayPositionId(null);
+    } else {
+      // Si es una posición diferente o no hay overlay activo, ACTIVAR con esta posición
+      console.log(`🟢 [TOGGLE ON] Activando overlay para posición ${position.id}`);
+      activateTradingOverlay(position.entryPrice);
+      setActiveOverlayPositionId(position.id);
+      
+      // Configurar TP y SL con los valores reales de la posición
+      if (position.takeProfitPrice) {
+        setTakeProfitLevel(position.takeProfitPrice);
+        tradingOverlayState.current.takeProfitLevel = position.takeProfitPrice;
+        console.log(`🎯 [TP SET] Take Profit configurado: $${position.takeProfitPrice.toFixed(2)}`);
+      }
+      if (position.stopLossPrice) {
+        setStopLossLevel(position.stopLossPrice);
+        tradingOverlayState.current.stopLossLevel = position.stopLossPrice;
+        console.log(`🛑 [SL SET] Stop Loss configurado: $${position.stopLossPrice.toFixed(2)}`);
+      }
+    }
+    
+    // Mantener callback por compatibilidad si está definido
+    if (onPositionPress) {
+      onPositionPress(position);
+    }
+  }, [activeOverlayPositionId, activateTradingOverlay, deactivateTradingOverlay, onPositionPress]);
 
   // 🐛 DEBUG: Rastrear cambios inesperados en el estado showTradingOverlay
   useEffect(() => {
@@ -2290,50 +2260,75 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
             return;
           }
 
+          // NUEVO: Obtener información de la posición activa para determinar colores
+          const activePosition = activePositions.find(p => p.id === activeOverlayPositionId);
+          const isLongPosition = activePosition ? activePosition.side === 'BUY' : true; // Default a LONG si no hay posición específica
+
+          console.log(`🎨 [PLUGIN] Dibujando overlay genérico para posición ${activePosition?.side || 'DEFAULT'}: ${activePosition?.symbol || 'N/A'}`);
+
           // Marcar que estamos dibujando para prevenir loops
           state.isDrawing = true;
           
           try {
             ctx.save();
 
-            // CRÍTICO: Usar entryPrice como divisor de colores
+            // CRÍTICO: Usar entryPrice como divisor de colores según el tipo de posición
             const entryPriceY = yScale.getPixelForValue(state.entryPrice);
             const currentPriceY = yScale.getPixelForValue(state.currentPrice);
 
-            // Área verde (para TP) arriba del entry price
-            ctx.fillStyle = 'rgba(0, 255, 136, 0.15)';
-            ctx.fillRect(
-              chartArea.left,
-              chartArea.top,
-              chartArea.right - chartArea.left,
-              entryPriceY - chartArea.top
-            );
+            if (isLongPosition) {
+              // Para posición LONG (BUY): verde arriba del entry (ganancia), rojo abajo (pérdida)
+              ctx.fillStyle = 'rgba(0, 255, 136, 0.15)';
+              ctx.fillRect(
+                chartArea.left,
+                chartArea.top,
+                chartArea.right - chartArea.left,
+                entryPriceY - chartArea.top
+              );
 
-            // Área roja (para SL) abajo del entry price
-            ctx.fillStyle = 'rgba(255, 68, 68, 0.15)';
-            ctx.fillRect(
-              chartArea.left,
-              entryPriceY,
-              chartArea.right - chartArea.left,
-              chartArea.bottom - entryPriceY
-            );
+              ctx.fillStyle = 'rgba(255, 68, 68, 0.15)';
+              ctx.fillRect(
+                chartArea.left,
+                entryPriceY,
+                chartArea.right - chartArea.left,
+                chartArea.bottom - entryPriceY
+              );
+            } else {
+              // Para posición SHORT (SELL): rojo arriba del entry (pérdida), verde abajo (ganancia)
+              ctx.fillStyle = 'rgba(255, 68, 68, 0.15)';
+              ctx.fillRect(
+                chartArea.left,
+                chartArea.top,
+                chartArea.right - chartArea.left,
+                entryPriceY - chartArea.top
+              );
 
-            // Línea del entry price (divisor principal)
-            ctx.strokeStyle = '#ffffff';
+              ctx.fillStyle = 'rgba(0, 255, 136, 0.15)';
+              ctx.fillRect(
+                chartArea.left,
+                entryPriceY,
+                chartArea.right - chartArea.left,
+                chartArea.bottom - entryPriceY
+              );
+            }
+
+            // Línea del entry price (divisor principal) - color según tipo de posición
+            ctx.strokeStyle = isLongPosition ? '#00ff88' : '#ff4444';
             ctx.lineWidth = 3;
             ctx.setLineDash([6, 6]);
             ctx.beginPath();
             ctx.moveTo(chartArea.left, entryPriceY);
             ctx.lineTo(chartArea.right, entryPriceY);
+            ctx.stroke();
             ctx.setLineDash([]);
             
-            // Etiqueta del entry price
-            ctx.fillStyle = '#ffffff';
+            // Etiqueta del entry price con información de la posición
+            ctx.fillStyle = isLongPosition ? '#00ff88' : '#ff4444';
             ctx.font = 'bold 14px Arial';
             ctx.textAlign = 'left';
             ctx.strokeStyle = '#000000';
             ctx.lineWidth = 3;
-            const entryText = `ENTRY: $${(state.entryPrice/1000).toFixed(1)}k`;
+            const entryText = `${activePosition?.side || 'ENTRY'}: $${(state.entryPrice/1000).toFixed(1)}k`;
             ctx.strokeText(entryText, chartArea.right + 5, entryPriceY + 5);
             ctx.fillText(entryText, chartArea.right + 5, entryPriceY + 5);
 
@@ -2351,10 +2346,13 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
             const tpY = yScale.getPixelForValue(state.takeProfitLevel);
             ctx.strokeStyle = '#00ff88';
             ctx.lineWidth = 3;
+            ctx.shadowColor = '#00ff88';
+            ctx.shadowBlur = 3;
             ctx.beginPath();
             ctx.moveTo(chartArea.left, tpY);
             ctx.lineTo(chartArea.right, tpY);
             ctx.stroke();
+            ctx.shadowBlur = 0;
 
             // Etiqueta TP
             ctx.fillStyle = '#00ff88';
@@ -2369,10 +2367,13 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
             const slY = yScale.getPixelForValue(state.stopLossLevel);
             ctx.strokeStyle = '#ff4444';
             ctx.lineWidth = 3;
+            ctx.shadowColor = '#ff4444';
+            ctx.shadowBlur = 3;
             ctx.beginPath();
             ctx.moveTo(chartArea.left, slY);
             ctx.lineTo(chartArea.right, slY);
             ctx.stroke();
+            ctx.shadowBlur = 0;
 
             // Etiqueta SL
             ctx.fillStyle = '#ff4444';
@@ -2383,6 +2384,35 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
             const slText = `SL: $${(state.stopLossLevel/1000).toFixed(1)}k`;
             ctx.strokeText(slText, chartArea.right + 5, slY + 15);
             ctx.fillText(slText, chartArea.right + 5, slY + 15);
+
+            // NUEVO: Dibujar barras de control interactivas con colores según posición
+            const barWidth = 20;
+            const barHeight = 30;
+            const barX = chartArea.right + 80;
+
+            // Barra TP
+            ctx.shadowColor = 'rgba(0, 0, 0, 0.5)';
+            ctx.shadowBlur = 4;
+            ctx.shadowOffsetX = 2;
+            ctx.shadowOffsetY = 2;
+            ctx.fillStyle = '#00ff88';
+            ctx.fillRect(barX, tpY - barHeight/2, barWidth, barHeight);
+            ctx.shadowBlur = 0;
+            ctx.strokeStyle = '#ffffff';
+            ctx.lineWidth = 2;
+            ctx.strokeRect(barX, tpY - barHeight/2, barWidth, barHeight);
+
+            // Barra SL
+            ctx.shadowColor = 'rgba(0, 0, 0, 0.5)';
+            ctx.shadowBlur = 4;
+            ctx.shadowOffsetX = 2;
+            ctx.shadowOffsetY = 2;
+            ctx.fillStyle = '#ff4444';
+            ctx.fillRect(barX, slY - barHeight/2, barWidth, barHeight);
+            ctx.shadowBlur = 0;
+            ctx.strokeStyle = '#ffffff';
+            ctx.lineWidth = 2;
+            ctx.strokeRect(barX, slY - barHeight/2, barWidth, barHeight);
 
             ctx.restore();
             
@@ -4615,6 +4645,65 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
           <Text style={styles.statusText}>{status}</Text>
         </View>
       </View>
+
+      {/* Barra de posiciones fija en la parte inferior - SIEMPRE VISIBLE */}
+      <View style={styles.positionsBar}>
+        <View style={styles.positionsHeader}>
+          <Text style={styles.positionsTitle}>Posiciones Activas</Text>
+          {activeOverlayPositionId && (
+            <Text style={styles.visualizedIndicator}>
+              Visualizando: {activePositions.find(p => p.id === activeOverlayPositionId)?.symbol || 'Ninguna'}
+            </Text>
+          )}
+        </View>
+        
+        <ScrollView 
+          horizontal 
+          showsHorizontalScrollIndicator={false} 
+          style={styles.positionsScrollView}
+          contentContainerStyle={styles.positionsScrollContent}
+        >
+          {activePositions.length === 0 ? (
+            <View style={styles.noPositionsContainer}>
+              <Text style={styles.noPositionsText}>No hay posiciones activas</Text>
+            </View>
+          ) : (
+            activePositions.map((position) => (
+              <TouchableOpacity
+                key={position.id}
+                style={[
+                  styles.positionButton,
+                  activeOverlayPositionId === position.id && styles.positionButtonActive,
+                  position.side === 'BUY' ? styles.positionButtonLong : styles.positionButtonShort
+                ]}
+                onPress={() => handlePositionButtonPress(position)}
+              >
+                <View style={styles.positionButtonContent}>
+                  <Text style={styles.positionSymbol}>{position.symbol}</Text>
+                  <Text style={[
+                    styles.positionSide,
+                    position.side === 'BUY' ? styles.positionSideLong : styles.positionSideShort
+                  ]}>
+                    {position.side}
+                  </Text>
+                  <Text style={styles.positionEntry}>
+                    ${position.entryPrice.toFixed(2)}
+                  </Text>
+                  <Text style={[
+                    styles.positionPnL,
+                    position.unrealizedPnL >= 0 ? styles.positionPnLPositive : styles.positionPnLNegative
+                  ]}>
+                    {position.unrealizedPnL >= 0 ? '+' : ''}${position.unrealizedPnL.toFixed(2)}
+                  </Text>
+                  {activeOverlayPositionId === position.id && (
+                    <Text style={styles.activeIndicator}>●</Text>
+                  )}
+                </View>
+              </TouchableOpacity>
+            ))
+          )}
+        </ScrollView>
+      </View>
     </View>
   );
 };
@@ -4780,6 +4869,110 @@ const styles = StyleSheet.create({
     color: '#ffffff',
     fontSize: 11,
     fontWeight: '500',
+  },
+  // Estilos para la barra de posiciones
+  positionsBar: {
+    backgroundColor: '#1a1a1a',
+    borderTopWidth: 1,
+    borderTopColor: '#333',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    flexShrink: 0,
+  },
+  positionsHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  positionsTitle: {
+    color: '#ffffff',
+    fontSize: 12,
+    fontWeight: 'bold',
+  },
+  visualizedIndicator: {
+    color: '#00ff88',
+    fontSize: 10,
+    fontStyle: 'italic',
+  },
+  positionsScrollView: {
+    flexDirection: 'row',
+  },
+  positionsScrollContent: {
+    paddingRight: 12,
+  },
+  noPositionsContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: 20,
+  },
+  noPositionsText: {
+    color: '#666',
+    fontSize: 12,
+    fontStyle: 'italic',
+  },
+  positionButton: {
+    backgroundColor: '#2a2a2a',
+    borderRadius: 8,
+    marginRight: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderWidth: 2,
+    borderColor: '#444',
+    minWidth: 100,
+  },
+  positionButtonActive: {
+    borderColor: '#00ff88',
+    backgroundColor: '#003322',
+  },
+  positionButtonLong: {
+    borderLeftColor: '#00ff88',
+    borderLeftWidth: 4,
+  },
+  positionButtonShort: {
+    borderLeftColor: '#ff4444',
+    borderLeftWidth: 4,
+  },
+  positionButtonContent: {
+    alignItems: 'center',
+  },
+  positionSymbol: {
+    color: '#ffffff',
+    fontSize: 11,
+    fontWeight: 'bold',
+    marginBottom: 2,
+  },
+  positionSide: {
+    fontSize: 9,
+    fontWeight: '600',
+    marginBottom: 2,
+  },
+  positionSideLong: {
+    color: '#00ff88',
+  },
+  positionSideShort: {
+    color: '#ff4444',
+  },
+  positionEntry: {
+    color: '#cccccc',
+    fontSize: 10,
+    marginBottom: 2,
+  },
+  positionPnL: {
+    fontSize: 10,
+    fontWeight: '500',
+  },
+  positionPnLPositive: {
+    color: '#00ff88',
+  },
+  positionPnLNegative: {
+    color: '#ff4444',
+  },
+  activeIndicator: {
+    color: '#00ff88',
+    fontSize: 16,
+    marginTop: 2,
   },
 });
 
