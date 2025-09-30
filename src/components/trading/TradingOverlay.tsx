@@ -9,6 +9,18 @@ import {
   TouchableOpacity,
 } from 'react-native';
 import { formatPrice } from '../../utils/formatters';
+import { TradingOrder, OrderSide, OrderStatus } from '../../types/trading';
+
+interface PositionOverlayData {
+  id: string;
+  symbol: string;
+  side: OrderSide;
+  entryPrice: number;
+  takeProfitPrice?: number;
+  stopLossPrice?: number;
+  quantity: number;
+  unrealizedPnL: number;
+}
 
 interface TradingOverlayProps {
   chartDimensions: {
@@ -31,6 +43,11 @@ interface TradingOverlayProps {
   initialStopLoss?: number | null;
   onTakeProfitChange?: (price: number | null) => void;
   onStopLossChange?: (price: number | null) => void;
+  // New props for position visualization
+  activePositions?: PositionOverlayData[];
+  currentPositionIndex?: number;
+  onPositionChange?: (index: number) => void;
+  onPositionPress?: (position: PositionOverlayData) => void;
 }
 
 const PRICE_AXIS_OFFSET = 68;
@@ -54,6 +71,11 @@ const TradingOverlay: React.FC<TradingOverlayProps> = ({
   initialStopLoss = null,
   onTakeProfitChange,
   onStopLossChange,
+  // New position props
+  activePositions = [],
+  currentPositionIndex = 0,
+  onPositionChange,
+  onPositionPress,
 }) => {
   const [tpHandleY, setTpHandleY] = useState(0);
   const [slHandleY, setSlHandleY] = useState(chartDimensions.height);
@@ -67,6 +89,16 @@ const TradingOverlay: React.FC<TradingOverlayProps> = ({
   const previousSlPrice = useRef<number | null>(null);
 
   const height = chartDimensions.height;
+
+  // Get current position for display
+  const currentPosition = useMemo(() => {
+    return activePositions[currentPositionIndex] || null;
+  }, [activePositions, currentPositionIndex]);
+
+  // Filter positions for current symbol
+  const symbolPositions = useMemo(() => {
+    return activePositions.filter(pos => pos.symbol === symbol);
+  }, [activePositions, symbol]);
 
   const priceRange = useMemo(() => {
     if (!priceScale) return null;
@@ -239,6 +271,143 @@ const TradingOverlay: React.FC<TradingOverlayProps> = ({
   const tpHandlers = tpPanResponderRef.current?.panHandlers ?? {};
   const slHandlers = slPanResponderRef.current?.panHandlers ?? {};
 
+  // Navigate between positions
+  const handlePreviousPosition = () => {
+    if (symbolPositions.length > 1) {
+      const currentSymbolIndex = symbolPositions.findIndex(pos => pos.id === currentPosition?.id);
+      const newIndex = currentSymbolIndex > 0 ? currentSymbolIndex - 1 : symbolPositions.length - 1;
+      const newGlobalIndex = activePositions.findIndex(pos => pos.id === symbolPositions[newIndex].id);
+      onPositionChange?.(newGlobalIndex);
+    }
+  };
+
+  const handleNextPosition = () => {
+    if (symbolPositions.length > 1) {
+      const currentSymbolIndex = symbolPositions.findIndex(pos => pos.id === currentPosition?.id);
+      const newIndex = currentSymbolIndex < symbolPositions.length - 1 ? currentSymbolIndex + 1 : 0;
+      const newGlobalIndex = activePositions.findIndex(pos => pos.id === symbolPositions[newIndex].id);
+      onPositionChange?.(newGlobalIndex);
+    }
+  };
+
+  // Render position lines
+  const renderPositionLines = () => {
+    if (!hasScale || symbolPositions.length === 0) return null;
+
+    return symbolPositions.map((position, index) => {
+      const isCurrentPosition = position.id === currentPosition?.id;
+      const opacity = isCurrentPosition ? 1 : 0.5;
+      
+      const entryOffset = priceToOffset(position.entryPrice);
+      const tpOffset = position.takeProfitPrice ? priceToOffset(position.takeProfitPrice) : null;
+      const slOffset = position.stopLossPrice ? priceToOffset(position.stopLossPrice) : null;
+      
+      const isLong = position.side === OrderSide.BUY;
+      const isProfitable = position.unrealizedPnL >= 0;
+
+      return (
+        <View key={position.id}>
+          {/* Entry line */}
+          <View
+            style={[
+              styles.horizontalLine,
+              styles.positionEntryLine,
+              {
+                top: clamp(entryOffset, 0, height),
+                opacity,
+                borderColor: isLong ? '#00ff88' : '#ff4444',
+                borderWidth: isCurrentPosition ? 2 : 1,
+              },
+            ]}
+          />
+          
+          {/* Entry price label */}
+          <TouchableOpacity
+            style={[
+              styles.positionLabel,
+              styles.entryLabel,
+              {
+                top: clamp(entryOffset, 0, height) - 12,
+                right: 8,
+                backgroundColor: isLong ? '#00ff88' : '#ff4444',
+                opacity,
+              },
+            ]}
+            onPress={() => onPositionPress?.(position)}
+          >
+            <Text style={styles.positionLabelText}>
+              {position.side} ${formatPrice(position.entryPrice, symbol)}
+            </Text>
+          </TouchableOpacity>
+
+          {/* TP line and label */}
+          {tpOffset !== null && (
+            <>
+              <View
+                style={[
+                  styles.horizontalLine,
+                  styles.positionTpLine,
+                  {
+                    top: clamp(tpOffset, 0, height),
+                    opacity,
+                    borderWidth: isCurrentPosition ? 2 : 1,
+                  },
+                ]}
+              />
+              <View
+                style={[
+                  styles.positionLabel,
+                  styles.tpLabel,
+                  {
+                    top: clamp(tpOffset, 0, height) - 12,
+                    right: 8,
+                    opacity,
+                  },
+                ]}
+              >
+                <Text style={styles.positionLabelText}>
+                  TP ${formatPrice(position.takeProfitPrice!, symbol)}
+                </Text>
+              </View>
+            </>
+          )}
+
+          {/* SL line and label */}
+          {slOffset !== null && (
+            <>
+              <View
+                style={[
+                  styles.horizontalLine,
+                  styles.positionSlLine,
+                  {
+                    top: clamp(slOffset, 0, height),
+                    opacity,
+                    borderWidth: isCurrentPosition ? 2 : 1,
+                  },
+                ]}
+              />
+              <View
+                style={[
+                  styles.positionLabel,
+                  styles.slLabel,
+                  {
+                    top: clamp(slOffset, 0, height) - 12,
+                    right: 8,
+                    opacity,
+                  },
+                ]}
+              >
+                <Text style={styles.positionLabelText}>
+                  SL ${formatPrice(position.stopLossPrice!, symbol)}
+                </Text>
+              </View>
+            </>
+          )}
+        </View>
+      );
+    });
+  };
+
   return (
     <View
       style={[
@@ -261,6 +430,50 @@ const TradingOverlay: React.FC<TradingOverlayProps> = ({
         <Text style={styles.closeButtonText}>✕</Text>
       </TouchableOpacity>
 
+      {/* Position Navigation */}
+      {symbolPositions.length > 0 && (
+        <View style={styles.positionNavigation}>
+          <TouchableOpacity
+            style={[
+              styles.positionNavigationButton,
+              { opacity: symbolPositions.length > 1 ? 1 : 0.3 }
+            ]}
+            onPress={handlePreviousPosition}
+            disabled={symbolPositions.length <= 1}
+          >
+            <Text style={styles.positionNavigationText}>‹</Text>
+          </TouchableOpacity>
+
+          {currentPosition && (
+            <TouchableOpacity
+              style={styles.positionInfo}
+              onPress={() => onPositionPress?.(currentPosition)}
+            >
+              <Text style={styles.positionInfoText}>
+                {currentPosition.side} • ${formatPrice(currentPosition.entryPrice, symbol)}
+              </Text>
+              <Text style={[
+                styles.positionPnlText,
+                { color: currentPosition.unrealizedPnL >= 0 ? '#00ff88' : '#ff4444' }
+              ]}>
+                {currentPosition.unrealizedPnL >= 0 ? '+' : ''}${currentPosition.unrealizedPnL.toFixed(2)}
+              </Text>
+            </TouchableOpacity>
+          )}
+
+          <TouchableOpacity
+            style={[
+              styles.positionNavigationButton,
+              { opacity: symbolPositions.length > 1 ? 1 : 0.3 }
+            ]}
+            onPress={handleNextPosition}
+            disabled={symbolPositions.length <= 1}
+          >
+            <Text style={styles.positionNavigationText}>›</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
       {!hasScale && (
         <View style={styles.noDataContainer}>
           <Text style={styles.noDataText}>Sin datos de precio para configurar TP/SL</Text>
@@ -269,24 +482,32 @@ const TradingOverlay: React.FC<TradingOverlayProps> = ({
 
       {hasScale && (
         <>
-          {tpActivePrice && (
-            <View
-              style={[
-                styles.horizontalLine,
-                styles.tpLine,
-                { top: clamp(tpHandleY, 0, height) },
-              ]}
-            />
-          )}
+          {/* Render position lines */}
+          {renderPositionLines()}
 
-          {slActivePrice && (
-            <View
-              style={[
-                styles.horizontalLine,
-                styles.slLine,
-                { top: clamp(slHandleY, 0, height) },
-              ]}
-            />
+          {/* Manual TP/SL lines (only if no current position or for new orders) */}
+          {!currentPosition && (
+            <>
+              {tpActivePrice && (
+                <View
+                  style={[
+                    styles.horizontalLine,
+                    styles.tpLine,
+                    { top: clamp(tpHandleY, 0, height) },
+                  ]}
+                />
+              )}
+
+              {slActivePrice && (
+                <View
+                  style={[
+                    styles.horizontalLine,
+                    styles.slLine,
+                    { top: clamp(slHandleY, 0, height) },
+                  ]}
+                />
+              )}
+            </>
           )}
 
           <View
@@ -297,71 +518,74 @@ const TradingOverlay: React.FC<TradingOverlayProps> = ({
             ]}
           />
 
-          <View
-            style={[
-              styles.sliderRail,
-              {
-                height,
-                right: -PRICE_AXIS_OFFSET,
-              },
-            ]}
-            pointerEvents="box-none"
-          >
+          {/* Manual TP/SL handles (only if no current position) */}
+          {!currentPosition && (
             <View
               style={[
-                styles.sliderTrack,
-                styles.tpTrack,
-                { height: clamp(latestPriceOffset, 0, height) },
-              ]}
-            />
-            <View
-              style={[
-                styles.sliderTrack,
-                styles.slTrack,
+                styles.sliderRail,
                 {
-                  top: clamp(latestPriceOffset, 0, height),
-                  height: clamp(height - latestPriceOffset, 0, height),
+                  height,
+                  right: -PRICE_AXIS_OFFSET,
                 },
               ]}
-            />
-
-            <View
-              style={[
-                styles.sliderHandle,
-                styles.tpHandle,
-                {
-                  transform: [
-                    {
-                      translateY: clamp(tpHandleY, 0, latestPriceOffset) - HANDLE_RADIUS,
-                    },
-                  ],
-                },
-              ]}
-              {...tpHandlers}
+              pointerEvents="box-none"
             >
-              <Text style={styles.handleLabel}>TP</Text>
-              <Text style={styles.handleValue}>{formattedTp}</Text>
-            </View>
+              <View
+                style={[
+                  styles.sliderTrack,
+                  styles.tpTrack,
+                  { height: clamp(latestPriceOffset, 0, height) },
+                ]}
+              />
+              <View
+                style={[
+                  styles.sliderTrack,
+                  styles.slTrack,
+                  {
+                    top: clamp(latestPriceOffset, 0, height),
+                    height: clamp(height - latestPriceOffset, 0, height),
+                  },
+                ]}
+              />
 
-            <View
-              style={[
-                styles.sliderHandle,
-                styles.slHandle,
-                {
-                  transform: [
-                    {
-                      translateY:
-                        clamp(slHandleY, latestPriceOffset, height) - HANDLE_RADIUS,
-                    },
-                  ],
-                },
-              ]}
-              {...slHandlers}
-            >
-              <Text style={styles.handleLabel}>SL</Text>
-              <Text style={styles.handleValue}>{formattedSl}</Text>
+              <View
+                style={[
+                  styles.sliderHandle,
+                  styles.tpHandle,
+                  {
+                    transform: [
+                      {
+                        translateY: clamp(tpHandleY, 0, latestPriceOffset) - HANDLE_RADIUS,
+                      },
+                    ],
+                  },
+                ]}
+                {...tpHandlers}
+              >
+                <Text style={styles.handleLabel}>TP</Text>
+                <Text style={styles.handleValue}>{formattedTp}</Text>
+              </View>
+
+              <View
+                style={[
+                  styles.sliderHandle,
+                  styles.slHandle,
+                  {
+                    transform: [
+                      {
+                        translateY:
+                          clamp(slHandleY, latestPriceOffset, height) - HANDLE_RADIUS,
+                      },
+                    ],
+                  },
+                ]}
+                {...slHandlers}
+              >
+                <Text style={styles.handleLabel}>SL</Text>
+                <Text style={styles.handleValue}>{formattedSl}</Text>
+              </View>
             </View>
-          </View>
+          )}
         </>
       )}
     </View>
@@ -485,6 +709,82 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '700',
     color: '#ffffff',
+  },
+  // Position visualization styles
+  positionEntryLine: {
+    borderStyle: 'solid',
+  },
+  positionTpLine: {
+    borderStyle: 'dashed',
+    borderColor: '#00ff88',
+  },
+  positionSlLine: {
+    borderStyle: 'dashed',
+    borderColor: '#ff4444',
+  },
+  positionLabel: {
+    position: 'absolute',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 4,
+    zIndex: 1002,
+  },
+  entryLabel: {
+    // backgroundColor set dynamically
+  },
+  tpLabel: {
+    backgroundColor: 'rgba(0, 255, 136, 0.9)',
+  },
+  slLabel: {
+    backgroundColor: 'rgba(255, 68, 68, 0.9)',
+  },
+  positionLabelText: {
+    color: '#ffffff',
+    fontSize: 11,
+    fontWeight: 'bold',
+  },
+  // Position navigation styles
+  positionNavigation: {
+    position: 'absolute',
+    top: 50,
+    left: 8,
+    right: 8,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    zIndex: 1003,
+  },
+  positionNavigationButton: {
+    backgroundColor: 'rgba(42, 42, 42, 0.9)',
+    borderRadius: 20,
+    width: 40,
+    height: 40,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#444444',
+  },
+  positionNavigationText: {
+    color: '#ffffff',
+    fontSize: 18,
+    fontWeight: 'bold',
+  },
+  positionInfo: {
+    backgroundColor: 'rgba(26, 26, 26, 0.9)',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderWidth: 1,
+    borderColor: '#333333',
+  },
+  positionInfoText: {
+    color: '#ffffff',
+    fontSize: 12,
+    fontWeight: 'bold',
+  },
+  positionPnlText: {
+    fontSize: 11,
+    fontWeight: '600',
   },
 });
 
