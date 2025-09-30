@@ -77,6 +77,12 @@ export const TradingScreen: React.FC = () => {
   // Estados para Take Profit y Stop Loss (mantenidos para funcionalidad del modal)
   const [overlayTakeProfit, setOverlayTakeProfit] = useState<number | null>(null);
   const [overlayStopLoss, setOverlayStopLoss] = useState<number | null>(null);
+  
+  // Estado para activación del overlay con precio específico
+  const [overlayActivationPrice, setOverlayActivationPrice] = useState<number | null>(null);
+  
+  // Estado para forzar desactivación del overlay
+  const [forceDeactivate, setForceDeactivate] = useState<boolean>(false);
 
   // Collapsible sections for left panel (large screens)
   const [showMarketDataSection, setShowMarketDataSection] = useState(true);
