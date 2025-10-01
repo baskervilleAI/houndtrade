@@ -9,6 +9,7 @@ interface OrderFormProps {
   defaultSymbol?: string;
   defaultTakeProfitPrice?: number | null;
   defaultStopLossPrice?: number | null;
+  getCurrentPrice?: (symbol: string) => number | null; // Nueva prop para obtener precio actual
 }
 
 const CRYPTO_SYMBOLS = [
@@ -124,6 +125,7 @@ export const OrderForm: React.FC<OrderFormProps> = ({
   defaultSymbol = 'BTCUSDT',
   defaultTakeProfitPrice,
   defaultStopLossPrice,
+  getCurrentPrice, // Nueva prop
 }) => {
   // Estados del formulario
   const [symbol, setSymbol] = useState(defaultSymbol);
@@ -132,8 +134,8 @@ export const OrderForm: React.FC<OrderFormProps> = ({
   const [usdtAmount, setUsdtAmount] = useState('100');
   
   // TP/SL modes: 'price' para precio específico, 'usdt' para cantidad en USDT
-  const [tpMode, setTpMode] = useState<'price' | 'usdt'>('usdt');
-  const [slMode, setSlMode] = useState<'price' | 'usdt'>('usdt');
+  const [tpMode, setTpMode] = useState<'price' | 'usdt'>('price'); // Cambiar default a 'price'
+  const [slMode, setSlMode] = useState<'price' | 'usdt'>('price'); // Cambiar default a 'price'
   
   const [takeProfitUSDT, setTakeProfitUSDT] = useState('20');
   const [stopLossUSDT, setStopLossUSDT] = useState('10');
@@ -142,6 +144,105 @@ export const OrderForm: React.FC<OrderFormProps> = ({
   
   const [notes, setNotes] = useState('');
   const [showAdvanced, setShowAdvanced] = useState(false);
+
+  // Función para convertir USDT a precio
+  const convertUsdtToPrice = (usdtAmount: number, currentPrice: number, quantity: number, isTP: boolean): number => {
+    if (side === OrderSide.BUY) {
+      // Para posición LONG (BUY)
+      return isTP ? currentPrice + (usdtAmount / quantity) : currentPrice - (usdtAmount / quantity);
+    } else {
+      // Para posición SHORT (SELL)
+      return isTP ? currentPrice - (usdtAmount / quantity) : currentPrice + (usdtAmount / quantity);
+    }
+  };
+
+  // Función para obtener cantidad estimada basada en precio actual
+  const getEstimatedQuantity = (): number => {
+    const currentPrice = getCurrentPrice?.(symbol);
+    const amount = parseFloat(usdtAmount) || 0;
+    
+    if (!currentPrice || amount <= 0) return 0;
+    
+    return amount / currentPrice;
+  };
+
+  // Manejador para cambio de modo TP
+  const handleTpModeChange = (newMode: 'price' | 'usdt') => {
+    if (newMode === tpMode) return;
+
+    const currentPrice = getCurrentPrice?.(symbol);
+    
+    if (newMode === 'price' && tpMode === 'usdt' && takeProfitUSDT.trim() && currentPrice) {
+      // Convirtiendo de USDT a precio
+      const usdtValue = parseFloat(takeProfitUSDT);
+      const quantity = getEstimatedQuantity();
+      
+      if (usdtValue > 0 && quantity > 0) {
+        const priceValue = convertUsdtToPrice(usdtValue, currentPrice, quantity, true);
+        setTakeProfitPrice(priceValue.toFixed(6));
+        setTakeProfitUSDT('');
+      }
+    } else if (newMode === 'usdt' && tpMode === 'price' && takeProfitPrice.trim() && currentPrice) {
+      // Convirtiendo de precio a USDT
+      const priceValue = parseFloat(takeProfitPrice);
+      const quantity = getEstimatedQuantity();
+      
+      if (priceValue > 0 && quantity > 0) {
+        let usdtValue = 0;
+        if (side === OrderSide.BUY) {
+          usdtValue = (priceValue - currentPrice) * quantity;
+        } else {
+          usdtValue = (currentPrice - priceValue) * quantity;
+        }
+        
+        if (usdtValue > 0) {
+          setTakeProfitUSDT(usdtValue.toFixed(2));
+          setTakeProfitPrice('');
+        }
+      }
+    }
+    
+    setTpMode(newMode);
+  };
+
+  // Manejador para cambio de modo SL
+  const handleSlModeChange = (newMode: 'price' | 'usdt') => {
+    if (newMode === slMode) return;
+
+    const currentPrice = getCurrentPrice?.(symbol);
+    
+    if (newMode === 'price' && slMode === 'usdt' && stopLossUSDT.trim() && currentPrice) {
+      // Convirtiendo de USDT a precio
+      const usdtValue = parseFloat(stopLossUSDT);
+      const quantity = getEstimatedQuantity();
+      
+      if (usdtValue > 0 && quantity > 0) {
+        const priceValue = convertUsdtToPrice(usdtValue, currentPrice, quantity, false);
+        setStopLossPrice(priceValue.toFixed(6));
+        setStopLossUSDT('');
+      }
+    } else if (newMode === 'usdt' && slMode === 'price' && stopLossPrice.trim() && currentPrice) {
+      // Convirtiendo de precio a USDT
+      const priceValue = parseFloat(stopLossPrice);
+      const quantity = getEstimatedQuantity();
+      
+      if (priceValue > 0 && quantity > 0) {
+        let usdtValue = 0;
+        if (side === OrderSide.BUY) {
+          usdtValue = (currentPrice - priceValue) * quantity;
+        } else {
+          usdtValue = (priceValue - currentPrice) * quantity;
+        }
+        
+        if (usdtValue > 0) {
+          setStopLossUSDT(usdtValue.toFixed(2));
+          setStopLossPrice('');
+        }
+      }
+    }
+    
+    setSlMode(newMode);
+  };
 
   useEffect(() => {
     if (defaultSymbol && defaultSymbol !== symbol) {
@@ -192,27 +293,27 @@ export const OrderForm: React.FC<OrderFormProps> = ({
       errors.push('La cantidad mínima recomendada es $10 USDT');
     }
 
-    if (tpMode === 'usdt') {
-      const tpAmount = parseFloat(takeProfitUSDT);
-      if (takeProfitUSDT.trim() && (isNaN(tpAmount) || tpAmount <= 0)) {
-        errors.push('El Take Profit debe ser un número mayor que 0');
-      }
-    } else {
+    if (tpMode === 'price') {
       const tpPrice = parseFloat(takeProfitPrice);
       if (takeProfitPrice.trim() && (isNaN(tpPrice) || tpPrice <= 0)) {
         errors.push('El precio de Take Profit debe ser mayor que 0');
       }
+    } else {
+      const tpAmount = parseFloat(takeProfitUSDT);
+      if (takeProfitUSDT.trim() && (isNaN(tpAmount) || tpAmount <= 0)) {
+        errors.push('El Take Profit debe ser un número mayor que 0');
+      }
     }
 
-    if (slMode === 'usdt') {
-      const slAmount = parseFloat(stopLossUSDT);
-      if (stopLossUSDT.trim() && (isNaN(slAmount) || slAmount <= 0)) {
-        errors.push('El Stop Loss debe ser un número mayor que 0');
-      }
-    } else {
+    if (slMode === 'price') {
       const slPrice = parseFloat(stopLossPrice);
       if (stopLossPrice.trim() && (isNaN(slPrice) || slPrice <= 0)) {
         errors.push('El precio de Stop Loss debe ser mayor que 0');
+      }
+    } else {
+      const slAmount = parseFloat(stopLossUSDT);
+      if (stopLossUSDT.trim() && (isNaN(slAmount) || slAmount <= 0)) {
+        errors.push('El Stop Loss debe ser un número mayor que 0');
       }
     }
 
@@ -236,16 +337,16 @@ export const OrderForm: React.FC<OrderFormProps> = ({
     };
 
     // Agregar TP/SL según el modo seleccionado
-    if (tpMode === 'usdt' && takeProfitUSDT.trim()) {
-      params.takeProfitUSDT = parseFloat(takeProfitUSDT);
-    } else if (tpMode === 'price' && takeProfitPrice.trim()) {
+    if (tpMode === 'price' && takeProfitPrice.trim()) {
       params.takeProfitPrice = parseFloat(takeProfitPrice);
+    } else if (tpMode === 'usdt' && takeProfitUSDT.trim()) {
+      params.takeProfitUSDT = parseFloat(takeProfitUSDT);
     }
 
-    if (slMode === 'usdt' && stopLossUSDT.trim()) {
-      params.stopLossUSDT = parseFloat(stopLossUSDT);
-    } else if (slMode === 'price' && stopLossPrice.trim()) {
+    if (slMode === 'price' && stopLossPrice.trim()) {
       params.stopLossPrice = parseFloat(stopLossPrice);
+    } else if (slMode === 'usdt' && stopLossUSDT.trim()) {
+      params.stopLossUSDT = parseFloat(stopLossUSDT);
     }
 
     try {
@@ -255,11 +356,14 @@ export const OrderForm: React.FC<OrderFormProps> = ({
         Alert.alert('¡Éxito!', 'Orden creada correctamente');
         // Limpiar formulario
         setUsdtAmount('100');
-        setTakeProfitUSDT('20');
-        setStopLossUSDT('10');
+        setTakeProfitUSDT('');
+        setStopLossUSDT('');
         setTakeProfitPrice('');
         setStopLossPrice('');
         setNotes('');
+        // Resetear modos a default (price)
+        setTpMode('price');
+        setSlMode('price');
       } else {
         Alert.alert('Error', result.errors?.join('\n') || 'Error al crear la orden');
       }
@@ -363,20 +467,20 @@ export const OrderForm: React.FC<OrderFormProps> = ({
             <Text style={{ fontSize: 16, flex: 1, color: '#ffffff' }}>Take Profit</Text>
             <SimpleSelect 
               value={tpMode} 
-              onValueChange={(value) => setTpMode(value as 'price' | 'usdt')}
+              onValueChange={(value) => handleTpModeChange(value as 'price' | 'usdt')}
               options={[
-                { value: 'usdt', label: 'USDT' },
-                { value: 'price', label: 'Precio' }
+                { value: 'price', label: 'Precio' },
+                { value: 'usdt', label: 'USDT' }
               ]}
               width={100}
             />
           </View>
           
-          {tpMode === 'usdt' ? (
+          {tpMode === 'price' ? (
             <TextInput
-              value={takeProfitUSDT}
-              onChangeText={setTakeProfitUSDT}
-              placeholder="Ganancia esperada en USDT"
+              value={takeProfitPrice}
+              onChangeText={setTakeProfitPrice}
+              placeholder="Precio objetivo"
               placeholderTextColor="#888888"
               keyboardType="numeric"
               style={{
@@ -392,9 +496,9 @@ export const OrderForm: React.FC<OrderFormProps> = ({
             />
           ) : (
             <TextInput
-              value={takeProfitPrice}
-              onChangeText={setTakeProfitPrice}
-              placeholder="Precio objetivo"
+              value={takeProfitUSDT}
+              onChangeText={setTakeProfitUSDT}
+              placeholder="Ganancia esperada en USDT"
               placeholderTextColor="#888888"
               keyboardType="numeric"
               style={{
@@ -417,20 +521,20 @@ export const OrderForm: React.FC<OrderFormProps> = ({
             <Text style={{ fontSize: 16, flex: 1, color: '#ffffff' }}>Stop Loss</Text>
             <SimpleSelect 
               value={slMode} 
-              onValueChange={(value) => setSlMode(value as 'price' | 'usdt')}
+              onValueChange={(value) => handleSlModeChange(value as 'price' | 'usdt')}
               options={[
-                { value: 'usdt', label: 'USDT' },
-                { value: 'price', label: 'Precio' }
+                { value: 'price', label: 'Precio' },
+                { value: 'usdt', label: 'USDT' }
               ]}
               width={100}
             />
           </View>
           
-          {slMode === 'usdt' ? (
+          {slMode === 'price' ? (
             <TextInput
-              value={stopLossUSDT}
-              onChangeText={setStopLossUSDT}
-              placeholder="Pérdida máxima en USDT"
+              value={stopLossPrice}
+              onChangeText={setStopLossPrice}
+              placeholder="Precio de stop"
               placeholderTextColor="#888888"
               keyboardType="numeric"
               style={{
@@ -446,9 +550,9 @@ export const OrderForm: React.FC<OrderFormProps> = ({
             />
           ) : (
             <TextInput
-              value={stopLossPrice}
-              onChangeText={setStopLossPrice}
-              placeholder="Precio de stop"
+              value={stopLossUSDT}
+              onChangeText={setStopLossUSDT}
+              placeholder="Pérdida máxima en USDT"
               placeholderTextColor="#888888"
               keyboardType="numeric"
               style={{

@@ -20,6 +20,7 @@ interface OrderFormModalProps {
   defaultSymbol?: string;
   defaultTakeProfitPrice?: number | null;
   defaultStopLossPrice?: number | null;
+  getCurrentPrice?: (symbol: string) => number | null; // Nueva prop
 }
 
 export const OrderFormModal: React.FC<OrderFormModalProps> = ({
@@ -30,6 +31,7 @@ export const OrderFormModal: React.FC<OrderFormModalProps> = ({
   defaultSymbol,
   defaultTakeProfitPrice,
   defaultStopLossPrice,
+  getCurrentPrice, // Nueva prop
 }) => {
   const handleCreateOrder = async (params: OrderCreationParams) => {
     const result = await onCreateOrder(params);
@@ -67,6 +69,7 @@ export const OrderFormModal: React.FC<OrderFormModalProps> = ({
             defaultSymbol={defaultSymbol}
             defaultTakeProfitPrice={defaultTakeProfitPrice}
             defaultStopLossPrice={defaultStopLossPrice}
+            getCurrentPrice={getCurrentPrice}
           />
         </View>
       </View>

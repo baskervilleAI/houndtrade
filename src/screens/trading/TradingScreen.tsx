@@ -21,7 +21,8 @@ import { PositionDetailsModal } from '../../components/trading/PositionDetailsMo
 import { OrderForm } from '../../components/trading/OrderForm';
 import { OrderFormModal } from '../../components/trading/OrderFormModal';
 import { OrderHistory } from '../../components/trading/OrderHistory';
-import TradingOverlay from '../../components/trading/TradingOverlay';
+import CentralizedTradingOverlay from '../../components/trading/CentralizedTradingOverlay';
+import OverlayManagerService from '../../services/overlayManagerService';
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
 
@@ -62,19 +63,13 @@ export const TradingScreen: React.FC = () => {
   const [showPositionModal, setShowPositionModal] = useState(false);
   const [selectedPosition, setSelectedPosition] = useState<any>(null);
   
-  // Trading overlay state - now controlled automatically by positions
-  const [showTradingOverlay, setShowTradingOverlay] = useState(false);
-  
-  // TP/SL visualization state for chart
-  const [visualizedPosition, setVisualizedPosition] = useState<any>(null);
-  const [showTpSlLines, setShowTpSlLines] = useState(false);
+  // Overlay manager instance
+  const overlayManager = OverlayManagerService.getInstance();
+  const [overlayState, setOverlayState] = useState(overlayManager.getState());
 
   // Estados para Take Profit y Stop Loss (mantenidos para funcionalidad del modal)
   const [overlayTakeProfit, setOverlayTakeProfit] = useState<number | null>(null);
   const [overlayStopLoss, setOverlayStopLoss] = useState<number | null>(null);
-
-  // Position navigation state
-  const [currentPositionIndex, setCurrentPositionIndex] = useState(0);
 
   // Initialize market data at the screen level - optimized for faster updates
   const { isInitialized, getStatus } = useMarketData({
@@ -82,6 +77,12 @@ export const TradingScreen: React.FC = () => {
     symbols: TRADING_SYMBOLS,
     refreshInterval: 10000, // 10 seconds - optimized for more frequent updates
   });
+
+  // Suscribirse a cambios del overlay manager
+  useEffect(() => {
+    const unsubscribe = overlayManager.subscribe(setOverlayState);
+    return unsubscribe;
+  }, [overlayManager]);
 
   // Update trading prices when market data changes
   useEffect(() => {
@@ -92,13 +93,30 @@ export const TradingScreen: React.FC = () => {
         updatePrice(symbol, data.price);
       }
     });
-  }, [tickers, getCurrentPrice, updatePrice]);
 
-  // Automatically show overlay when there are active positions - DESHABILITADO para permitir toggle manual
-  // useEffect(() => {
-  //   const hasActivePositions = activeOrders.length > 0;
-  //   setShowTradingOverlay(hasActivePositions);
-  // }, [activeOrders.length]);
+    // También actualizar precios en el overlay manager
+    overlayManager.updatePrices(
+      Object.fromEntries(
+        Object.entries(tickers).map(([symbol, data]) => [symbol, data.price])
+      )
+    );
+  }, [tickers, getCurrentPrice, updatePrice, overlayManager]);
+
+  // Actualizar posiciones en el overlay manager cuando cambien las órdenes activas
+  useEffect(() => {
+    activeOrders.forEach(order => {
+      const currentPrice = tickers[order.symbol]?.price || getCurrentPrice(order.symbol) || order.entryPrice;
+      overlayManager.updatePosition(order, currentPrice);
+    });
+
+    // Remover posiciones que ya no existen
+    const currentOrderIds = new Set(activeOrders.map(o => o.id));
+    overlayState.positions.forEach((position, positionId) => {
+      if (!currentOrderIds.has(positionId)) {
+        overlayManager.removePosition(positionId);
+      }
+    });
+  }, [activeOrders, tickers, getCurrentPrice, overlayManager, overlayState.positions]);
 
   // Only log once when status changes
   useEffect(() => {
@@ -107,9 +125,11 @@ export const TradingScreen: React.FC = () => {
       tickerCount: Object.keys(tickers).length,
       symbols: Object.keys(tickers),
       tradingOrders: orders.length,
-      activeOrders: activeOrders.length
+      activeOrders: activeOrders.length,
+      overlayActive: overlayState.isActive,
+      activePositionId: overlayState.activePositionId,
     });
-  }, [isInitialized, Object.keys(tickers).length, orders.length, activeOrders.length]);
+  }, [isInitialized, Object.keys(tickers).length, orders.length, activeOrders.length, overlayState.isActive, overlayState.activePositionId]);
 
   // Calcular precio actual para referencia
   const currentPrice = tickers[selectedPair]?.price || 0;
@@ -123,109 +143,22 @@ export const TradingScreen: React.FC = () => {
     await refreshPortfolio();
   };
 
-  // Handle navigation to chart from position - MEJORADO con visualización de TP/SL
+  // Handle navigation to chart from position - SIMPLIFICADO con overlay centralizado
   const handleGoToChart = useCallback((symbol: string, position: any) => {
-    console.log(`🎯 [GO TO CHART] Navegando a ${symbol} con overlay activado y visualización TP/SL`);
+    console.log(`🎯 [GO TO CHART] Navegando a ${symbol} con overlay activado`);
     
     // Switch to trading tab
     setActiveTab('trading');
     
-    // Activate trading overlay with position
-    setShowTradingOverlay(true);
+    // Activar overlay para esta posición específica
+    overlayManager.togglePositionOverlay(position.id);
     
-    // Get current price for the symbol
-    let currentPrice = tickers[symbol]?.price;
-    if (!currentPrice) {
-      const tradingPrice = getCurrentPrice(symbol);
-      currentPrice = tradingPrice || position.entryPrice;
-    }
-    
-    console.log(`🎯 [GO TO CHART] Precio actual: $${currentPrice}, Precio entrada: $${position.entryPrice}`);
-    
-    // NUEVO: Convertir TP/SL de PnL a precio si es necesario y establecer visualización
-    let takeProfitPrice = null;
-    let stopLossPrice = null;
-    
-    if (position.takeProfitPrice !== undefined && position.takeProfitPrice !== null) {
-      if (position.takeProfitPrice > 0 && position.takeProfitPrice < 1) {
-        // Es un porcentaje o PnL, convertir a precio
-        const tpMultiplier = position.side === 'BUY' ? (1 + position.takeProfitPrice) : (1 - position.takeProfitPrice);
-        takeProfitPrice = position.entryPrice * tpMultiplier;
-        console.log(`🎯 [TP CONVERSION] TP de PnL ${position.takeProfitPrice} a precio $${takeProfitPrice.toFixed(2)}`);
-      } else {
-        // Ya es un precio
-        takeProfitPrice = position.takeProfitPrice;
-        console.log(`🎯 [TP PRICE] TP ya es precio: $${takeProfitPrice.toFixed(2)}`);
-      }
-    }
-    
-    if (position.stopLossPrice !== undefined && position.stopLossPrice !== null) {
-      if (position.stopLossPrice > 0 && position.stopLossPrice < 1) {
-        // Es un porcentaje o PnL, convertir a precio
-        const slMultiplier = position.side === 'BUY' ? (1 - position.stopLossPrice) : (1 + position.stopLossPrice);
-        stopLossPrice = position.entryPrice * slMultiplier;
-        console.log(`🎯 [SL CONVERSION] SL de PnL ${position.stopLossPrice} a precio $${stopLossPrice.toFixed(2)}`);
-      } else {
-        // Ya es un precio
-        stopLossPrice = position.stopLossPrice;
-        console.log(`🎯 [SL PRICE] SL ya es precio: $${stopLossPrice.toFixed(2)}`);
-      }
-    }
-    
-    // Set overlay TP/SL from position
-    if (takeProfitPrice) {
-      setOverlayTakeProfit(takeProfitPrice);
-      console.log(`🟢 [OVERLAY TP] Establecido TP en $${takeProfitPrice.toFixed(2)}`);
-    }
-    if (stopLossPrice) {
-      setOverlayStopLoss(stopLossPrice);
-      console.log(`🔴 [OVERLAY SL] Establecido SL en $${stopLossPrice.toFixed(2)}`);
-    }
-    
-    // Colores basados en el precio de entrada como divisor
-    const entryPrice = position.entryPrice;
-    const side = position.side;
-    
-    console.log(`🎨 [COLOR LOGIC] Posición ${side} con entrada $${entryPrice.toFixed(2)}`);
-    console.log(`🎨 [COLOR LOGIC] TP: ${takeProfitPrice ? '$' + takeProfitPrice.toFixed(2) : 'N/A'}`);
-    console.log(`🎨 [COLOR LOGIC] SL: ${stopLossPrice ? '$' + stopLossPrice.toFixed(2) : 'N/A'}`);
-  }, [tickers, getCurrentPrice]);
-
-  // Position navigation handlers
-  const handlePositionChange = useCallback((index: number) => {
-    setCurrentPositionIndex(index);
-  }, []);
+    console.log(`🎯 [GO TO CHART] Overlay activado para posición ${position.id}`);
+  }, [overlayManager]);
 
   const handlePositionPress = useCallback((position: any) => {
     setSelectedPosition(position);
     setShowPositionModal(true);
-  }, []);
-
-  // Handler for visualizing TP/SL lines when clicking position in overlay
-  const handlePositionTpSlVisualize = useCallback((position: any) => {
-    console.log(`🎯 [TP/SL VISUALIZE] Activando visualización para posición:`, {
-      id: position.id,
-      symbol: position.symbol,
-      side: position.side,
-      entryPrice: position.entryPrice,
-      takeProfitPrice: position.takeProfitPrice,
-      stopLossPrice: position.stopLossPrice
-    });
-    
-    setVisualizedPosition(position);
-    setShowTpSlLines(true);
-    
-    // También activar el trading overlay si no está activo
-    if (!showTradingOverlay) {
-      setShowTradingOverlay(true);
-    }
-  }, [showTradingOverlay]);
-
-  // Handler to clear TP/SL visualization
-  const handleClearTpSlVisualization = useCallback(() => {
-    console.log(`🧹 [TP/SL CLEAR] Limpiando visualización TP/SL`);
-    setShowTpSlLines(false);
-    setVisualizedPosition(null);
   }, []);
 
   // Calculate unrealized PnL for position
@@ -248,8 +181,14 @@ export const TradingScreen: React.FC = () => {
             <View style={styles.chartWrapper}>
               <MinimalistChart 
                 symbol={selectedPair}
-                showTradingOverlay={showTradingOverlay}
-                onTradingOverlayChange={setShowTradingOverlay}
+                // Simplificado: usar solo el estado del overlay manager
+                showTradingOverlay={overlayState.isActive}
+                onTradingOverlayChange={(isVisible) => {
+                  console.log(`🎯 [CHART OVERLAY TOGGLE] ${isVisible ? 'Activado' : 'Desactivado'}`);
+                  if (!isVisible) {
+                    overlayManager.deactivateOverlay();
+                  }
+                }}
                 activePositions={activeOrders.map(order => ({
                   id: order.id,
                   symbol: order.symbol,
@@ -260,39 +199,19 @@ export const TradingScreen: React.FC = () => {
                   quantity: order.quantity,
                   unrealizedPnL: calculateUnrealizedPnL(order, currentPrice),
                 }))}
-                // New props for TP/SL visualization
-                visualizedPosition={visualizedPosition}
-                showTpSlVisualization={showTpSlLines}
-                onClearTpSlVisualization={handleClearTpSlVisualization}
               />
-              <TradingOverlay
+              {/* NUEVO: Overlay centralizado */}
+              <CentralizedTradingOverlay
                 chartDimensions={{
                   width: screenWidth,
                   height: 400, // Chart height
                   x: 0,
                   y: 0,
                 }}
-                isVisible={showTradingOverlay}
                 symbol={selectedPair}
                 latestPrice={currentPrice}
-                // Position visualization props
-                activePositions={activeOrders.map(order => ({
-                  id: order.id,
-                  symbol: order.symbol,
-                  side: order.side,
-                  entryPrice: order.entryPrice,
-                  takeProfitPrice: order.takeProfitPrice || undefined,
-                  stopLossPrice: order.stopLossPrice || undefined,
-                  quantity: order.quantity,
-                  unrealizedPnL: calculateUnrealizedPnL(order, currentPrice),
-                }))}
-                currentPositionIndex={currentPositionIndex}
-                onPositionChange={handlePositionChange}
-                onPositionPress={handlePositionPress}
-                onPositionTpSlVisualize={handlePositionTpSlVisualize}
-                // Nuevo prop para price scale - obtenerlo del chart
                 priceScale={(() => {
-                  // Este será calculado por el TradingOverlay internamente desde las posiciones
+                  // Calcular escala de precios basada en las posiciones activas
                   if (activeOrders.length === 0) return undefined;
                   const prices = activeOrders.flatMap(order => [
                     order.entryPrice,
@@ -308,6 +227,10 @@ export const TradingScreen: React.FC = () => {
                     pixelsPerPrice: 400 / (max - min) // Chart height / price range
                   };
                 })()}
+                onClose={() => {
+                  console.log(`🧹 [OVERLAY CLOSE] Overlay cerrado desde el componente`);
+                  overlayManager.deactivateOverlay();
+                }}
               />
             </View>
           </View>
@@ -418,20 +341,6 @@ export const TradingScreen: React.FC = () => {
         </TouchableOpacity>
         
         <TouchableOpacity
-          style={[styles.menuButton, activeTab === 'posiciones' && styles.activeMenuButton]}
-          onPress={() => setActiveTab('posiciones')}
-        >
-          <Text style={[styles.menuButtonText, activeTab === 'posiciones' && styles.activeMenuButtonText]}>
-            Posiciones
-          </Text>
-          {activeOrders.length > 0 && (
-            <View style={styles.menuBadge}>
-              <Text style={styles.menuBadgeText}>{activeOrders.length}</Text>
-            </View>
-          )}
-        </TouchableOpacity>
-        
-        <TouchableOpacity
           style={[styles.menuButton, activeTab === 'trades' && styles.activeMenuButton]}
           onPress={() => setActiveTab('trades')}
         >
@@ -443,6 +352,41 @@ export const TradingScreen: React.FC = () => {
 
       {/* Market Data - only show for trading view */}
       {activeTab === 'trading' && <MarketData />}
+
+      {/* Posiciones siempre visibles en la parte superior */}
+      <View style={styles.positionsHeaderContainer}>
+        <View style={styles.positionsHeader}>
+          <Text style={styles.positionsHeaderText}>
+            Posiciones Activas ({activeOrders.length})
+          </Text>
+          <TouchableOpacity 
+            style={styles.newOrderButton}
+            onPress={() => setShowOrderModal(true)}
+          >
+            <Text style={styles.newOrderButtonText}>+ Nueva</Text>
+          </TouchableOpacity>
+        </View>
+        <RealTimePositionsGrid 
+          orders={activeOrders}
+          onAddPosition={() => setShowOrderModal(true)}
+          onPositionPress={(position: any) => {
+            console.log('Position pressed:', position);
+            setSelectedPosition(position);
+            setShowPositionModal(true);
+          }}
+          onClosePosition={(positionId: string) => {
+            closeOrder(positionId, 'Cerrado desde posiciones');
+          }}
+          getCurrentPrice={getCurrentPrice}
+          onPriceUpdate={(callback: any) => {
+            // Subscribe to price updates from the trading service
+            const tradingOrderService = require('../../services/tradingOrderService').TradingOrderService.getInstance();
+            return tradingOrderService.onPriceUpdate(callback);
+          }}
+          isLoading={isLoading}
+          compact={true} // Modo compacto para ahorrar espacio
+        />
+      </View>
 
       {/* Tab Content */}
       <View style={styles.content}>
@@ -712,5 +656,36 @@ const styles = StyleSheet.create({
   },
   positionsTopSpacer: {
     flex: 1,
+  },
+  // Estilos para posiciones en la parte superior
+  positionsHeaderContainer: {
+    backgroundColor: '#111111',
+    borderBottomWidth: 1,
+    borderBottomColor: '#333333',
+    maxHeight: 200, // Limitar altura para ahorrar espacio
+  },
+  positionsHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    backgroundColor: '#1a1a1a',
+  },
+  positionsHeaderText: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  newOrderButton: {
+    backgroundColor: '#00ff88',
+    borderRadius: 15,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+  },
+  newOrderButtonText: {
+    color: '#000000',
+    fontSize: 12,
+    fontWeight: 'bold',
   },
 });

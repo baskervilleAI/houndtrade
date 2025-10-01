@@ -159,7 +159,8 @@ export function useTrading(): UseTradingState {
     // Suscribirse a actualizaciones de precios
     priceUpdateUnsubscribe.current = orderService.current.onPriceUpdate((symbol, price) => {
       // Solo actualizar si tenemos órdenes activas con este símbolo
-      const hasActiveOrdersForSymbol = activeOrders.some(order => order.symbol === symbol);
+      const currentActiveOrders = orderService.current.getActiveOrders();
+      const hasActiveOrdersForSymbol = currentActiveOrders.some(order => order.symbol === symbol);
       
       if (hasActiveOrdersForSymbol) {
         // Actualizar portfolio cuando cambie el precio de un símbolo con órdenes activas
@@ -171,7 +172,7 @@ export function useTrading(): UseTradingState {
     });
 
     debugLogger.debug('Actualizaciones de portfolio en tiempo real configuradas');
-  }, [activeOrders, refreshPortfolio]);
+  }, [refreshPortfolio]);
 
   /**
    * Refresca todos los datos

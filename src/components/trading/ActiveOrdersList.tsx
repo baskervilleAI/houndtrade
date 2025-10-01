@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, Alert, FlatList, RefreshControl, TouchableOpacity, StyleSheet } from 'react-native';
 import { TradingOrder, OrderSide, OrderStatus } from '../../types/trading';
+import OverlayManagerService from '../../services/overlayManagerService';
 
 interface ActiveOrdersListProps {
   orders: TradingOrder[];
@@ -16,9 +17,18 @@ interface OrderCardProps {
   currentPrice: number | null;
   onClose: (orderId: string, reason?: string) => Promise<void>;
   onCancel: (orderId: string, reason?: string) => void;
+  onToggleOverlay: (order: TradingOrder) => void;
+  isOverlayActive: boolean;
 }
 
-const OrderCard: React.FC<OrderCardProps> = ({ order, currentPrice, onClose, onCancel }) => {
+const OrderCard: React.FC<OrderCardProps> = ({ 
+  order, 
+  currentPrice, 
+  onClose, 
+  onCancel, 
+  onToggleOverlay,
+  isOverlayActive 
+}) => {
   const [isClosing, setIsClosing] = useState(false);
 
   // Calcular PnL actual
@@ -108,7 +118,9 @@ const OrderCard: React.FC<OrderCardProps> = ({ order, currentPrice, onClose, onC
     styles.orderCard,
     {
       backgroundColor: order.side === OrderSide.BUY ? '#e8f5e8' : '#ffe8e8',
-      borderLeftColor: order.side === OrderSide.BUY ? '#16a085' : '#e74c3c'
+      borderLeftColor: order.side === OrderSide.BUY ? '#16a085' : '#e74c3c',
+      borderWidth: isOverlayActive ? 2 : 1,
+      borderColor: isOverlayActive ? '#00ff88' : (order.side === OrderSide.BUY ? '#16a085' : '#e74c3c'),
     }
   ];
 
@@ -217,6 +229,26 @@ const OrderCard: React.FC<OrderCardProps> = ({ order, currentPrice, onClose, onC
 
         {/* Botones de acción */}
         <View style={styles.buttonsRow}>
+          {/* NUEVO: Botón de toggle overlay */}
+          <TouchableOpacity
+            style={[
+              styles.button, 
+              styles.overlayButton,
+              { 
+                backgroundColor: isOverlayActive ? '#00ff88' : '#666666',
+                borderColor: isOverlayActive ? '#00ff88' : '#888888',
+              }
+            ]}
+            onPress={() => onToggleOverlay(order)}
+          >
+            <Text style={[
+              styles.overlayButtonText,
+              { color: isOverlayActive ? '#000000' : '#ffffff' }
+            ]}>
+              {isOverlayActive ? '👁️ ON' : '👁️ OFF'}
+            </Text>
+          </TouchableOpacity>
+
           <TouchableOpacity
             style={[styles.button, styles.cancelButton]}
             onPress={handleCancel}
@@ -255,6 +287,32 @@ export const ActiveOrdersList: React.FC<ActiveOrdersListProps> = ({
   isLoading = false
 }) => {
   const [refreshing, setRefreshing] = useState(false);
+  const [overlayState, setOverlayState] = useState(OverlayManagerService.getInstance().getState());
+  const overlayManager = OverlayManagerService.getInstance();
+
+  // Suscribirse a cambios del overlay manager
+  useEffect(() => {
+    const unsubscribe = overlayManager.subscribe(setOverlayState);
+    return unsubscribe;
+  }, [overlayManager]);
+
+  // Actualizar posiciones en el overlay manager cuando cambien las órdenes
+  useEffect(() => {
+    orders.forEach(order => {
+      const currentPrice = getCurrentPrice(order.symbol);
+      if (currentPrice) {
+        overlayManager.updatePosition(order, currentPrice);
+      }
+    });
+
+    // Remover posiciones que ya no existen
+    const currentOrderIds = new Set(orders.map(o => o.id));
+    overlayState.positions.forEach((position, positionId) => {
+      if (!currentOrderIds.has(positionId)) {
+        overlayManager.removePosition(positionId);
+      }
+    });
+  }, [orders, getCurrentPrice, overlayManager, overlayState.positions]);
 
   const handleRefresh = async () => {
     if (onRefresh) {
@@ -272,6 +330,8 @@ export const ActiveOrdersList: React.FC<ActiveOrdersListProps> = ({
       const result = await onCloseOrder(orderId, reason);
       if (result.success) {
         Alert.alert('Éxito', 'Orden cerrada correctamente');
+        // Remover del overlay manager
+        overlayManager.removePosition(orderId);
       } else {
         Alert.alert('Error', result.error || 'Error al cerrar la orden');
       }
@@ -285,6 +345,8 @@ export const ActiveOrdersList: React.FC<ActiveOrdersListProps> = ({
       const result = onCancelOrder(orderId, reason);
       if (result.success) {
         Alert.alert('Éxito', 'Orden cancelada correctamente');
+        // Remover del overlay manager
+        overlayManager.removePosition(orderId);
       } else {
         Alert.alert('Error', result.error || 'Error al cancelar la orden');
       }
@@ -293,14 +355,33 @@ export const ActiveOrdersList: React.FC<ActiveOrdersListProps> = ({
     }
   };
 
-  const renderOrderItem = ({ item }: { item: TradingOrder }) => (
-    <OrderCard
-      order={item}
-      currentPrice={getCurrentPrice(item.symbol)}
-      onClose={handleCloseOrder}
-      onCancel={handleCancelOrder}
-    />
-  );
+  // **NUEVA FUNCIÓN: Toggle de overlay por orden**
+  const handleToggleOverlay = (order: TradingOrder) => {
+    console.log(`🎯 [TOGGLE OVERLAY] Orden ${order.id} - ${order.symbol} ${order.side}`);
+    
+    const wasActivated = overlayManager.togglePositionOverlay(order.id);
+    
+    if (wasActivated) {
+      console.log(`✅ [OVERLAY ACTIVATED] Overlay activado para orden ${order.id}`);
+    } else {
+      console.log(`❌ [OVERLAY DEACTIVATED] Overlay desactivado para orden ${order.id}`);
+    }
+  };
+
+  const renderOrderItem = ({ item }: { item: TradingOrder }) => {
+    const isOverlayActive = overlayState.activePositionId === item.id && overlayState.isActive;
+    
+    return (
+      <OrderCard
+        order={item}
+        currentPrice={getCurrentPrice(item.symbol)}
+        onClose={handleCloseOrder}
+        onCancel={handleCancelOrder}
+        onToggleOverlay={handleToggleOverlay}
+        isOverlayActive={isOverlayActive}
+      />
+    );
+  };
 
   if (orders.length === 0) {
     return (
@@ -347,6 +428,16 @@ export const ActiveOrdersList: React.FC<ActiveOrdersListProps> = ({
               ${orders.reduce((sum, order) => sum + order.usdtAmount, 0).toFixed(2)}
             </Text>
           </View>
+          
+          {/* Nuevo: Indicador de overlay activo */}
+          {overlayState.isActive && (
+            <View style={styles.statItem}>
+              <Text style={styles.statLabel}>Overlay</Text>
+              <Text style={[styles.statValue, { color: '#00ff88' }]}>
+                ON
+              </Text>
+            </View>
+          )}
         </View>
       </View>
 
@@ -519,6 +610,17 @@ const styles = StyleSheet.create({
   closeButtonText: {
     color: 'white',
     fontWeight: 'bold',
+  },
+  overlayButton: {
+    backgroundColor: '#666666',
+    borderWidth: 1,
+    borderColor: '#888888',
+    paddingHorizontal: 12,
+  },
+  overlayButtonText: {
+    color: '#ffffff',
+    fontWeight: 'bold',
+    fontSize: 12,
   },
   emptyState: {
     flex: 1,

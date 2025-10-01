@@ -282,6 +282,7 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
     entryPrice: number | null; // NUEVO: Precio de entrada como centro
     takeProfitLevel: number | null;
     stopLossLevel: number | null;
+    lastLoggedState: { symbol: string; entryPrice: number; currentPrice: number } | null;
   }>({
     isActive: false,
     lastDrawTime: 0,
@@ -290,7 +291,8 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
     currentPrice: null,
     entryPrice: null,
     takeProfitLevel: null,
-    stopLossLevel: null
+    stopLossLevel: null,
+    lastLoggedState: null
   });
   
   const { selectedPair } = useMarket();
@@ -326,7 +328,8 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
       currentPrice,
       entryPrice, // NUEVO: Guardar entry price como centro
       takeProfitLevel: newTpLevel,
-      stopLossLevel: newSlLevel
+      stopLossLevel: newSlLevel,
+      lastLoggedState: null // Para optimizar logging
     };
     
     // Actualizar estados de React
@@ -353,7 +356,8 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
       currentPrice: null,
       entryPrice: null, // NUEVO: Resetear entry price
       takeProfitLevel: null,
-      stopLossLevel: null
+      stopLossLevel: null,
+      lastLoggedState: null
     };
     
     console.log(`🔄 [OVERLAY DEBUG] Estado interno reseteado`);
@@ -1222,6 +1226,12 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
   const handlePositionButtonPress = useCallback((position: PositionData) => {
     console.log(`🔘 [POSITION BUTTON] Presionado botón de posición: ${position.symbol} - ${position.side}`);
     
+    // CRÍTICO: Solo permitir activar overlay si la posición es del símbolo actual del gráfico
+    if (position.symbol !== symbol) {
+      console.log(`🚫 [POSITION BUTTON] Posición ${position.symbol} no pertenece al gráfico actual ${symbol} - ignorando`);
+      return;
+    }
+    
     // Verificar si esta posición ya tiene el overlay activo
     if (activeOverlayPositionId === position.id) {
       // Si la misma posición ya está activa, DESACTIVAR el overlay
@@ -1251,7 +1261,7 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
     if (onPositionPress) {
       onPositionPress(position);
     }
-  }, [activeOverlayPositionId, activateTradingOverlay, deactivateTradingOverlay, onPositionPress]);
+  }, [activeOverlayPositionId, activateTradingOverlay, deactivateTradingOverlay, onPositionPress, symbol]);
 
   // 🐛 DEBUG: Rastrear cambios inesperados en el estado showTradingOverlay
   useEffect(() => {
@@ -2262,9 +2272,29 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
 
           // NUEVO: Obtener información de la posición activa para determinar colores
           const activePosition = activePositions.find(p => p.id === activeOverlayPositionId);
+          
+          // CRÍTICO: Solo dibujar overlay si la posición pertenece al símbolo actual del gráfico
+          if (activePosition && activePosition.symbol !== symbol) {
+            // console.log(`🚫 [PLUGIN] Omitiendo overlay - posición ${activePosition.symbol} no coincide con gráfico ${symbol}`);
+            return;
+          }
+          
           const isLongPosition = activePosition ? activePosition.side === 'BUY' : true; // Default a LONG si no hay posición específica
 
-          console.log(`🎨 [PLUGIN] Dibujando overlay genérico para posición ${activePosition?.side || 'DEFAULT'}: ${activePosition?.symbol || 'N/A'}`);
+          // OPTIMIZACIÓN: Solo loggear cambios reales de estado para reducir spam
+          const shouldLog = !state.lastLoggedState || 
+            state.lastLoggedState.symbol !== symbol ||
+            state.lastLoggedState.entryPrice !== state.entryPrice ||
+            state.lastLoggedState.currentPrice !== state.currentPrice;
+            
+          if (shouldLog) {
+            console.log(`🎨 [PLUGIN] Dibujando overlay para posición ${activePosition?.side || 'DEFAULT'}: ${activePosition?.symbol || 'N/A'} en gráfico ${symbol}`);
+            state.lastLoggedState = {
+              symbol,
+              entryPrice: state.entryPrice,
+              currentPrice: state.currentPrice
+            };
+          }
 
           // Marcar que estamos dibujando para prevenir loops
           state.isDrawing = true;
@@ -3843,6 +3873,13 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
         // 1. RESETEAR LA CÁMARA específicamente según el tipo de cambio
         if (simpleCamera && (symbolChanged || intervalChanged)) {
           if (symbolChanged) {
+            // LIMPIAR OVERLAY DE TRADING cuando se cambia de símbolo
+            if (showTradingOverlay || activeOverlayPositionId) {
+              console.log(`🧹 [SYMBOL CHANGE] Limpiando overlay de trading al cambiar de ${previousSymbolRef.current} a ${currentSymbol}`);
+              deactivateTradingOverlay();
+              setActiveOverlayPositionId(null);
+            }
+            
             // ACTIVAR PROTECCIÓN: Bloquear actualizaciones durante cambio de criptomoneda
             isChangingCryptocurrency.current = true;
             

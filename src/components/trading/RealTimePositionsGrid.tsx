@@ -30,6 +30,7 @@ interface RealTimePositionsGridProps {
   getCurrentPrice?: (symbol: string) => number | null;
   onPriceUpdate?: (callback: (symbol: string, price: number) => void) => (() => void);
   isLoading?: boolean;
+  compact?: boolean; // Nueva prop para diseño compacto
 }
 
 export const RealTimePositionsGrid: React.FC<RealTimePositionsGridProps> = ({
@@ -40,6 +41,7 @@ export const RealTimePositionsGrid: React.FC<RealTimePositionsGridProps> = ({
   getCurrentPrice,
   onPriceUpdate,
   isLoading = false,
+  compact = false, // Por defecto no es compacto
 }) => {
   const [positionsData, setPositionsData] = useState<RealTimePositionData[]>([]);
   const [refreshing, setRefreshing] = useState(false);
@@ -183,6 +185,56 @@ export const RealTimePositionsGrid: React.FC<RealTimePositionsGridProps> = ({
   );
 
   /**
+   * Renderiza el botón compacto de agregar posición
+   */
+  const renderCompactAddButton = () => (
+    <TouchableOpacity
+      key="add-position-compact"
+      style={styles.compactAddButton}
+      onPress={onAddPosition}
+    >
+      <Text style={styles.compactAddButtonText}>+</Text>
+    </TouchableOpacity>
+  );
+
+  /**
+   * Renderiza una tarjeta de posición compacta
+   */
+  const renderCompactPositionCard = (position: RealTimePositionData) => {
+    const isProfitable = position.unrealizedPnL >= 0;
+    const isLong = position.side === OrderSide.BUY;
+    
+    return (
+      <TouchableOpacity
+        key={position.id}
+        style={[styles.compactPositionCard, { borderLeftColor: isProfitable ? '#00ff88' : '#ff4444' }]}
+        onPress={() => onPositionPress?.(position)}
+      >
+        <View style={styles.compactCardHeader}>
+          <Text style={styles.compactSymbolText}>{position.symbol}</Text>
+          <View style={[
+            styles.compactSideIndicator,
+            { backgroundColor: isLong ? '#00ff88' : '#ff4444' }
+          ]}>
+            <Text style={styles.compactSideText}>{position.side}</Text>
+          </View>
+        </View>
+        
+        <Text style={[
+          styles.compactPnlText,
+          { color: isProfitable ? '#00ff88' : '#ff4444' }
+        ]}>
+          {isProfitable ? '+' : ''}${formatCurrency(Math.abs(position.unrealizedPnL))}
+        </Text>
+        
+        <Text style={styles.compactPriceText}>
+          ${formatPrice(position.currentPrice, position.symbol)}
+        </Text>
+      </TouchableOpacity>
+    );
+  };
+
+  /**
    * Renderiza una tarjeta de posición
    */
   const renderPositionCard = (position: RealTimePositionData) => {
@@ -321,33 +373,40 @@ export const RealTimePositionsGrid: React.FC<RealTimePositionsGridProps> = ({
   }
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, compact && styles.compactContainer]}>
       {/* Header con información */}
-      <View style={styles.headerContainer}>
-        <Text style={styles.headerTitle}>Posiciones Activas ({positionsData.length})</Text>
-        <Text style={styles.lastUpdateText}>
-          Última actualización: {new Date(lastUpdateTime).toLocaleTimeString()}
-        </Text>
-      </View>
+      {!compact && (
+        <View style={styles.headerContainer}>
+          <Text style={styles.headerTitle}>Posiciones Activas ({positionsData.length})</Text>
+          <Text style={styles.lastUpdateText}>
+            Última actualización: {new Date(lastUpdateTime).toLocaleTimeString()}
+          </Text>
+        </View>
+      )}
 
       <ScrollView
-        style={styles.scrollView}
-        showsVerticalScrollIndicator={false}
+        style={[styles.scrollView, compact && styles.compactScrollView]}
+        horizontal={compact}
+        showsVerticalScrollIndicator={!compact}
+        showsHorizontalScrollIndicator={compact}
         refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={handleRefresh}
-            tintColor="#00ff88"
-            colors={['#00ff88']}
-          />
+          !compact ? (
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={handleRefresh}
+              tintColor="#00ff88"
+              colors={['#00ff88']}
+            />
+          ) : undefined
         }
       >
-        <View style={styles.grid}>
-          {renderAddPositionCard()}
-          {positionsData.map(renderPositionCard)}
+        <View style={[styles.grid, compact && styles.compactGrid]}>
+          {compact && renderCompactAddButton()}
+          {positionsData.map(position => compact ? renderCompactPositionCard(position) : renderPositionCard(position))}
+          {!compact && renderAddPositionCard()}
         </View>
         
-        {positionsData.length === 0 && (
+        {!compact && positionsData.length === 0 && (
           <View style={styles.emptyState}>
             <Text style={styles.emptyStateText}>
               No tienes posiciones activas{'\n'}
@@ -538,6 +597,77 @@ const styles = StyleSheet.create({
     fontSize: 16,
     textAlign: 'center',
     lineHeight: 24,
+  },
+  // Estilos para modo compacto
+  compactContainer: {
+    maxHeight: 80,
+    backgroundColor: '#0a0a0a',
+  },
+  compactScrollView: {
+    flexGrow: 0,
+    maxHeight: 80,
+  },
+  compactGrid: {
+    flexDirection: 'row',
+    padding: 8,
+    gap: 8,
+  },
+  compactAddButton: {
+    width: 60,
+    height: 60,
+    backgroundColor: '#2a2a2a',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#555555',
+    borderStyle: 'dashed',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 8,
+  },
+  compactAddButtonText: {
+    fontSize: 20,
+    color: '#888888',
+    fontWeight: 'bold',
+  },
+  compactPositionCard: {
+    width: 100,
+    height: 60,
+    backgroundColor: '#1a1a1a',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#333333',
+    borderLeftWidth: 3,
+    padding: 6,
+    marginRight: 8,
+    justifyContent: 'space-between',
+  },
+  compactCardHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  compactSymbolText: {
+    fontSize: 12,
+    fontWeight: 'bold',
+    color: '#ffffff',
+  },
+  compactSideIndicator: {
+    paddingHorizontal: 3,
+    paddingVertical: 1,
+    borderRadius: 2,
+  },
+  compactSideText: {
+    fontSize: 8,
+    fontWeight: 'bold',
+    color: '#000000',
+  },
+  compactPnlText: {
+    fontSize: 11,
+    fontWeight: 'bold',
+  },
+  compactPriceText: {
+    fontSize: 10,
+    color: '#cccccc',
   },
 });
 
