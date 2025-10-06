@@ -21,8 +21,7 @@ import { PositionDetailsModal } from '../../components/trading/PositionDetailsMo
 import { OrderForm } from '../../components/trading/OrderForm';
 import { OrderFormModal } from '../../components/trading/OrderFormModal';
 import { OrderHistory } from '../../components/trading/OrderHistory';
-import CentralizedTradingOverlay from '../../components/trading/CentralizedTradingOverlay';
-import OverlayManagerService from '../../services/overlayManagerService';
+
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
 
@@ -63,9 +62,13 @@ export const TradingScreen: React.FC = () => {
   const [showPositionModal, setShowPositionModal] = useState(false);
   const [selectedPosition, setSelectedPosition] = useState<any>(null);
   
-  // Overlay manager instance
-  const overlayManager = OverlayManagerService.getInstance();
-  const [overlayState, setOverlayState] = useState(overlayManager.getState());
+  // Estados para colapsar/expandir paneles
+  const [isMarketDataCollapsed, setIsMarketDataCollapsed] = useState(false);
+  const [isPositionsCollapsed, setIsPositionsCollapsed] = useState(false);
+  
+  // Estado para controlar el overlay de trading en el gráfico
+  const [showChartOverlay, setShowChartOverlay] = useState(false);
+  const [selectedPositionId, setSelectedPositionId] = useState<string | null>(null);
 
   // Estados para Take Profit y Stop Loss (mantenidos para funcionalidad del modal)
   const [overlayTakeProfit, setOverlayTakeProfit] = useState<number | null>(null);
@@ -78,11 +81,7 @@ export const TradingScreen: React.FC = () => {
     refreshInterval: 10000, // 10 seconds - optimized for more frequent updates
   });
 
-  // Suscribirse a cambios del overlay manager
-  useEffect(() => {
-    const unsubscribe = overlayManager.subscribe(setOverlayState);
-    return unsubscribe;
-  }, [overlayManager]);
+
 
   // Update trading prices when market data changes
   useEffect(() => {
@@ -94,29 +93,10 @@ export const TradingScreen: React.FC = () => {
       }
     });
 
-    // También actualizar precios en el overlay manager
-    overlayManager.updatePrices(
-      Object.fromEntries(
-        Object.entries(tickers).map(([symbol, data]) => [symbol, data.price])
-      )
-    );
-  }, [tickers, getCurrentPrice, updatePrice, overlayManager]);
 
-  // Actualizar posiciones en el overlay manager cuando cambien las órdenes activas
-  useEffect(() => {
-    activeOrders.forEach(order => {
-      const currentPrice = tickers[order.symbol]?.price || getCurrentPrice(order.symbol) || order.entryPrice;
-      overlayManager.updatePosition(order, currentPrice);
-    });
+  }, [tickers, getCurrentPrice, updatePrice]);
 
-    // Remover posiciones que ya no existen
-    const currentOrderIds = new Set(activeOrders.map(o => o.id));
-    overlayState.positions.forEach((position, positionId) => {
-      if (!currentOrderIds.has(positionId)) {
-        overlayManager.removePosition(positionId);
-      }
-    });
-  }, [activeOrders, tickers, getCurrentPrice, overlayManager, overlayState.positions]);
+
 
   // Only log once when status changes
   useEffect(() => {
@@ -126,10 +106,10 @@ export const TradingScreen: React.FC = () => {
       symbols: Object.keys(tickers),
       tradingOrders: orders.length,
       activeOrders: activeOrders.length,
-      overlayActive: overlayState.isActive,
-      activePositionId: overlayState.activePositionId,
+      showChartOverlay,
+      selectedPositionId,
     });
-  }, [isInitialized, Object.keys(tickers).length, orders.length, activeOrders.length, overlayState.isActive, overlayState.activePositionId]);
+  }, [isInitialized, Object.keys(tickers).length, orders.length, activeOrders.length, showChartOverlay, selectedPositionId]);
 
   // Calcular precio actual para referencia
   const currentPrice = tickers[selectedPair]?.price || 0;
@@ -143,18 +123,19 @@ export const TradingScreen: React.FC = () => {
     await refreshPortfolio();
   };
 
-  // Handle navigation to chart from position - SIMPLIFICADO con overlay centralizado
+  // Handle navigation to chart from position
   const handleGoToChart = useCallback((symbol: string, position: any) => {
     console.log(`🎯 [GO TO CHART] Navegando a ${symbol} con overlay activado`);
     
     // Switch to trading tab
     setActiveTab('trading');
     
-    // Activar overlay para esta posición específica
-    overlayManager.togglePositionOverlay(position.id);
+    // Activar overlay en el chart con el entry price de la posición
+    setShowChartOverlay(true);
+    setSelectedPositionId(position.id);
     
     console.log(`🎯 [GO TO CHART] Overlay activado para posición ${position.id}`);
-  }, [overlayManager]);
+  }, []);
 
   const handlePositionPress = useCallback((position: any) => {
     setSelectedPosition(position);
@@ -177,74 +158,161 @@ export const TradingScreen: React.FC = () => {
     switch (activeTab) {
       case 'trading':
         return (
-          <View style={styles.chartContainer}>
-            <View style={styles.chartWrapper}>
-              <MinimalistChart 
-                symbol={selectedPair}
-                // Simplificado: usar solo el estado del overlay manager
-                showTradingOverlay={overlayState.isActive}
-                onTradingOverlayChange={(isVisible) => {
-                  console.log(`🎯 [CHART OVERLAY TOGGLE] ${isVisible ? 'Activado' : 'Desactivado'}`);
-                  if (!isVisible) {
-                    overlayManager.deactivateOverlay();
-                  }
-                }}
-                activePositions={activeOrders.map(order => ({
-                  id: order.id,
-                  symbol: order.symbol,
-                  side: order.side,
-                  entryPrice: order.entryPrice,
-                  takeProfitPrice: order.takeProfitPrice || undefined,
-                  stopLossPrice: order.stopLossPrice || undefined,
-                  quantity: order.quantity,
-                  unrealizedPnL: calculateUnrealizedPnL(order, currentPrice),
-                }))}
-              />
-              {/* NUEVO: Overlay centralizado */}
-              <CentralizedTradingOverlay
-                chartDimensions={{
-                  width: screenWidth,
-                  height: 400, // Chart height
-                  x: 0,
-                  y: 0,
-                }}
-                symbol={selectedPair}
-                latestPrice={currentPrice}
-                priceScale={(() => {
-                  // Calcular escala de precios basada en las posiciones activas
-                  if (activeOrders.length === 0) return undefined;
-                  const prices = activeOrders.flatMap(order => [
-                    order.entryPrice,
-                    ...(order.takeProfitPrice ? [order.takeProfitPrice] : []),
-                    ...(order.stopLossPrice ? [order.stopLossPrice] : [])
-                  ].filter(Boolean));
-                  if (prices.length === 0) return undefined;
-                  const min = Math.min(...prices) * 0.98; // 2% padding
-                  const max = Math.max(...prices) * 1.02; // 2% padding
-                  return {
-                    min,
-                    max,
-                    pixelsPerPrice: 400 / (max - min) // Chart height / price range
-                  };
-                })()}
-                onClose={() => {
-                  console.log(`🧹 [OVERLAY CLOSE] Overlay cerrado desde el componente`);
-                  overlayManager.deactivateOverlay();
-                }}
-              />
+          <View style={styles.tradingContainer}>
+            {/* Market Data Panel - Colapsable */}
+            <View style={styles.collapsiblePanel}>
+              <TouchableOpacity 
+                style={styles.collapsibleHeader}
+                onPress={() => setIsMarketDataCollapsed(!isMarketDataCollapsed)}
+              >
+                <Text style={styles.collapsibleTitle}>Pares de Trading</Text>
+                <Text style={styles.collapseIcon}>{isMarketDataCollapsed ? '▼' : '▲'}</Text>
+              </TouchableOpacity>
+              {!isMarketDataCollapsed && <MarketData />}
             </View>
+
+            {/* Chart Container - Toma el espacio restante */}
+            <View style={[
+              styles.chartContainer,
+              { marginBottom: activeOrders.length > 0 ? (isPositionsCollapsed ? 50 : 180) : 0 }
+            ]}>
+              <View style={styles.chartWrapper}>
+                <MinimalistChart 
+                  symbol={selectedPair}
+                  showTradingOverlay={showChartOverlay}
+                  onTradingOverlayChange={(isVisible) => {
+                    console.log(`🎯 [CHART OVERLAY TOGGLE] ${isVisible ? 'Activado' : 'Desactivado'}`);
+                    setShowChartOverlay(isVisible);
+                    if (!isVisible) {
+                      setSelectedPositionId(null);
+                    }
+                  }}
+                  selectedPositionId={selectedPositionId}
+                  activePositions={activeOrders.map(order => ({
+                    id: order.id,
+                    symbol: order.symbol,
+                    side: order.side,
+                    entryPrice: order.entryPrice,
+                    takeProfitPrice: order.takeProfitPrice || undefined,
+                    stopLossPrice: order.stopLossPrice || undefined,
+                    quantity: order.quantity,
+                    unrealizedPnL: calculateUnrealizedPnL(order, currentPrice),
+                  }))}
+                />
+              {/* NUEVO: Overlay centralizado */}
+
+            </View>
+            </View>
+
+            {/* Posiciones Activas Panel - Fijo en la parte inferior - Colapsable */}
+            {activeOrders.length > 0 && (
+              <View style={styles.bottomPositionsPanel}>
+                <TouchableOpacity 
+                  style={styles.collapsibleHeader}
+                  onPress={() => setIsPositionsCollapsed(!isPositionsCollapsed)}
+                >
+                  <View style={styles.collapsibleHeaderLeft}>
+                    <Text style={styles.collapsibleTitle}>
+                      Posiciones Activas ({activeOrders.length})
+                    </Text>
+                  </View>
+                  <View style={styles.collapsibleHeaderRight}>
+                    {!isPositionsCollapsed && (
+                      <TouchableOpacity
+                        style={styles.miniNewButton}
+                        onPress={(e) => {
+                          e.stopPropagation();
+                          setShowOrderModal(true);
+                        }}
+                      >
+                        <Text style={styles.miniNewButtonText}>+ Nueva</Text>
+                      </TouchableOpacity>
+                    )}
+                    <Text style={styles.collapseIcon}>{isPositionsCollapsed ? '▲' : '▼'}</Text>
+                  </View>
+                </TouchableOpacity>
+                {!isPositionsCollapsed && (
+                  <ScrollView 
+                    horizontal 
+                    showsHorizontalScrollIndicator={false}
+                    style={styles.positionsScrollView}
+                    contentContainerStyle={styles.positionsScrollContent}
+                  >
+                    {activeOrders.map((position) => {
+                      const currentPriceForPosition = tickers[position.symbol]?.price || getCurrentPrice(position.symbol) || position.entryPrice;
+                      const pnl = calculateUnrealizedPnL(position, currentPriceForPosition);
+                      const pnlPercent = ((currentPriceForPosition - position.entryPrice) / position.entryPrice) * 100;
+                      const isProfit = pnl >= 0;
+                      const isSelected = selectedPositionId === position.id;
+
+                      return (
+                        <TouchableOpacity
+                          key={position.id}
+                          style={[
+                            styles.positionCard,
+                            isSelected && styles.positionCardSelected
+                          ]}
+                          onPress={() => {
+                            // Toggle overlay para esta posición (solo si es del mismo par)
+                            if (position.symbol === selectedPair) {
+                              // Si ya está seleccionada, deseleccionar; si no, seleccionar
+                              if (selectedPositionId === position.id) {
+                                setShowChartOverlay(false);
+                                setSelectedPositionId(null);
+                              } else {
+                                // El chart detectará automáticamente la posición por el click
+                                // Solo marcamos cual está seleccionada visualmente
+                                setSelectedPositionId(position.id);
+                                // El MinimalistChart manejará el overlay internamente
+                                // usando los activePositions que ya le pasamos
+                              }
+                            }
+                          }}
+                        >
+                          <View style={styles.positionCardHeader}>
+                            <Text style={styles.positionSymbol}>{position.symbol}</Text>
+                            <View style={[
+                              styles.positionSideBadge,
+                              position.side === 'BUY' ? styles.buyBadge : styles.sellBadge
+                            ]}>
+                              <Text style={styles.positionSideText}>
+                                {position.side === 'BUY' ? 'LONG' : 'SHORT'}
+                              </Text>
+                            </View>
+                          </View>
+                          <Text style={styles.positionEntry}>
+                            ${formatPrice(position.entryPrice, position.symbol)}
+                          </Text>
+                          <Text style={[
+                            styles.positionPnL,
+                            { color: isProfit ? '#00ff88' : '#ff4444' }
+                          ]}>
+                            {isProfit ? '+' : ''}${formatCurrency(Math.abs(pnl))}
+                          </Text>
+                          <Text style={[
+                            styles.positionPnLPercent,
+                            { color: isProfit ? '#00ff88' : '#ff4444' }
+                          ]}>
+                            {isProfit ? '+' : ''}{pnlPercent.toFixed(2)}%
+                          </Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </ScrollView>
+                )}
+              </View>
+            )}
           </View>
         );
       
       case 'posiciones':
         return (
-          <View style={styles.positionsContainer}>
-            <View style={styles.positionsTopSpacer} />
+          <View style={styles.positionsFullContainer}>
             <RealTimePositionsGrid 
               orders={activeOrders}
               onAddPosition={() => setShowOrderModal(true)}
               onPositionPress={(position: any) => {
-                console.log('Position pressed:', position);
+                console.log('Position pressed - opening modal:', position);
                 setSelectedPosition(position);
                 setShowPositionModal(true);
               }}
@@ -258,6 +326,7 @@ export const TradingScreen: React.FC = () => {
                 return tradingOrderService.onPriceUpdate(callback);
               }}
               isLoading={isLoading}
+              compact={false}
             />
           </View>
         );
@@ -341,6 +410,15 @@ export const TradingScreen: React.FC = () => {
         </TouchableOpacity>
         
         <TouchableOpacity
+          style={[styles.menuButton, activeTab === 'posiciones' && styles.activeMenuButton]}
+          onPress={() => setActiveTab('posiciones')}
+        >
+          <Text style={[styles.menuButtonText, activeTab === 'posiciones' && styles.activeMenuButtonText]}>
+            Posiciones
+          </Text>
+        </TouchableOpacity>
+        
+        <TouchableOpacity
           style={[styles.menuButton, activeTab === 'trades' && styles.activeMenuButton]}
           onPress={() => setActiveTab('trades')}
         >
@@ -348,44 +426,6 @@ export const TradingScreen: React.FC = () => {
             Trades
           </Text>
         </TouchableOpacity>
-      </View>
-
-      {/* Market Data - only show for trading view */}
-      {activeTab === 'trading' && <MarketData />}
-
-      {/* Posiciones siempre visibles en la parte superior */}
-      <View style={styles.positionsHeaderContainer}>
-        <View style={styles.positionsHeader}>
-          <Text style={styles.positionsHeaderText}>
-            Posiciones Activas ({activeOrders.length})
-          </Text>
-          <TouchableOpacity 
-            style={styles.newOrderButton}
-            onPress={() => setShowOrderModal(true)}
-          >
-            <Text style={styles.newOrderButtonText}>+ Nueva</Text>
-          </TouchableOpacity>
-        </View>
-        <RealTimePositionsGrid 
-          orders={activeOrders}
-          onAddPosition={() => setShowOrderModal(true)}
-          onPositionPress={(position: any) => {
-            console.log('Position pressed:', position);
-            setSelectedPosition(position);
-            setShowPositionModal(true);
-          }}
-          onClosePosition={(positionId: string) => {
-            closeOrder(positionId, 'Cerrado desde posiciones');
-          }}
-          getCurrentPrice={getCurrentPrice}
-          onPriceUpdate={(callback: any) => {
-            // Subscribe to price updates from the trading service
-            const tradingOrderService = require('../../services/tradingOrderService').TradingOrderService.getInstance();
-            return tradingOrderService.onPriceUpdate(callback);
-          }}
-          isLoading={isLoading}
-          compact={true} // Modo compacto para ahorrar espacio
-        />
       </View>
 
       {/* Tab Content */}
@@ -648,44 +688,133 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     fontWeight: '600',
   },
-  // Styles for bottom-aligned positions
-  positionsContainer: {
+  // Styles for positions view (full screen)
+  positionsFullContainer: {
     flex: 1,
-    justifyContent: 'flex-end',
     backgroundColor: '#0a0a0a',
   },
-  positionsTopSpacer: {
+  // Trading container con paneles colapsables
+  tradingContainer: {
     flex: 1,
+    backgroundColor: '#0a0a0a',
   },
-  // Estilos para posiciones en la parte superior
-  positionsHeaderContainer: {
-    backgroundColor: '#111111',
+  // Paneles colapsables
+  collapsiblePanel: {
+    backgroundColor: '#1a1a1a',
     borderBottomWidth: 1,
     borderBottomColor: '#333333',
-    maxHeight: 200, // Limitar altura para ahorrar espacio
   },
-  positionsHeader: {
+  // Panel de posiciones en la parte inferior
+  bottomPositionsPanel: {
+    backgroundColor: '#1a1a1a',
+    borderTopWidth: 1,
+    borderTopColor: '#333333',
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    maxHeight: 180,
+    zIndex: 10,
+  },
+  collapsibleHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingHorizontal: 16,
-    paddingVertical: 8,
-    backgroundColor: '#1a1a1a',
+    paddingVertical: 12,
+    backgroundColor: '#222222',
   },
-  positionsHeaderText: {
+  collapsibleHeaderLeft: {
+    flex: 1,
+  },
+  collapsibleHeaderRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  collapsibleTitle: {
+    fontSize: 14,
+    fontWeight: 'bold',
     color: '#ffffff',
-    fontSize: 16,
-    fontWeight: 'bold',
   },
-  newOrderButton: {
-    backgroundColor: '#00ff88',
-    borderRadius: 15,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-  },
-  newOrderButtonText: {
-    color: '#000000',
+  collapseIcon: {
     fontSize: 12,
+    color: '#888888',
+    marginLeft: 8,
+  },
+  miniNewButton: {
+    backgroundColor: '#00ff88',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 4,
+  },
+  miniNewButtonText: {
+    color: '#000000',
+    fontSize: 11,
     fontWeight: 'bold',
+  },
+  // Scroll de posiciones
+  positionsScrollView: {
+    paddingVertical: 12,
+  },
+  positionsScrollContent: {
+    paddingHorizontal: 16,
+    gap: 12,
+  },
+  // Tarjetas de posición
+  positionCard: {
+    backgroundColor: '#2a2a2a',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#333333',
+    padding: 12,
+    minWidth: 120,
+    marginRight: 8,
+  },
+  positionCardSelected: {
+    borderColor: '#00ff88',
+    borderWidth: 2,
+    backgroundColor: '#1a2a1a',
+  },
+  positionCardHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  positionSymbol: {
+    fontSize: 13,
+    fontWeight: 'bold',
+    color: '#ffffff',
+  },
+  positionSideBadge: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  buyBadge: {
+    backgroundColor: 'rgba(0, 255, 136, 0.2)',
+  },
+  sellBadge: {
+    backgroundColor: 'rgba(255, 68, 68, 0.2)',
+  },
+  positionSideText: {
+    fontSize: 9,
+    fontWeight: 'bold',
+    color: '#ffffff',
+  },
+  positionEntry: {
+    fontSize: 11,
+    color: '#888888',
+    marginBottom: 4,
+  },
+  positionPnL: {
+    fontSize: 13,
+    fontWeight: 'bold',
+    marginBottom: 2,
+  },
+  positionPnLPercent: {
+    fontSize: 11,
+    fontWeight: '600',
   },
 });

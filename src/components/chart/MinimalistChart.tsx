@@ -71,6 +71,7 @@ interface MinimalistChartProps {
   visualizedPosition?: PositionData | null; // Position to visualize TP/SL lines for
   showTpSlVisualization?: boolean; // Whether to show TP/SL lines
   onClearTpSlVisualization?: () => void; // Callback to clear TP/SL visualization
+  selectedPositionId?: string | null; // ID de la posición seleccionada para mostrar overlay
 }
 
 const timeIntervals: { label: string; value: TimeInterval }[] = [
@@ -92,7 +93,8 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
   onPositionPress,
   visualizedPosition = null,
   showTpSlVisualization = false,
-  onClearTpSlVisualization
+  onClearTpSlVisualization,
+  selectedPositionId = null
 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const chartRef = useRef<any>(null);
@@ -1288,6 +1290,38 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
       setActiveOverlayPositionId(null);
     }
   }, [activateOverlayWithPrice, activateTradingOverlay]);
+
+  // NUEVO: useEffect para activar/desactivar overlay cuando cambia selectedPositionId
+  useEffect(() => {
+    // Evitar loops: solo actuar si hay un cambio real entre selectedPositionId y activeOverlayPositionId
+    if (selectedPositionId && selectedPositionId !== activeOverlayPositionId) {
+      // Encontrar la posición seleccionada
+      const position = activePositions.find(p => p.id === selectedPositionId);
+      if (position && position.symbol === symbol) {
+        console.log(`🎯 [SELECTED POSITION] Activando overlay para posición: ${position.symbol} - Entry: $${position.entryPrice}`);
+        
+        // Activar directamente sin usar handlePositionButtonPress para evitar toggle
+        activateTradingOverlay(position.entryPrice);
+        setActiveOverlayPositionId(position.id);
+        
+        // Configurar TP y SL con los valores reales de la posición
+        if (position.takeProfitPrice) {
+          setTakeProfitLevel(position.takeProfitPrice);
+          tradingOverlayState.current.takeProfitLevel = position.takeProfitPrice;
+        }
+        if (position.stopLossPrice) {
+          setStopLossLevel(position.stopLossPrice);
+          tradingOverlayState.current.stopLossLevel = position.stopLossPrice;
+        }
+      }
+    } else if (!selectedPositionId && activeOverlayPositionId) {
+      // Si selectedPositionId es null y hay un overlay activo, desactivarlo
+      console.log(`🔴 [SELECTED POSITION] Desactivando overlay`);
+      deactivateTradingOverlay();
+      setActiveOverlayPositionId(null);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedPositionId, symbol]);
 
   // NUEVO: useEffect para forzar desactivación completa del overlay
   useEffect(() => {
@@ -4683,64 +4717,7 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
         </View>
       </View>
 
-      {/* Barra de posiciones fija en la parte inferior - SIEMPRE VISIBLE */}
-      <View style={styles.positionsBar}>
-        <View style={styles.positionsHeader}>
-          <Text style={styles.positionsTitle}>Posiciones Activas</Text>
-          {activeOverlayPositionId && (
-            <Text style={styles.visualizedIndicator}>
-              Visualizando: {activePositions.find(p => p.id === activeOverlayPositionId)?.symbol || 'Ninguna'}
-            </Text>
-          )}
-        </View>
-        
-        <ScrollView 
-          horizontal 
-          showsHorizontalScrollIndicator={false} 
-          style={styles.positionsScrollView}
-          contentContainerStyle={styles.positionsScrollContent}
-        >
-          {activePositions.length === 0 ? (
-            <View style={styles.noPositionsContainer}>
-              <Text style={styles.noPositionsText}>No hay posiciones activas</Text>
-            </View>
-          ) : (
-            activePositions.map((position) => (
-              <TouchableOpacity
-                key={position.id}
-                style={[
-                  styles.positionButton,
-                  activeOverlayPositionId === position.id && styles.positionButtonActive,
-                  position.side === 'BUY' ? styles.positionButtonLong : styles.positionButtonShort
-                ]}
-                onPress={() => handlePositionButtonPress(position)}
-              >
-                <View style={styles.positionButtonContent}>
-                  <Text style={styles.positionSymbol}>{position.symbol}</Text>
-                  <Text style={[
-                    styles.positionSide,
-                    position.side === 'BUY' ? styles.positionSideLong : styles.positionSideShort
-                  ]}>
-                    {position.side}
-                  </Text>
-                  <Text style={styles.positionEntry}>
-                    ${position.entryPrice.toFixed(2)}
-                  </Text>
-                  <Text style={[
-                    styles.positionPnL,
-                    position.unrealizedPnL >= 0 ? styles.positionPnLPositive : styles.positionPnLNegative
-                  ]}>
-                    {position.unrealizedPnL >= 0 ? '+' : ''}${position.unrealizedPnL.toFixed(2)}
-                  </Text>
-                  {activeOverlayPositionId === position.id && (
-                    <Text style={styles.activeIndicator}>●</Text>
-                  )}
-                </View>
-              </TouchableOpacity>
-            ))
-          )}
-        </ScrollView>
-      </View>
+
     </View>
   );
 };
