@@ -253,19 +253,23 @@ export const TradingScreen: React.FC = () => {
                             isSelected && styles.positionCardSelected
                           ]}
                           onPress={() => {
+                            console.log(`🎯 [POSITION CLICK] Posición clickeada: ${position.symbol}, Par actual: ${selectedPair}`);
+                            
                             // Toggle overlay para esta posición (solo si es del mismo par)
                             if (position.symbol === selectedPair) {
-                              // Si ya está seleccionada, deseleccionar; si no, seleccionar
+                              // Si ya está seleccionada, deseleccionar (toggle OFF)
                               if (selectedPositionId === position.id) {
+                                console.log(`🔴 [TOGGLE] Desactivando overlay para ${position.id}`);
                                 setShowChartOverlay(false);
                                 setSelectedPositionId(null);
                               } else {
-                                // El chart detectará automáticamente la posición por el click
-                                // Solo marcamos cual está seleccionada visualmente
+                                // Seleccionar esta posición (toggle ON)
+                                console.log(`🟢 [TOGGLE] Activando overlay para ${position.id}`);
                                 setSelectedPositionId(position.id);
-                                // El MinimalistChart manejará el overlay internamente
-                                // usando los activePositions que ya le pasamos
+                                setShowChartOverlay(true);
                               }
+                            } else {
+                              console.log(`⚠️ [MISMATCH] Posición ${position.symbol} no coincide con par actual ${selectedPair}`);
                             }
                           }}
                         >

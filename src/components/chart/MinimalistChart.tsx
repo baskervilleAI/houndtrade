@@ -1291,16 +1291,33 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
     }
   }, [activateOverlayWithPrice, activateTradingOverlay]);
 
-  // NUEVO: useEffect para activar/desactivar overlay cuando cambia selectedPositionId
+  // NUEVO: useEffect para activar/desactivar overlay cuando cambia selectedPositionId o symbol
   useEffect(() => {
-    // Evitar loops: solo actuar si hay un cambio real entre selectedPositionId y activeOverlayPositionId
-    if (selectedPositionId && selectedPositionId !== activeOverlayPositionId) {
-      // Encontrar la posición seleccionada
+    console.log(`🔍 [OVERLAY SYNC] selectedPositionId: ${selectedPositionId}, activeOverlayPositionId: ${activeOverlayPositionId}, symbol: ${symbol}`);
+    
+    // Caso 1: Hay una posición seleccionada
+    if (selectedPositionId) {
       const position = activePositions.find(p => p.id === selectedPositionId);
-      if (position && position.symbol === symbol) {
-        console.log(`🎯 [SELECTED POSITION] Activando overlay para posición: ${position.symbol} - Entry: $${position.entryPrice}`);
+      
+      if (!position) {
+        console.log(`⚠️ [OVERLAY SYNC] Posición ${selectedPositionId} no encontrada en activePositions`);
+        return;
+      }
+      
+      // Verificar si la posición es del símbolo actual
+      if (position.symbol !== symbol) {
+        console.log(`⚠️ [OVERLAY SYNC] Posición ${position.symbol} no coincide con símbolo actual ${symbol} - Desactivando overlay`);
+        if (activeOverlayPositionId) {
+          deactivateTradingOverlay();
+          setActiveOverlayPositionId(null);
+        }
+        return;
+      }
+      
+      // Activar overlay solo si no está ya activo para esta posición
+      if (selectedPositionId !== activeOverlayPositionId) {
+        console.log(`🟢 [OVERLAY SYNC] Activando overlay para posición: ${position.symbol} - Entry: $${position.entryPrice}`);
         
-        // Activar directamente sin usar handlePositionButtonPress para evitar toggle
         activateTradingOverlay(position.entryPrice);
         setActiveOverlayPositionId(position.id);
         
@@ -1308,20 +1325,23 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
         if (position.takeProfitPrice) {
           setTakeProfitLevel(position.takeProfitPrice);
           tradingOverlayState.current.takeProfitLevel = position.takeProfitPrice;
+          console.log(`🎯 [TP SET] Take Profit configurado: $${position.takeProfitPrice.toFixed(2)}`);
         }
         if (position.stopLossPrice) {
           setStopLossLevel(position.stopLossPrice);
           tradingOverlayState.current.stopLossLevel = position.stopLossPrice;
+          console.log(`🛑 [SL SET] Stop Loss configurado: $${position.stopLossPrice.toFixed(2)}`);
         }
       }
-    } else if (!selectedPositionId && activeOverlayPositionId) {
-      // Si selectedPositionId es null y hay un overlay activo, desactivarlo
-      console.log(`🔴 [SELECTED POSITION] Desactivando overlay`);
+    } 
+    // Caso 2: No hay posición seleccionada pero hay overlay activo
+    else if (!selectedPositionId && activeOverlayPositionId) {
+      console.log(`🔴 [OVERLAY SYNC] selectedPositionId es null - Desactivando overlay`);
       deactivateTradingOverlay();
       setActiveOverlayPositionId(null);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedPositionId, symbol]);
+  }, [selectedPositionId, symbol, activePositions]);
 
   // NUEVO: useEffect para forzar desactivación completa del overlay
   useEffect(() => {
