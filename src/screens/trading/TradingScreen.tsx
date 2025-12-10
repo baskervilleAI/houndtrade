@@ -34,6 +34,11 @@ export const TradingScreen: React.FC = () => {
   const isLaptop16by9 = (screenWidth >= 1200) || ((screenWidth / screenHeight) >= (16 / 9) && screenWidth >= 1024);
   // initial width reference for half-screen detection
   const initialWidthRef = React.useRef<number>(typeof window !== 'undefined' ? window.innerWidth : screenWidth);
+  // track last known half/full state across handlers (helps debounced handler detect crossings)
+  const lastIsHalfRef = React.useRef<boolean>(
+    (typeof window !== 'undefined') ? (window.innerWidth <= (initialWidthRef.current / 2)) : (screenWidth <= (initialWidthRef.current / 2))
+  );
+  const INITIAL_WIDTH_KEY = 'houndtrade:initialWidth';
   const [isHalfScreen, setIsHalfScreen] = useState(false);
   const [reloadChartKey, setReloadChartKey] = useState(0);
   // Key for sessionStorage
@@ -134,6 +139,27 @@ export const TradingScreen: React.FC = () => {
     }
   }, []);
 
+  // Persist / restore the initial width used to compute the "half" threshold.
+  // We store it in sessionStorage so a reload doesn't lose the original baseline width
+  useEffect(() => {
+    if (typeof window === 'undefined' || !window.sessionStorage) return;
+    try {
+      const stored = window.sessionStorage.getItem(INITIAL_WIDTH_KEY);
+      if (stored) {
+        const num = Number(stored);
+        if (!isNaN(num) && num > 0) {
+          initialWidthRef.current = num;
+        }
+      } else {
+        const w = window.innerWidth;
+        initialWidthRef.current = w;
+        try { window.sessionStorage.setItem(INITIAL_WIDTH_KEY, String(w)); } catch (e) { /* ignore */ }
+      }
+    } catch (e) {
+      // ignore sessionStorage errors
+    }
+  }, []);
+
   // Detect window resizing to half of initial width and auto-adjust UI + reload chart axes
   useEffect(() => {
     // ensure initialWidthRef is set
@@ -150,52 +176,29 @@ export const TradingScreen: React.FC = () => {
           } else {
             setIsLeftPanelVisible(true);
           }
-          // force chart reload by bumping key
-          setReloadChartKey(k => k + 1);
+          // update the shared ref so debounced handler knows the previous state
+          lastIsHalfRef.current = nowHalf;
+          return nowHalf;
         }
-        return nowHalf;
+        return prev;
       });
     };
-
-    window.addEventListener('resize', onResize);
-    return () => window.removeEventListener('resize', onResize);
-  }, []);
-
-  // Initialize market data at the screen level - optimized for faster updates
-  const { isInitialized, getStatus } = useMarketData({
-    autoStart: true,
-    symbols: TRADING_SYMBOLS,
-    refreshInterval: 10000, // 10 seconds - optimized for more frequent updates
-  });
-
-  // Update trading prices when market data changes
-  useEffect(() => {
-    Object.entries(tickers).forEach(([symbol, data]) => {
-      const currentTradingPrice = getCurrentPrice(symbol);
-      if (!currentTradingPrice || Math.abs(currentTradingPrice - data.price) > data.price * 0.01) {
-        // Update if price difference is more than 1%
-        updatePrice(symbol, data.price);
+    // attach resize listener for this effect
+    if (typeof window !== 'undefined') {
+      window.addEventListener('resize', onResize);
+    }
+    return () => {
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('resize', onResize);
       }
-    });
-  }, [tickers, getCurrentPrice, updatePrice]);
-
-  // Only log once when status changes
-  useEffect(() => {
-    console.log('🏠 TradingScreen - Market data status changed:', {
-      initialized: isInitialized,
-      tickerCount: Object.keys(tickers).length,
-      symbols: Object.keys(tickers),
-      tradingOrders: orders.length,
-      activeOrders: activeOrders.length
-    });
-  }, [isInitialized, Object.keys(tickers).length, orders.length, activeOrders.length]);
-
-  // Calcular precio actual para referencia
-  const currentPrice = tickers[selectedPair]?.price || 0;
-  const priceChange = tickers[selectedPair]?.changePercent24h || 0;
+    };
+  }, []);
 
   // UI scale detection to adapt fonts/elements to browser/device zoom
   const [uiScale, setUiScale] = useState<number>(
+    (typeof window !== 'undefined' && (window.visualViewport?.scale || window.devicePixelRatio)) || 1
+  );
+  const lastZoomRef = React.useRef<number>(
     (typeof window !== 'undefined' && (window.visualViewport?.scale || window.devicePixelRatio)) || 1
   );
 
@@ -203,6 +206,8 @@ export const TradingScreen: React.FC = () => {
     const updateScale = () => {
       const newScale = window.visualViewport?.scale || window.devicePixelRatio || 1;
       setUiScale(prev => (Math.abs(prev - newScale) > 0.01 ? newScale : prev));
+      // Keep lastZoomRef in sync so we can detect zoom changes vs resize
+      lastZoomRef.current = newScale;
     };
     if (window.visualViewport) {
       window.visualViewport.addEventListener('resize', updateScale);
@@ -221,22 +226,90 @@ export const TradingScreen: React.FC = () => {
   // Reload page when window resizing finishes (debounced) — helpful for layout recalculations
   useEffect(() => {
     if (typeof window === 'undefined') return;
+  // Use a stable ref to remember whether we were in "half" mode before the resize
+  const initial = initialWidthRef.current || screenWidth;
+  const currentWidth = (typeof window !== 'undefined') ? window.innerWidth : screenWidth;
+  // use the cross-effect ref that tracks the last known half/full state
+  const prevIsHalfRef = { current: lastIsHalfRef.current } as { current: boolean };
 
-    let reloadTimeout: number | null = null;
+    let timeoutId: number | null = null;
+    let startScale = lastZoomRef.current;
+    // record the half/full state at the start of a resize gesture
+    let resizeStartIsHalf: boolean | null = null;
 
     const onResizeReload = () => {
-      if (reloadTimeout !== null) {
-        window.clearTimeout(reloadTimeout);
+      // capture scale at start/continuation of resize
+      startScale = window.visualViewport?.scale || window.devicePixelRatio || 1;
+
+      // if this is the first tick in a resize burst, capture the starting half/full
+      if (resizeStartIsHalf === null) {
+        resizeStartIsHalf = lastIsHalfRef.current;
       }
-      reloadTimeout = window.setTimeout(() => {
-        console.log('[TradingScreen] window resize finished — reloading page');
-        window.location.reload();
+
+      if (timeoutId !== null) window.clearTimeout(timeoutId);
+
+      timeoutId = window.setTimeout(() => {
+        timeoutId = null;
+        const nowWidth = window.innerWidth;
+        const initial = initialWidthRef.current || screenWidth;
+        const isNowHalf = nowWidth <= initial / 2;
+
+        // Compare with the half/full state captured at the start of this resize gesture
+        if (resizeStartIsHalf === isNowHalf) {
+          // no crossing — skip reload
+          console.debug('[TradingScreen] resize finished but no threshold crossing (startIsHalf=%s, now=%s, initial=%s, nowWidth=%s)', resizeStartIsHalf, isNowHalf, initial, nowWidth);
+          // clear marker and return
+          resizeStartIsHalf = null;
+          return;
+        }
+
+        const endScale = window.visualViewport?.scale || window.devicePixelRatio || 1;
+        // if scale changed significantly during the resize, treat it as zoom — skip reload
+        if (Math.abs(endScale - startScale) > 0.01) {
+          console.debug('[TradingScreen] detected zoom during resize — skipping reload (startScale=%s,endScale=%s)', startScale, endScale);
+          // update shared last state so future crossings still work
+          lastIsHalfRef.current = isNowHalf;
+          resizeStartIsHalf = null;
+          return;
+        }
+
+        console.debug('[TradingScreen] threshold crossed and no zoom detected — reloading page (startIsHalf=%s -> now=%s)', resizeStartIsHalf, isNowHalf);
+        // update shared last state before remounting/reloading
+        lastIsHalfRef.current = isNowHalf;
+        // Persist minimal UI state so the chart remount can restore it if needed
+        try {
+          const toSave = {
+            activeTab,
+            showOrderModal,
+            overlayTakeProfit,
+            overlayStopLoss,
+            isLeftPanelVisible,
+            showMarketDataSection,
+            showOrderFormSection,
+            showActiveOrdersSection,
+            showOrderHistorySection
+          };
+          window.sessionStorage && window.sessionStorage.setItem(SESSION_KEY, JSON.stringify(toSave));
+        } catch (e) {
+          // ignore storage errors
+        }
+
+        // Persist and then reload the full page when crossing half<->full (user requested full reload)
+        try {
+          // small delay to ensure sessionStorage write completes in some browsers
+          setTimeout(() => {
+            try { window.location.reload(); } catch (e) { console.debug('[TradingScreen] reload failed', e); }
+          }, 50);
+        } catch (e) {
+          // fallback to remount if reload isn't allowed
+          setReloadChartKey(k => k + 1);
+        }
       }, 350);
     };
 
     window.addEventListener('resize', onResizeReload);
     return () => {
-      if (reloadTimeout !== null) window.clearTimeout(reloadTimeout);
+      if (timeoutId !== null) window.clearTimeout(timeoutId);
       window.removeEventListener('resize', onResizeReload);
     };
   }, []);
@@ -316,6 +389,120 @@ export const TradingScreen: React.FC = () => {
         return null;
     }
   };
+
+  // Reusable left-side controls (used both for left column and top panel)
+  const renderLeftControls = () => (
+    <View style={{ flex: 1 }}>
+      {/* Left-side tab buttons (vertical) */}
+      <View style={styles.leftMenu}>
+        <TouchableOpacity
+          style={[styles.leftMenuButton, activeTab === 'trading' && styles.leftMenuButtonActive]}
+          onPress={() => setActiveTab('trading')}
+        >
+          <Text style={[styles.leftMenuButtonText, activeTab === 'trading' && styles.leftMenuButtonTextActive]}>Trading</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[styles.leftMenuButton, activeTab === 'posiciones' && styles.leftMenuButtonActive]}
+          onPress={() => setActiveTab('posiciones')}
+        >
+          <Text style={[styles.leftMenuButtonText, activeTab === 'posiciones' && styles.leftMenuButtonTextActive]}>Posiciones</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[styles.leftMenuButton, activeTab === 'trades' && styles.leftMenuButtonActive]}
+          onPress={() => setActiveTab('trades')}
+        >
+          <Text style={[styles.leftMenuButtonText, activeTab === 'trades' && styles.leftMenuButtonTextActive]}>Trades</Text>
+        </TouchableOpacity>
+      </View>
+
+      <ScrollView style={{ flex: 1 }} contentContainerStyle={{ gap: 12 }} showsVerticalScrollIndicator={false}>
+        {/* Market Data section */}
+        <View style={styles.sectionWrapper}>
+          <TouchableOpacity
+            style={styles.sectionHeader}
+            onPress={() => setShowMarketDataSection(v => !v)}
+          >
+            <Text style={styles.sectionHeaderTitle}>Market Data</Text>
+            <Text style={styles.sectionToggle}>{showMarketDataSection ? '▾' : '▸'}</Text>
+          </TouchableOpacity>
+          {showMarketDataSection && (
+            <View style={styles.sectionContent}>
+              <MarketData />
+            </View>
+          )}
+        </View>
+
+        {/* Order Form section */}
+        <View style={styles.sectionWrapper}>
+          <TouchableOpacity
+            style={styles.sectionHeader}
+            onPress={() => setShowOrderFormSection(v => !v)}
+          >
+            <Text style={styles.sectionHeaderTitle}>Nueva Orden</Text>
+            <Text style={styles.sectionToggle}>{showOrderFormSection ? '▾' : '▸'}</Text>
+          </TouchableOpacity>
+          {showOrderFormSection && (
+            <View style={[styles.sectionContent, { maxHeight: 520 }]}> 
+              <OrderForm
+                onCreateOrder={createOrder}
+                isLoading={isLoading}
+                defaultSymbol={selectedPair}
+                defaultTakeProfitPrice={overlayTakeProfit}
+                defaultStopLossPrice={overlayStopLoss}
+              />
+            </View>
+          )}
+        </View>
+
+        {/* Active Orders section */}
+        <View style={styles.sectionWrapper}>
+          <TouchableOpacity
+            style={styles.sectionHeader}
+            onPress={() => setShowActiveOrdersSection(v => !v)}
+          >
+            <Text style={styles.sectionHeaderTitle}>Órdenes Activas</Text>
+            <Text style={styles.sectionToggle}>{showActiveOrdersSection ? '▾' : '▸'}</Text>
+          </TouchableOpacity>
+          {showActiveOrdersSection && (
+            <View style={styles.sectionContent}>
+              <ActiveOrdersList
+                orders={activeOrders}
+                onCloseOrder={async (orderId: string, reason?: string) => {
+                  await closeOrder(orderId, reason || 'Cerrado desde lista');
+                  return { success: true };
+                }}
+                onCancelOrder={(orderId: string) => {
+                  const res = cancelOrder(orderId, 'Cancelado desde lista');
+                  return res || { success: false, error: 'Error' };
+                }}
+                getCurrentPrice={getCurrentPrice}
+                onRefresh={handleRefreshData}
+                isLoading={isLoading}
+              />
+            </View>
+          )}
+        </View>
+
+        {/* Order History section */}
+        <View style={styles.sectionWrapper}>
+          <TouchableOpacity
+            style={styles.sectionHeader}
+            onPress={() => setShowOrderHistorySection(v => !v)}
+          >
+            <Text style={styles.sectionHeaderTitle}>Historial</Text>
+            <Text style={styles.sectionToggle}>{showOrderHistorySection ? '▾' : '▸'}</Text>
+          </TouchableOpacity>
+          {showOrderHistorySection && (
+            <View style={styles.sectionContent}>
+              <OrderHistory orders={orders} />
+            </View>
+          )}
+        </View>
+      </ScrollView>
+    </View>
+  );
 
   return (
     <View style={styles.container}>
@@ -548,6 +735,22 @@ export const TradingScreen: React.FC = () => {
                 )}
 
                 <View style={styles.rightPanel}>
+                  {renderTabContent()}
+                </View>
+              </View>
+            );
+          }
+
+          // If we are in trading tab and the screen is roughly half-window wide,
+          // render the controls above the chart (top panel). For smaller screens
+          // keep the single-column layout.
+          if (activeTab === 'trading' && isHalfScreen) {
+            return (
+              <View style={{ flex: 1 }}>
+                <View style={styles.topPanel}>
+                  {renderLeftControls()}
+                </View>
+                <View style={{ flex: 1 }}>
                   {renderTabContent()}
                 </View>
               </View>
@@ -1142,6 +1345,14 @@ const styles = StyleSheet.create({
     padding: 12,
     overflow: 'hidden',
   },
+  topPanel: {
+    width: '100%',
+    backgroundColor: '#0f0f0f',
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 12,
+    overflow: 'hidden',
+  },
   rightPanel: {
     flex: 2,
     backgroundColor: 'transparent',
@@ -1171,7 +1382,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     backgroundColor: '#0f0f0f',
     borderBottomWidth: 1,
-    borderBottomColor: '#181818'
+    borderBottomColor: '#181818',
   },
   sectionHeaderTitle: {
     color: '#ffffff',
@@ -1182,37 +1393,34 @@ const styles = StyleSheet.create({
     color: '#888',
     fontSize: 14,
   },
+  // Left-side menu and buttons used both in left column and topPanel
+  leftMenu: {
+    paddingBottom: 8,
+  },
+  leftMenuButton: {
+    paddingVertical: 12,
+    paddingHorizontal: 10,
+    borderRadius: 6,
+    backgroundColor: '#111',
+    marginBottom: 8,
+    alignItems: 'center',
+  },
+  leftMenuButtonActive: {
+    backgroundColor: '#002b20',
+    borderColor: '#00ff88',
+    borderWidth: 1,
+  },
+  leftMenuButtonText: {
+    color: '#ddd',
+    fontWeight: '700',
+  },
+  leftMenuButtonTextActive: {
+    color: '#00ff88',
+  },
   sectionContent: {
     paddingHorizontal: 8,
     paddingVertical: 8,
     backgroundColor: '#0a0a0a'
-  },
-  leftMenu: {
-    padding: 8,
-    display: 'flex',
-    flexDirection: 'column',
-    gap: 8,
-    marginBottom: 8,
-  },
-  leftMenuButton: {
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-    borderRadius: 8,
-    backgroundColor: '#111',
-    borderWidth: 1,
-    borderColor: '#222',
-    alignItems: 'center',
-  },
-  leftMenuButtonActive: {
-    backgroundColor: '#0b2f1f',
-    borderColor: '#00ff88',
-  },
-  leftMenuButtonText: {
-    color: '#ccc',
-    fontWeight: '600',
-  },
-  leftMenuButtonTextActive: {
-    color: '#00ff88',
   },
   leftPanelHideButton: {
     position: 'absolute',

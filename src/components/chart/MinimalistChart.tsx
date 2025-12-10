@@ -175,14 +175,37 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
 
   // Cuando zoomScale cambia, forzar el gráfico a redimensionarse y actualizar el diseño para que los ejes y etiquetas permanezcan visibles
   useEffect(() => {
-    if (chartRef.current) {
-      try {
-        // Chart.js 4: llamar a resize luego actualizar
-        chartRef.current.resize();
-        chartRef.current.update('none');
-      } catch (e) {
-        // ignorar
+    if (!chartRef.current) return;
+    try {
+      // Determinar tamaño de fuente de ticks (preferir la configuración actual del chart si existe)
+      const currentTickFontSize = (
+        (chartRef.current.options && chartRef.current.options.scales && chartRef.current.options.scales.x && chartRef.current.options.scales.x.ticks && chartRef.current.options.scales.x.ticks.font && chartRef.current.options.scales.x.ticks.font.size) as number
+      ) || Math.max(9, Math.round(12 * (zoomScale || 1)));
+
+  // Calcular bottom padding en función del tamaño de fuente para asegurar visibilidad
+  // Escalar el padding adicional según zoomScale para manejar >100% (p.ej. 110%)
+  const zoomMultiplier = Math.max(1, zoomScale || 1);
+  const baseCalculated = Math.round(currentTickFontSize * 2.6);
+  const calculatedBottom = Math.max(32, Math.round(baseCalculated * (1 + (zoomMultiplier - 1) * 1.4)));
+
+      const existingPadding = chartRef.current.options.layout?.padding || 0;
+      if (typeof existingPadding === 'object') {
+        chartRef.current.options.layout.padding = {
+          ...(existingPadding as any),
+          bottom: Math.max((existingPadding as any).bottom || 0, calculatedBottom)
+        } as any;
+      } else {
+        chartRef.current.options.layout = chartRef.current.options.layout || {};
+        chartRef.current.options.layout.padding = Math.max(Number(existingPadding || 0), calculatedBottom) as any;
       }
+
+      // Forzar recálculo del layout y repaint sin animación
+      // Pequeño timeout para asegurar que estilos del DOM estén aplicados (useful en algunos navegadores)
+      setTimeout(() => {
+        try { chartRef.current.resize(); chartRef.current.update('none'); } catch (e) { /* ignore */ }
+      }, 20);
+    } catch (e) {
+      // noop
     }
   }, [zoomScale]);
   // Función para obtener estilos responsivos
@@ -2410,6 +2433,33 @@ const MinimalistChart: React.FC<MinimalistChartProps> = ({
         options: chartOptions
       });
 
+      // Ensure there is enough bottom padding for the x-axis labels so they
+      // don't get clipped (issue visible at 100% zoom / devicePixelRatio == 1).
+      try {
+        if (chartRef.current && chartRef.current.options) {
+          // Apply a sensible bottom padding; Chart.js layout.padding accepts number or object
+          const existingPadding = chartRef.current.options.layout?.padding || 0;
+          // If object, preserve other paddings
+          if (typeof existingPadding === 'object') {
+            chartRef.current.options.layout.padding = {
+              ...(existingPadding as any),
+              bottom: Math.max((existingPadding as any).bottom || 0, 28)
+            } as any;
+          } else {
+            chartRef.current.options.layout = chartRef.current.options.layout || {};
+            chartRef.current.options.layout.padding = Math.max(Number(existingPadding || 0), 28) as any;
+          }
+
+          // Small timeout to ensure DOM/CSS applied before resize calculation
+          setTimeout(() => {
+            try { chartRef.current.resize(); chartRef.current.update('none'); } catch (e) { /* ignore */ }
+          }, 50);
+        }
+      } catch (e) {
+        // best-effort: if anything fails, we don't want to crash the whole init
+        logError('Error applying bottom padding to chart', { error: e instanceof Error ? e.message : String(e) });
+      }
+
       const chartCreationDuration = Date.now() - chartCreationStart;
       const totalInitDuration = Date.now() - initStartTime;
 
@@ -4503,6 +4553,8 @@ const styles = StyleSheet.create({
     position: 'relative',
     minHeight: 300,
     width: '100%',
+    // Allow labels / axes drawn slightly outside the canvas area to remain visible
+    overflow: 'visible' as any,
   },
   chartCanvas: {
     backgroundColor: '#000',
